@@ -1,0 +1,51 @@
+# Example .pre-commit-config.yaml for Odoo projects
+# Copy this file to your Odoo module/project root and customize as needed
+
+repos:
+  - repo: https://github.com/soltein-net/solt-pre-commit
+    rev: v1.0.0  # Use the latest version
+    hooks:
+      # Check __manifest__.py files
+      - id: check-odoo-manifest
+        name: Check Odoo Manifest Files
+        
+      # Check __init__.py files
+      - id: check-odoo-init
+        name: Check Odoo Init Files
+        
+      # Check XML view files
+      - id: check-odoo-xml
+        name: Check Odoo XML Files
+        
+      # Check model definitions
+      - id: check-odoo-models
+        name: Check Odoo Models
+        
+      # Check for deprecated APIs
+      - id: check-odoo-deprecated
+        name: Check Deprecated APIs
+
+  # Optional: Add other useful pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: mixed-line-ending
+
+  # Optional: Python code formatting
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3
+        args: ['--line-length=88']
+
+  # Optional: Python import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ['--profile', 'black']

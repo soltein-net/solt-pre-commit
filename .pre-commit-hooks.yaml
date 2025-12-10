@@ -1,0 +1,40 @@
+- id: check-odoo-manifest
+  name: Check Odoo Manifest Files
+  description: Validates __manifest__.py files for required fields and correct structure
+  entry: check-odoo-manifest
+  language: python
+  files: __manifest__\.py$
+  pass_filenames: true
+
+- id: check-odoo-init
+  name: Check Odoo __init__.py Files
+  description: Validates __init__.py files for correct import structure
+  entry: check-odoo-init
+  language: python
+  files: __init__\.py$
+  pass_filenames: true
+
+- id: check-odoo-xml
+  name: Check Odoo XML Files
+  description: Validates XML files for syntax and Odoo-specific rules
+  entry: check-odoo-xml
+  language: python
+  files: \.(xml)$
+  pass_filenames: true
+
+- id: check-odoo-models
+  name: Check Odoo Model Definitions
+  description: Validates Python model files for common issues
+  entry: check-odoo-models
+  language: python
+  files: models/.*\.py$
+  pass_filenames: true
+
+- id: check-odoo-deprecated
+  name: Check for Deprecated Odoo APIs
+  description: Detects usage of deprecated Odoo APIs and methods
+  entry: check-odoo-deprecated
+  language: python
+  files: \.py$
+  exclude: __manifest__\.py$
+  pass_filenames: true
