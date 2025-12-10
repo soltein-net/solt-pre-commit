@@ -1,6 +1,5 @@
-"""Test configuration for pytest."""
-import sys
-from pathlib import Path
+"""Test configuration for pytest.
 
-# Add the parent directory to the path so we can import the package
-sys.path.insert(0, str(Path(__file__).parent.parent))
+Tests should be run after installing the package in development mode:
+    pip install -e .
+"""

@@ -141,10 +141,22 @@ def check_model_class(cls: ast.ClassDef, content: str) -> List[str]:
     lines = content.split('\n')
     for i, line in enumerate(lines, 1):
         if 'self.env.cr.execute' in line or 'self._cr.execute' in line:
-            # Check if using string formatting (potential SQL injection)
-            if '%' in line or '.format(' in line or 'f"' in line or "f'" in line:
+            # Check if using string formatting within the execute call (potential SQL injection)
+            # Match patterns like: execute("..." % ...) or execute(f"...") or execute("...".format(...))
+            # But avoid matching safe parameterized queries like: execute("...", (param,))
+            if re.search(r'execute\s*\(\s*["\'].*?["\']\s*%\s*[^,\)]', line):
                 errors.append(
                     f"Line {i}: Potential SQL injection risk. "
+                    "Use parameterized queries with execute(query, params)"
+                )
+            elif re.search(r'execute\s*\(\s*f["\']', line):
+                errors.append(
+                    f"Line {i}: Potential SQL injection risk with f-string. "
+                    "Use parameterized queries with execute(query, params)"
+                )
+            elif re.search(r'execute\s*\([^)]*\.format\s*\(', line):
+                errors.append(
+                    f"Line {i}: Potential SQL injection risk with .format(). "
                     "Use parameterized queries with execute(query, params)"
                 )
     

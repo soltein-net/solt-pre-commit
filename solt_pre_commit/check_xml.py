@@ -40,9 +40,10 @@ def check_xml_file(file_path: Path) -> List[str]:
     except Exception as e:
         return [f"Error reading file: {e}"]
     
-    # Parse XML
+    # Parse XML with secure defaults to prevent XXE attacks
     try:
-        tree = etree.fromstring(content)
+        parser = etree.XMLParser(resolve_entities=False)
+        tree = etree.fromstring(content, parser)
     except etree.XMLSyntaxError as e:
         return [f"XML syntax error: {e}"]
     

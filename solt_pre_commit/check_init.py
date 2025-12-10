@@ -78,8 +78,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"\n{file_path}:")
             for error in errors:
                 print(f"  ⚠️  {error}")
-            # Don't fail on warnings for __init__.py
-            # return_code = 1
+            # Note: We don't fail on warnings for __init__.py files
+            # as they are informational only
         else:
             print(f"✓ {file_path}")
     
