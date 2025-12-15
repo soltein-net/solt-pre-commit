@@ -1,0 +1,746 @@
+# -*- coding: utf-8 -*-
+# Copyright 2025 Soltein SA. de CV.
+# License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
+
+"""Main orchestrator for Odoo module validations with severity support."""
+
+import argparse
+import ast
+import glob
+import os
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+import yaml
+
+from . import (
+    checks_odoo_module_csv,
+    checks_odoo_module_po,
+    checks_odoo_module_python,
+    checks_odoo_module_xml,
+    checks_odoo_module_xml_advanced,
+)
+
+DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/main/docs/README_TEMPLATE.rst"
+DFTL_README_FILES = ["README.md", "README.txt", "README.rst"]
+DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "update_xml"]
+MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
+
+
+# ═══════════════════════════════════════════════════════════════
+# SEVERITY SYSTEM
+# ═══════════════════════════════════════════════════════════════
+
+class Severity:
+    """Severity levels for checks."""
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
+
+    # Priority order (higher = more severe)
+    PRIORITY = {
+        ERROR: 3,
+        WARNING: 2,
+        INFO: 1,
+    }
+
+    # Display colors (ANSI)
+    COLORS = {
+        ERROR: "\033[91m",  # Red
+        WARNING: "\033[93m",  # Yellow
+        INFO: "\033[94m",  # Blue
+    }
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+
+    # Icons
+    ICONS = {
+        ERROR: "❌",
+        WARNING: "⚠️ ",
+        INFO: "ℹ️ ",
+    }
+
+
+# Default severity for each check
+DEFAULT_SEVERITY = {
+    # Critical errors - always block
+    "xml_syntax_error": Severity.ERROR,
+    "csv_syntax_error": Severity.ERROR,
+    "python_syntax_error": Severity.ERROR,
+    "manifest_syntax_error": Severity.ERROR,
+    "po_syntax_error": Severity.ERROR,
+
+    # Duplicate IDs - block
+    "xml_duplicate_record_id": Severity.ERROR,
+    "csv_duplicate_record_id": Severity.ERROR,
+    "po_duplicate_message_definition": Severity.ERROR,
+
+    # Odoo runtime warnings - block
+    "python_duplicate_field_label": Severity.ERROR,
+    "python_inconsistent_compute_sudo": Severity.ERROR,
+    "python_tracking_without_mail_thread": Severity.ERROR,
+    "python_selection_on_related": Severity.ERROR,
+    "xml_deprecated_active_id_usage": Severity.ERROR,
+
+    # Dangerous patterns - warning
+    "xml_view_dangerous_replace_low_priority": Severity.WARNING,
+    "xml_create_user_wo_reset_password": Severity.WARNING,
+    "xml_dangerous_filter_wo_user": Severity.WARNING,
+    "xml_duplicate_fields": Severity.WARNING,
+    "xml_hardcoded_id": Severity.WARNING,
+    "xml_duplicate_view_priority": Severity.WARNING,
+
+    # Deprecations - warning
+    "xml_deprecated_tree_attribute": Severity.WARNING,
+    "xml_deprecated_data_node": Severity.WARNING,
+    "xml_deprecated_openerp_xml_node": Severity.WARNING,
+    "xml_deprecated_t_raw": Severity.WARNING,
+    "xml_deprecated_qweb_directive": Severity.WARNING,
+    "xml_button_without_type": Severity.WARNING,
+    "xml_alert_missing_role": Severity.WARNING,
+
+    # Code quality - warning/info
+    "python_field_missing_string": Severity.WARNING,
+    "python_field_missing_help": Severity.INFO,
+    "python_method_missing_docstring": Severity.INFO,
+    "python_docstring_too_short": Severity.INFO,
+    "python_docstring_uninformative": Severity.INFO,
+
+    # PO quality
+    "po_requires_module": Severity.WARNING,
+    "po_python_parse_printf": Severity.WARNING,
+    "po_python_parse_format": Severity.WARNING,
+
+    # XML quality
+    "xml_redundant_module_name": Severity.INFO,
+    "xml_not_valid_char_link": Severity.WARNING,
+
+    # Manifest
+    "missing_readme": Severity.INFO,
+}
+
+
+class SeverityConfig:
+    """Configuration for severity system."""
+
+    CONFIG_FILES = [".solt-hooks.yaml", ".solt-hooks.yml", "solt-hooks.yaml"]
+
+    def __init__(self, config_path=None):
+        self.config = self._load_config(config_path)
+        self.severity_map = self._build_severity_map()
+        self.disabled_checks = set(self.config.get("disabled_checks", []))
+        self.blocking_severities = self._get_blocking_severities()
+
+    def _load_config(self, config_path=None):
+        """Load configuration from .solt-hooks.yaml."""
+        if config_path:
+            search_paths = [Path(config_path)]
+        else:
+            current = Path.cwd()
+            search_paths = []
+            for _ in range(5):
+                for config_name in self.CONFIG_FILES:
+                    search_paths.append(current / config_name)
+                current = current.parent
+
+        for path in search_paths:
+            if path.exists():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        return yaml.safe_load(f) or {}
+                except (yaml.YAMLError, OSError):
+                    pass
+        return {}
+
+    def _build_severity_map(self):
+        """Build severity map from defaults and config overrides."""
+        severity_map = DEFAULT_SEVERITY.copy()
+
+        # Override with config values
+        config_severity = self.config.get("severity", {})
+        for check_name, level in config_severity.items():
+            if level in (Severity.ERROR, Severity.WARNING, Severity.INFO):
+                severity_map[check_name] = level
+
+        return severity_map
+
+    def _get_blocking_severities(self):
+        """Get which severities should block the commit."""
+        # Default: only errors block
+        default_blocking = [Severity.ERROR]
+
+        blocking = self.config.get("blocking_severities", default_blocking)
+
+        # Normalize to list
+        if isinstance(blocking, str):
+            blocking = [blocking]
+
+        return set(blocking)
+
+    def get_severity(self, check_name):
+        """Get severity for a check."""
+        return self.severity_map.get(check_name, Severity.WARNING)
+
+    def is_check_disabled(self, check_name):
+        """Check if a check is disabled."""
+        return check_name in self.disabled_checks
+
+    def is_blocking(self, severity):
+        """Check if a severity level should block."""
+        return severity in self.blocking_severities
+
+    def should_report(self, check_name):
+        """Check if a check should be reported (not disabled)."""
+        return not self.is_check_disabled(check_name)
+
+
+class CheckResult:
+    """Container for check results with severity."""
+
+    def __init__(self, severity_config):
+        self.severity_config = severity_config
+        self.results = defaultdict(list)  # {check_name: [messages]}
+
+    def add(self, check_name, messages):
+        """Add check results."""
+        if not messages:
+            return
+        if self.severity_config.should_report(check_name):
+            self.results[check_name].extend(messages)
+
+    def add_from_dict(self, checks_errors):
+        """Add results from a checks_errors dict."""
+        for check_name, messages in checks_errors.items():
+            self.add(check_name, messages)
+
+    def get_by_severity(self):
+        """Group results by severity level."""
+        by_severity = {
+            Severity.ERROR: {},
+            Severity.WARNING: {},
+            Severity.INFO: {},
+        }
+
+        for check_name, messages in self.results.items():
+            severity = self.severity_config.get_severity(check_name)
+            by_severity[severity][check_name] = messages
+
+        return by_severity
+
+    def has_blocking_issues(self):
+        """Check if there are any blocking issues."""
+        for check_name, messages in self.results.items():
+            if not messages:
+                continue
+            severity = self.severity_config.get_severity(check_name)
+            if self.severity_config.is_blocking(severity):
+                return True
+        return False
+
+    def get_counts(self):
+        """Get count of issues by severity."""
+        counts = {Severity.ERROR: 0, Severity.WARNING: 0, Severity.INFO: 0}
+
+        for check_name, messages in self.results.items():
+            severity = self.severity_config.get_severity(check_name)
+            counts[severity] += len(messages)
+
+        return counts
+
+    def is_empty(self):
+        """Check if there are no results."""
+        return all(len(msgs) == 0 for msgs in self.results.values())
+
+
+class ResultPrinter:
+    """Pretty printer for check results."""
+
+    def __init__(self, use_colors=True, verbose=False):
+        self.use_colors = use_colors and sys.stdout.isatty()
+        self.verbose = verbose
+
+    def _color(self, text, color):
+        """Apply color if enabled."""
+        if self.use_colors:
+            return f"{color}{text}{Severity.RESET}"
+        return text
+
+    def _bold(self, text):
+        """Apply bold if colors enabled."""
+        if self.use_colors:
+            return f"{Severity.BOLD}{text}{Severity.RESET}"
+        return text
+
+    def _severity_header(self, severity, count):
+        """Generate header for severity section."""
+        icon = Severity.ICONS[severity]
+        color = Severity.COLORS[severity]
+        name = severity.upper()
+
+        header = f"{icon} {name}S ({count})"
+        return self._color(header, color)
+
+    def _format_check_name(self, check_name):
+        """Format check name for display."""
+        # Convert snake_case to Title Case
+        return check_name.replace("_", " ").title()
+
+    def print_results(self, check_result, module_name=""):
+        """Print results organized by severity."""
+        if check_result.is_empty():
+            return
+
+        by_severity = check_result.get_by_severity()
+        counts = check_result.get_counts()
+        blocking = check_result.severity_config.blocking_severities
+
+        # Print header
+        print("")
+        if module_name:
+            print(self._bold(f"{'═' * 60}"))
+            print(self._bold(f"📦 MODULE: {module_name}"))
+            print(self._bold(f"{'═' * 60}"))
+
+        # Print each severity level (in order: error, warning, info)
+        for severity in [Severity.ERROR, Severity.WARNING, Severity.INFO]:
+            checks = by_severity[severity]
+            if not checks:
+                continue
+
+            # Skip info in non-verbose mode
+            if severity == Severity.INFO and not self.verbose:
+                continue
+
+            count = counts[severity]
+            is_blocking = severity in blocking
+
+            print("")
+            header = self._severity_header(severity, count)
+            if is_blocking:
+                header += self._color(" [BLOCKING]", Severity.COLORS[Severity.ERROR])
+            print(header)
+            print("─" * 50)
+
+            for check_name, messages in sorted(checks.items()):
+                check_display = self._format_check_name(check_name)
+                print(f"\n  {self._bold(check_display)} ({len(messages)})")
+
+                for msg in messages[:10]:  # Limit to first 10 per check
+                    # Indent and truncate long messages
+                    if len(msg) > 120:
+                        msg = msg[:117] + "..."
+                    print(f"    • {msg}")
+
+                if len(messages) > 10:
+                    remaining = len(messages) - 10
+                    print(f"    ... and {remaining} more")
+
+        # Print summary
+        print("")
+        print("─" * 50)
+        self._print_summary(counts, blocking)
+
+    def _print_summary(self, counts, blocking):
+        """Print summary line."""
+        parts = []
+
+        for severity in [Severity.ERROR, Severity.WARNING, Severity.INFO]:
+            count = counts[severity]
+            if count == 0 and severity == Severity.INFO:
+                continue
+
+            icon = Severity.ICONS[severity]
+            color = Severity.COLORS[severity]
+
+            text = f"{icon} {count} {severity}{'s' if count != 1 else ''}"
+            if severity in blocking and count > 0:
+                text += " (blocking)"
+
+            parts.append(self._color(text, color))
+
+        print(f"Summary: {' | '.join(parts)}")
+
+    def print_blocking_notice(self, check_result):
+        """Print notice about blocking issues."""
+        if not check_result.has_blocking_issues():
+            return
+
+        print("")
+        print(self._color("═" * 60, Severity.COLORS[Severity.ERROR]))
+        print(self._color("❌ VALIDATION FAILED - Blocking issues found", Severity.COLORS[Severity.ERROR]))
+        print(self._color("═" * 60, Severity.COLORS[Severity.ERROR]))
+        print("")
+        print("The following severity levels are configured to block:")
+        for sev in sorted(check_result.severity_config.blocking_severities):
+            print(f"  • {sev}")
+        print("")
+        print("To change blocking behavior, edit .solt-hooks.yaml:")
+        print("")
+        print("  blocking_severities:")
+        print("    - error          # Only errors block")
+        print("    # - warning      # Uncomment to also block warnings")
+        print("")
+
+    def print_success(self, module_name=""):
+        """Print success message."""
+        msg = "✅ All checks passed!"
+        if module_name:
+            msg = f"✅ {module_name}: All checks passed!"
+        print(self._color(msg, "\033[92m"))  # Green
+
+
+def installable(method):
+    """Decorator to run checks only on installable modules."""
+
+    def inner(self):
+        msg_tmpl = f"Skipped check '{method.__name__}' for '{self.manifest_path}'"
+        if self.error:
+            if self.verbose:
+                print(f"{msg_tmpl} with error: '{self.error}'")
+        elif not self.is_module_installable:
+            if self.verbose:
+                print(f"{msg_tmpl} is not installable")
+        else:
+            return method(self)
+
+    return inner
+
+
+class ChecksOdooModule:
+    """Main class to run validations on Odoo modules."""
+
+    def __init__(self, manifest_path, verbose=True, check_mode=None, severity_config=None):
+        self.manifest_path = self._get_manifest_file_path(manifest_path)
+        self.verbose = verbose
+        self.check_mode = check_mode
+        self.severity_config = severity_config or SeverityConfig()
+        self.odoo_addon_path = os.path.dirname(self.manifest_path)
+        self.odoo_addon_name = os.path.basename(self.odoo_addon_path)
+        self.error = ""
+        self.manifest_dict = self._manifest2dict()
+        self.is_module_installable = self._is_installable()
+        self.manifest_referenced_files = self._referenced_files_by_extension()
+        self.check_result = CheckResult(self.severity_config)
+
+    @staticmethod
+    def _get_manifest_file_path(original_manifest_path):
+        for manifest_name in MANIFEST_NAMES:
+            manifest_path = os.path.join(original_manifest_path, manifest_name)
+            if os.path.isfile(manifest_path):
+                return manifest_path
+        return original_manifest_path
+
+    def _manifest2dict(self):
+        if os.path.basename(self.manifest_path) not in MANIFEST_NAMES:
+            return {}
+        if not os.path.isfile(self.manifest_path):
+            return {}
+        if not os.path.isfile(os.path.join(self.odoo_addon_path, "__init__.py")):
+            return {}
+        with open(self.manifest_path, "r", encoding="UTF-8") as f_manifest:
+            try:
+                return ast.literal_eval(f_manifest.read())
+            except Exception as err:
+                self.error = f"Manifest {self.manifest_path} with error {err}"
+        return {}
+
+    def _is_installable(self):
+        return self.manifest_dict and self.manifest_dict.get("installable", True)
+
+    def _referenced_files_by_extension(self):
+        ext_referenced_files = defaultdict(list)
+
+        for data_section in DFTL_MANIFEST_DATA_KEYS:
+            for fname in self.manifest_dict.get(data_section) or []:
+                ext = os.path.splitext(fname)[1].lower()
+                ext_referenced_files[ext].append({
+                    "filename": os.path.realpath(
+                        os.path.join(self.odoo_addon_path, os.path.normpath(fname))
+                    ),
+                    "filename_short": os.path.normpath(fname),
+                    "data_section": data_section,
+                })
+
+        fnames = (
+                glob.glob(os.path.join(self.odoo_addon_path, "i18n*", "*.po")) +
+                glob.glob(os.path.join(self.odoo_addon_path, "i18n*", "*.pot"))
+        )
+        for fname in fnames:
+            ext = os.path.splitext(fname)[1].lower()
+            ext_referenced_files[ext].append({
+                "filename": os.path.realpath(fname),
+                "filename_short": os.path.normpath(fname),
+                "data_section": "default",
+            })
+
+        for root, dirs, files in os.walk(self.odoo_addon_path):
+            dirs[:] = [d for d in dirs if d not in {
+                "__pycache__", ".git", "node_modules", "static", "lib"
+            }]
+            for fname in files:
+                if fname.endswith(".py"):
+                    full_path = os.path.join(root, fname)
+                    ext_referenced_files[".py"].append({
+                        "filename": os.path.realpath(full_path),
+                        "filename_short": os.path.relpath(full_path, self.odoo_addon_path),
+                        "data_section": "python",
+                    })
+
+        return ext_referenced_files
+
+    def _should_run_check(self, check_type):
+        if self.check_mode is None:
+            return True
+        return self.check_mode == check_type
+
+    def check_manifest(self):
+        if not self._should_run_check("manifest"):
+            return
+        if not self.manifest_dict:
+            self.check_result.add("manifest_syntax_error", [
+                f"{self.manifest_path} could not be loaded {self.error}"
+            ])
+
+    @installable
+    def check_missing_readme(self):
+        if not self._should_run_check("manifest"):
+            return
+        for readme_name in DFTL_README_FILES:
+            readme_path = os.path.join(self.odoo_addon_path, readme_name)
+            if os.path.isfile(readme_path):
+                return
+        self.check_result.add("missing_readme", [
+            f"{self.odoo_addon_path} missing README. Template: {DFTL_README_TMPL_URL}"
+        ])
+
+    @installable
+    def check_xml(self):
+        if not self._should_run_check("xml"):
+            return
+        manifest_datas = self.manifest_referenced_files[".xml"]
+        if not manifest_datas:
+            return
+
+        checks_obj = checks_odoo_module_xml.ChecksOdooModuleXML(
+            manifest_datas, self.odoo_addon_name
+        )
+        for check_meth in self._get_check_methods(checks_obj):
+            check_meth()
+        self.check_result.add_from_dict(checks_obj.checks_errors)
+
+    @installable
+    def check_xml_advanced(self):
+        if not self._should_run_check("xml"):
+            return
+        manifest_datas = self.manifest_referenced_files[".xml"]
+        if not manifest_datas:
+            return
+
+        checks_obj = checks_odoo_module_xml_advanced.ChecksOdooModuleXMLAdvanced(
+            manifest_datas, self.odoo_addon_name
+        )
+        for check_meth in self._get_check_methods(checks_obj):
+            check_meth()
+        self.check_result.add_from_dict(checks_obj.checks_errors)
+
+    @installable
+    def check_csv(self):
+        if not self._should_run_check("csv"):
+            return
+        manifest_datas = self.manifest_referenced_files[".csv"]
+        if not manifest_datas:
+            return
+
+        checks_obj = checks_odoo_module_csv.ChecksOdooModuleCSV(
+            manifest_datas, self.odoo_addon_name
+        )
+        for check_meth in self._get_check_methods(checks_obj):
+            check_meth()
+        self.check_result.add_from_dict(checks_obj.checks_errors)
+
+    @installable
+    def check_po(self):
+        if not self._should_run_check("po"):
+            return
+        manifest_datas = (
+                self.manifest_referenced_files[".po"] +
+                self.manifest_referenced_files[".pot"]
+        )
+        if not manifest_datas:
+            return
+
+        checks_obj = checks_odoo_module_po.ChecksOdooModulePO(
+            manifest_datas, self.odoo_addon_name
+        )
+        for check_meth in self._get_check_methods(checks_obj):
+            check_meth()
+        self.check_result.add_from_dict(checks_obj.checks_errors)
+
+    @installable
+    def check_python(self):
+        if not self._should_run_check("python"):
+            return
+        manifest_datas = self.manifest_referenced_files[".py"]
+        if not manifest_datas:
+            return
+
+        checks_obj = checks_odoo_module_python.ChecksOdooModulePython(
+            manifest_datas, self.odoo_addon_name
+        )
+        for check_meth in self._get_check_methods(checks_obj):
+            check_meth()
+        self.check_result.add_from_dict(checks_obj.checks_errors)
+
+    @staticmethod
+    def _get_check_methods(obj):
+        for attr in dir(obj):
+            if callable(getattr(obj, attr)) and attr.startswith("check_"):
+                yield getattr(obj, attr)
+
+    @staticmethod
+    def getattr_checks(obj_or_class=None):
+        if obj_or_class is None:
+            obj_or_class = ChecksOdooModule
+        for attr in dir(obj_or_class):
+            if callable(getattr(obj_or_class, attr)) and attr.startswith("check_"):
+                yield getattr(obj_or_class, attr)
+
+
+def run(manifest_paths=None, verbose=True, do_exit=True, check_mode=None,
+        config_path=None, show_info=False):
+    """Main entry point."""
+    if manifest_paths is None:
+        manifest_paths = []
+
+    severity_config = SeverityConfig(config_path)
+    printer = ResultPrinter(use_colors=True, verbose=show_info)
+
+    all_results = []
+    has_blocking = False
+
+    for manifest_path in manifest_paths:
+        checks_obj = ChecksOdooModule(
+            os.path.realpath(manifest_path),
+            verbose=verbose,
+            check_mode=check_mode,
+            severity_config=severity_config,
+        )
+
+        for check in checks_obj.getattr_checks():
+            check(checks_obj)
+
+        if not checks_obj.check_result.is_empty():
+            all_results.append((checks_obj.odoo_addon_name, checks_obj.check_result))
+            if checks_obj.check_result.has_blocking_issues():
+                has_blocking = True
+
+            if verbose:
+                printer.print_results(checks_obj.check_result, checks_obj.odoo_addon_name)
+        elif verbose:
+            printer.print_success(checks_obj.odoo_addon_name)
+
+    # Print final summary if multiple modules
+    if len(manifest_paths) > 1 and verbose:
+        print("")
+        print("=" * 60)
+        print("📊 FINAL SUMMARY")
+        print("=" * 60)
+
+        total_counts = {Severity.ERROR: 0, Severity.WARNING: 0, Severity.INFO: 0}
+        for module_name, result in all_results:
+            counts = result.get_counts()
+            for sev, count in counts.items():
+                total_counts[sev] += count
+
+        print(f"  Modules checked: {len(manifest_paths)}")
+        print(f"  Modules with issues: {len(all_results)}")
+        print(f"  ❌ Errors: {total_counts[Severity.ERROR]}")
+        print(f"  ⚠️  Warnings: {total_counts[Severity.WARNING]}")
+        print(f"  ℹ️  Info: {total_counts[Severity.INFO]}")
+
+    # Print blocking notice if needed
+    if has_blocking and verbose:
+        # Use first result's config for the notice
+        if all_results:
+            printer.print_blocking_notice(all_results[0][1])
+
+    exit_code = 1 if has_blocking else 0
+
+    if do_exit:
+        sys.exit(exit_code)
+
+    return all_results, exit_code
+
+
+def main():
+    """Console entry point."""
+    parser = argparse.ArgumentParser(
+        description="Solt Pre-commit: Odoo module validation hooks"
+    )
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        help="Paths to Odoo modules to validate"
+    )
+    parser.add_argument(
+        "--check-xml-only",
+        action="store_true",
+        help="Run only XML checks"
+    )
+    parser.add_argument(
+        "--check-csv-only",
+        action="store_true",
+        help="Run only CSV checks"
+    )
+    parser.add_argument(
+        "--check-po-only",
+        action="store_true",
+        help="Run only PO/POT checks"
+    )
+    parser.add_argument(
+        "--check-python-only",
+        action="store_true",
+        help="Run only Python checks"
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to config file (default: .solt-hooks.yaml)"
+    )
+    parser.add_argument(
+        "--show-info",
+        action="store_true",
+        help="Show info-level issues (hidden by default)"
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress output"
+    )
+
+    args = parser.parse_args()
+
+    check_mode = None
+    if args.check_xml_only:
+        check_mode = "xml"
+    elif args.check_csv_only:
+        check_mode = "csv"
+    elif args.check_po_only:
+        check_mode = "po"
+    elif args.check_python_only:
+        check_mode = "python"
+
+    paths = args.paths or ["."]
+
+    return run(
+        manifest_paths=paths,
+        verbose=not args.quiet,
+        check_mode=check_mode,
+        config_path=args.config,
+        show_info=args.show_info,
+    )
+
+
+if __name__ == "__main__":
+    main()

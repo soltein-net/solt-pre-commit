@@ -1,0 +1,120 @@
+# =============================================================================
+# Solt Pre-commit Hooks
+# Available hooks for consumption from Odoo module repositories
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BRANCH NAME - Branch naming policy validation
+# -----------------------------------------------------------------------------
+- id: solt-check-branch
+  name: Solt - Validate Branch Name
+  description: |
+    Validate branch naming convention.
+    Configure in .solt-hooks.yaml:
+    - strict: true  → Requires ticket (feature/SOLT-123-desc)
+    - strict: false → Type/description only (feature/my-change)
+  entry: solt-check-branch
+  language: python
+  always_run: true
+  pass_filenames: false
+  stages: [pre-commit, pre-push]
+
+# -----------------------------------------------------------------------------
+# FULL VALIDATION - All checks (XML, CSV, PO, Python, Manifest)
+# -----------------------------------------------------------------------------
+- id: solt-check-odoo
+  name: Solt - Validate Odoo Module (Full)
+  description: |
+    Run all validations on Odoo modules:
+    - XML: syntax, duplicates, deprecated nodes, active_id usage, alerts
+    - CSV: duplicate record IDs
+    - PO/POT: syntax, duplicates, printf/format variables
+    - Python: fields, docstrings, tracking, compute_sudo
+    - Manifest: syntax, missing README
+  entry: solt-check-odoo
+  language: python
+  files: (__manifest__|__openerp__)\.py$
+  pass_filenames: true
+  types: [python]
+
+# -----------------------------------------------------------------------------
+# XML ONLY - Basic and advanced XML validations
+# -----------------------------------------------------------------------------
+- id: solt-check-xml
+  name: Solt - Validate Odoo XML
+  description: |
+    Validate XML files:
+    - Syntax errors
+    - Duplicate record IDs
+    - Duplicate fields in records
+    - Redundant module name in xmlid
+    - Deprecated tree attributes (colors, fonts, string)
+    - Deprecated <odoo><data> and <openerp> nodes
+    - Dangerous view replace with low priority
+    - Users without no_reset_password
+    - Filters without user_id
+    - Deprecated active_id/active_ids/active_model usage
+    - Alert elements without proper role
+    - Buttons without type attribute
+    - Deprecated t-raw directive
+    - Hardcoded numeric IDs
+  entry: solt-check-odoo
+  language: python
+  files: \.xml$
+  pass_filenames: false
+  args: [--check-xml-only]
+
+# -----------------------------------------------------------------------------
+# CSV ONLY - CSV data file validations
+# -----------------------------------------------------------------------------
+- id: solt-check-csv
+  name: Solt - Validate Odoo CSV
+  description: |
+    Validate CSV files:
+    - Syntax errors
+    - Duplicate record IDs (external IDs)
+  entry: solt-check-odoo
+  language: python
+  files: \.csv$
+  pass_filenames: false
+  args: [--check-csv-only]
+
+# -----------------------------------------------------------------------------
+# PO/POT ONLY - Translation file validations
+# -----------------------------------------------------------------------------
+- id: solt-check-po
+  name: Solt - Validate Odoo PO/POT
+  description: |
+    Validate translation files:
+    - Syntax errors
+    - Duplicate message definitions
+    - Missing module comment (#. module: MODULE)
+    - Printf variable mismatches (%s, %d)
+    - Format variable mismatches ({}, {name})
+  entry: solt-check-odoo
+  language: python
+  files: \.(po|pot)$
+  pass_filenames: false
+  args: [--check-po-only]
+
+# -----------------------------------------------------------------------------
+# PYTHON ONLY - Python code validations
+# -----------------------------------------------------------------------------
+- id: solt-check-python
+  name: Solt - Validate Odoo Python
+  description: |
+    Validate Python files:
+    - Syntax errors
+    - Duplicate field labels (same string on multiple fields)
+    - Inconsistent compute_sudo on fields with same compute method
+    - tracking=True on models without mail.thread
+    - selection attribute on related fields
+    - Missing string attribute on fields
+    - Missing help attribute on fields
+    - Missing docstrings on public methods
+    - Too short or uninformative docstrings
+  entry: solt-check-odoo
+  language: python
+  files: \.py$
+  pass_filenames: false
+  args: [--check-python-only]
