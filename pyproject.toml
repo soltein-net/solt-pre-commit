@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solt-pre-commit"
+version = "1.0.0"
+description = "Custom pre-commit hooks for Odoo module validation - Soltein"
+readme = "README.md"
+license = {text = "LGPL-3.0-or-later"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Soltein", email = "dev@soltein.mx"}
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "lxml>=4.9.0",
+    "polib>=1.1.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+solt-check-odoo = "solt_pre_commit.checks_odoo_module:main"
+solt-check-branch = "solt_pre_commit.checks_branch_name:main"
+
+[project.urls]
+Homepage = "https://github.com/soltein-net/solt-pre-commit"
+Repository = "https://github.com/soltein-net/solt-pre-commit"
+Issues = "https://github.com/soltein-net/solt-pre-commit/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 120
+
+[tool.isort]
+profile = "black"
+line_length = 120
+known_first_party = ["solt_pre_commit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
