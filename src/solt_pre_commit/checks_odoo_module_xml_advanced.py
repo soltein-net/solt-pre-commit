@@ -51,7 +51,7 @@ class ChecksOdooModuleXMLAdvanced:
         Odoo Warning:
         Using active_id, active_ids and active_model in expressions is deprecated
         """
-        pattern = re.compile(r'\b(active_id|active_ids|active_model)\b')
+        pattern = re.compile(r"\b(active_id|active_ids|active_model)\b")
 
         for manifest_data in self.manifest_datas:
             tree = manifest_data.get("tree")
@@ -61,8 +61,13 @@ class ChecksOdooModuleXMLAdvanced:
             filename = manifest_data["filename"]
 
             search_attrs = [
-                "context", "domain", "attrs", "options",
-                "filter_domain", "default", "eval",
+                "context",
+                "domain",
+                "attrs",
+                "options",
+                "filter_domain",
+                "default",
+                "eval",
             ]
 
             for attr in search_attrs:
@@ -72,7 +77,7 @@ class ChecksOdooModuleXMLAdvanced:
 
                     for match in matches:
                         self.checks_errors["xml_deprecated_active_id_usage"].append(
-                            f'{filename}:{node.sourceline} '
+                            f"{filename}:{node.sourceline} "
                             f'Deprecated use of "{match}" in {attr}="{value[:50]}..."'
                         )
 
@@ -99,7 +104,7 @@ class ChecksOdooModuleXMLAdvanced:
                 valid_roles = {"alert", "alertdialog", "status"}
                 if role not in valid_roles:
                     self.checks_errors["xml_alert_missing_role"].append(
-                        f'{filename}:{node.sourceline} '
+                        f"{filename}:{node.sourceline} "
                         f'Element with class "{classes}" should have '
                         f'role="alert", role="alertdialog", or role="status"'
                     )
@@ -116,7 +121,7 @@ class ChecksOdooModuleXMLAdvanced:
             for node in tree.xpath("//button[not(@type)]"):
                 name = node.get("name", "unnamed")
                 self.checks_errors["xml_button_without_type"].append(
-                    f'{filename}:{node.sourceline} '
+                    f"{filename}:{node.sourceline} "
                     f'Button "{name}" is missing type attribute'
                 )
 
@@ -132,7 +137,7 @@ class ChecksOdooModuleXMLAdvanced:
             for node in tree.xpath("//*[@t-raw]"):
                 value = node.get("t-raw", "")
                 self.checks_errors["xml_deprecated_t_raw"].append(
-                    f'{filename}:{node.sourceline} '
+                    f"{filename}:{node.sourceline} "
                     f'Deprecated t-raw="{value}", use t-out with markup() instead'
                 )
 
@@ -156,9 +161,9 @@ class ChecksOdooModuleXMLAdvanced:
                         for match in matches:
                             if int(match) > 1:
                                 self.checks_errors["xml_hardcoded_id"].append(
-                                    f'{filename}:{node.sourceline} '
+                                    f"{filename}:{node.sourceline} "
                                     f'Possible hardcoded ID "{match}" in {attr}, '
-                                    f'consider using ref()'
+                                    f"consider using ref()"
                                 )
 
     def check_duplicate_view_priority(self):
@@ -183,19 +188,23 @@ class ChecksOdooModuleXMLAdvanced:
                 priority = "16"
 
                 if priority_node:
-                    priority = priority_node[0].get("eval", priority_node[0].text or "16")
+                    priority = priority_node[0].get(
+                        "eval", priority_node[0].text or "16"
+                    )
 
                 key = (inherit_ref, priority)
-                inherit_groups[key].append({
-                    "id": record.get("id"),
-                    "lineno": record.sourceline,
-                })
+                inherit_groups[key].append(
+                    {
+                        "id": record.get("id"),
+                        "lineno": record.sourceline,
+                    }
+                )
 
             for (inherit_ref, priority), views in inherit_groups.items():
                 if len(views) >= 2:
                     view_ids = ", ".join(v["id"] for v in views)
                     self.checks_errors["xml_duplicate_view_priority"].append(
-                        f'{filename}:{views[0]["lineno"]} '
+                        f"{filename}:{views[0]['lineno']} "
                         f'Views ({view_ids}) inherit from "{inherit_ref}" '
-                        f'with same priority {priority}'
+                        f"with same priority {priority}"
                     )

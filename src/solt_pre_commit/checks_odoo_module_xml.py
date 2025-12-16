@@ -25,17 +25,21 @@ class ChecksOdooModuleXML:
         for manifest_data in manifest_datas:
             try:
                 with open(manifest_data["filename"], "rb") as f_xml:
-                    manifest_data.update({
-                        "node": etree.parse(f_xml),
-                        "file_error": None,
-                    })
+                    manifest_data.update(
+                        {
+                            "node": etree.parse(f_xml),
+                            "file_error": None,
+                        }
+                    )
             except (FileNotFoundError, etree.XMLSyntaxError) as xml_err:
-                manifest_data.update({
-                    "node": etree.Element("__empty__"),
-                    "file_error": xml_err,
-                })
+                manifest_data.update(
+                    {
+                        "node": etree.Element("__empty__"),
+                        "file_error": xml_err,
+                    }
+                )
                 self.checks_errors["xml_syntax_error"].append(
-                    f'{manifest_data["filename"]} {xml_err}'
+                    f"{manifest_data['filename']} {xml_err}"
                 )
 
     @staticmethod
@@ -124,7 +128,7 @@ class ChecksOdooModuleXML:
         )
         if xmlid_module == self.module_name:
             self.checks_errors["xml_redundant_module_name"].append(
-                f'{manifest_data["filename"]}:{record.sourceline} '
+                f"{manifest_data['filename']}:{record.sourceline} "
                 f'Redundant module name <record id="{record_id}" '
                 f'better using only <record id="{xmlid_name}"'
             )
@@ -139,7 +143,7 @@ class ChecksOdooModuleXML:
 
         if is_replaced and priority < DFTL_MIN_PRIORITY:
             self.checks_errors["xml_view_dangerous_replace_low_priority"].append(
-                f'{manifest_data["filename"]}:{record.sourceline} '
+                f"{manifest_data['filename']}:{record.sourceline} "
                 f'Dangerous "replace" with priority {priority} < {DFTL_MIN_PRIORITY}'
             )
 
@@ -149,7 +153,7 @@ class ChecksOdooModuleXML:
         for node in record.xpath(xpath):
             attrs_found = ", ".join(set(node.attrib.keys()) & deprecate_attrs)
             self.checks_errors["xml_deprecated_tree_attribute"].append(
-                f'{manifest_data["filename"]}:{node.sourceline} '
+                f"{manifest_data['filename']}:{node.sourceline} "
                 f'Deprecated "<tree {attrs_found}=..."'
             )
 
@@ -157,12 +161,11 @@ class ChecksOdooModuleXML:
         """Validate user creation without no_reset_password."""
         if record.get("model") != "res.users":
             return
-        if (
-            record.xpath("field[@name='name'][1]") and
-            "no_reset_password" not in (record.get("context") or "")
+        if record.xpath("field[@name='name'][1]") and "no_reset_password" not in (
+            record.get("context") or ""
         ):
             self.checks_errors["xml_create_user_wo_reset_password"].append(
-                f'{manifest_data["filename"]}:{record.sourceline} '
+                f"{manifest_data['filename']}:{record.sourceline} "
                 "record res.users without context=\"{'no_reset_password': True}\""
             )
 
@@ -173,7 +176,7 @@ class ChecksOdooModuleXML:
         fields = record.xpath("field[@name='name' or @name='user_id']")
         if fields and len(fields) == 1:
             self.checks_errors["xml_dangerous_filter_wo_user"].append(
-                f'{manifest_data["filename"]}:{record.sourceline} '
+                f"{manifest_data['filename']}:{record.sourceline} "
                 "Dangerous filter without explicit `user_id`"
             )
 
@@ -184,8 +187,8 @@ class ChecksOdooModuleXML:
                 children = list(odoo_node.iterchildren())
                 if len(children) == 1 and len(odoo_node.xpath("./data")) == 1:
                     self.checks_errors["xml_deprecated_data_node"].append(
-                        f'{manifest_data["filename"]}:{odoo_node.sourceline} '
-                        'Use <odoo> instead of <odoo><data>'
+                        f"{manifest_data['filename']}:{odoo_node.sourceline} "
+                        "Use <odoo> instead of <odoo><data>"
                     )
 
     def check_xml_deprecated_openerp_node(self):
@@ -193,7 +196,7 @@ class ChecksOdooModuleXML:
         for manifest_data in self.manifest_datas:
             for openerp_node in manifest_data["node"].xpath("/openerp"):
                 self.checks_errors["xml_deprecated_openerp_xml_node"].append(
-                    f'{manifest_data["filename"]}:{openerp_node.sourceline} '
+                    f"{manifest_data['filename']}:{openerp_node.sourceline} "
                     "Deprecated <openerp> xml node, use <odoo>"
                 )
 
@@ -210,7 +213,7 @@ class ChecksOdooModuleXML:
             for node in manifest_data["node"].xpath(xpath):
                 found = ", ".join(set(node.attrib) & deprecated)
                 self.checks_errors["xml_deprecated_qweb_directive"].append(
-                    f'{manifest_data["filename"]}:{node.sourceline} '
+                    f"{manifest_data['filename']}:{node.sourceline} "
                     f'Deprecated QWeb directive "{found}". Use "t-options"'
                 )
 
@@ -221,8 +224,10 @@ class ChecksOdooModuleXML:
                 for node in manifest_data["node"].xpath(f".//{name}[@{attr}]"):
                     resource = node.get(attr, "")
                     ext = os.path.splitext(os.path.basename(resource))[1]
-                    if resource.startswith("/") and not re.search(r"^\.[a-zA-Z]+$", ext):
+                    if resource.startswith("/") and not re.search(
+                        r"^\.[a-zA-Z]+$", ext
+                    ):
                         self.checks_errors["xml_not_valid_char_link"].append(
-                            f'{manifest_data["filename"]}:{node.sourceline} '
+                            f"{manifest_data['filename']}:{node.sourceline} "
                             "Resource contains invalid character"
                         )
