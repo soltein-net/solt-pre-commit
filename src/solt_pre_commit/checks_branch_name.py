@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2025 Soltein SA. de CV.
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
@@ -34,11 +35,12 @@ DEFAULT_PROTECTED_BRANCHES = {
     "HEAD",
 }
 
-# Odoo version branches pattern (e.g., 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0)
-ODOO_VERSION_BRANCH_PATTERN = r"^\d+\.0$"
-
-# Release version pattern (e.g., 17.0.1.0)
-RELEASE_VERSION_PATTERN = r"^\d+\.\d+\.\d+(\.\d+)?$"
+# Default protected patterns (Odoo version branches and feature/hotfix with version)
+DEFAULT_PROTECTED_PATTERNS = [
+    r"^\d+\.0.*$",  # 17.0, 17.0.1, 18.0, etc.
+    r"^feature/\d+\.0-.*$",  # feature/17.0-something
+    r"^hotfix/\d+\.0-.*$",  # hotfix/17.0-something
+]
 
 
 class BranchNameValidator:
@@ -62,9 +64,11 @@ class BranchNameValidator:
 
         self.ticket_prefixes = ticket_prefixes or self._get_prefixes_from_config()
         self.allowed_types = self._get_allowed_types()
+        self.protected_patterns = self._get_protected_patterns()
         self._compile_patterns()
 
     def _load_config(self, config_path: Optional[str] = None) -> dict:
+        """Load configuration from .solt-hooks.yaml."""
         if config_path:
             search_paths = [Path(config_path)]
         else:
@@ -85,13 +89,23 @@ class BranchNameValidator:
         return {}
 
     def _get_prefixes_from_config(self) -> List[str]:
+        """Get ticket prefixes from config."""
         prefixes = self.branch_config.get("ticket_prefixes", [])
         return prefixes if prefixes else ["[A-Z]+"]
 
     def _get_allowed_types(self) -> List[str]:
+        """Get allowed branch types from config."""
         return self.branch_config.get("allowed_types", DEFAULT_BRANCH_TYPES)
 
+    def _get_protected_patterns(self) -> List[str]:
+        """Get protected patterns from config."""
+        config_patterns = self.branch_config.get("protected_patterns", [])
+        if config_patterns:
+            return config_patterns
+        return DEFAULT_PROTECTED_PATTERNS
+
     def _compile_patterns(self):
+        """Compile regex patterns for branch validation."""
         if self.ticket_prefixes == ["[A-Z]+"]:
             prefix_pattern = "[A-Z]+"
         else:
@@ -101,15 +115,19 @@ class BranchNameValidator:
 
         for branch_type in self.allowed_types:
             if branch_type == "release":
-                self.patterns[branch_type] = re.compile(r"^release/\d+\.\d+\.\d+(\.\d+)?$")
+                # release/17.0.1.0 or release/1.0.0
+                self.patterns[branch_type] = re.compile(r"^release/\d+\.\d+(\.\d+)*$")
             elif self.strict:
+                # Strict: requires ticket - feature/SOLT-123-description
                 self.patterns[branch_type] = re.compile(f"^{branch_type}/{prefix_pattern}-\\d+-.+$")
             else:
+                # Flexible: type/description or type/TICKET-123-description
                 self.patterns[branch_type] = re.compile(
                     f"^{branch_type}/([a-z0-9][-a-z0-9]*|{prefix_pattern}-\\d+-.+)$"
                 )
 
     def get_current_branch(self) -> Optional[str]:
+        """Get current git branch name."""
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -122,26 +140,33 @@ class BranchNameValidator:
             return None
 
     def is_protected_branch(self, branch_name: str) -> bool:
+        """Check if branch is protected (skip validation)."""
+        # Check explicit protected branches
         if branch_name in DEFAULT_PROTECTED_BRANCHES:
             return True
-        if re.match(ODOO_VERSION_BRANCH_PATTERN, branch_name):
-            return True
+
+        # Check additional protected branches from config
         additional_protected = self.branch_config.get("protected_branches", [])
         if branch_name in additional_protected:
             return True
-        protected_patterns = self.branch_config.get("protected_patterns", [])
-        for pattern in protected_patterns:
+
+        # Check protected patterns
+        for pattern in self.protected_patterns:
             try:
                 if re.match(pattern, branch_name):
                     return True
             except re.error:
                 pass
+
         return False
 
     def validate(self, branch_name: str) -> Tuple[bool, str]:
+        """Validate a branch name against the naming policy."""
+        # Check if protected (skip validation)
         if self.is_protected_branch(branch_name):
             return True, f"Protected branch '{branch_name}' - skipped validation"
 
+        # Check against type patterns
         for branch_type, pattern in self.patterns.items():
             if pattern.match(branch_name):
                 return True, f"Valid {branch_type} branch: {branch_name}"
@@ -149,6 +174,7 @@ class BranchNameValidator:
         return False, self._generate_error_message(branch_name)
 
     def _generate_error_message(self, branch_name: str) -> str:
+        """Generate a helpful error message for invalid branch names."""
         types_str = ", ".join(self.allowed_types)
 
         if self.strict:
@@ -198,24 +224,31 @@ Examples:
   ✔ feature/SOLT-123-add-new-feature
   ✔ fix/correct-calculation
   ✔ release/17.0.1.0
+  ✔ feature/17.0-new-feature (version-prefixed)
+  ✔ hotfix/17.0-urgent-fix (version-prefixed)
 
 Common mistakes:
   ✗ Feature/... (use lowercase)
   ✗ my-branch (missing type prefix)
 """
 
+        # List protected branches and patterns
         protected = list(DEFAULT_PROTECTED_BRANCHES)
         protected.extend(self.branch_config.get("protected_branches", []))
 
         message += f"""
 Protected branches (no validation required):
   {", ".join(sorted(protected))}
-  Odoo versions: 12.0, 13.0, ..., 17.0, 18.0
+
+Protected patterns:
+  Odoo versions: 17.0, 17.0.1, 18.0, etc.
+  Version features: feature/17.0-*, hotfix/17.0-*
 """
         return message
 
 
 def main():
+    """Main entry point."""
     parser = argparse.ArgumentParser(description="Validate git branch naming policy")
     parser.add_argument("branch", nargs="?", help="Branch name to validate")
     parser.add_argument("--ticket-prefixes", nargs="+", default=None)

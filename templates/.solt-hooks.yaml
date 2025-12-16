@@ -21,9 +21,13 @@ validation_scope: changed
 # =============================================================================
 branch_naming:
   strict: false  # true = requires ticket (feature/SOLT-123-desc)
+
+  # Ticket prefixes (used when strict: true)
   ticket_prefixes:
     - SOLT
     - PROJ
+
+  # Allowed branch types with pattern: <type>/<description>
   allowed_types:
     - feature
     - fix
@@ -34,6 +38,23 @@ branch_naming:
     - docs
     - test
     - chore
+
+  # Protected branches (skip validation)
+  protected_branches:
+    - main
+    - master
+    - develop
+    - staging
+    - production
+
+  # Protected patterns (regex) - branches matching these skip validation
+  protected_patterns:
+    - "^17\\.0.*$"
+    - "^18\\.0.*$"
+    - "^feature/17\\.0-.*$"
+    - "^feature/18\\.0-.*$"
+    - "^hotfix/17\\.0-.*$"
+    - "^hotfix/18\\.0-.*$"
 
 # =============================================================================
 # DISABLED CHECKS
