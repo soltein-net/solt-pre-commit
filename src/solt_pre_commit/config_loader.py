@@ -256,24 +256,17 @@ class SoltConfig:
         self.disabled_checks: set[str] = set(self.config.get("disabled_checks", []))
 
         # Skip lists
-        self.skip_string_fields: set[str] = set(
-            self.config.get("skip_string_fields", DEFAULT_SKIP_STRING_FIELDS)
-        )
-        self.skip_help_fields: set[str] = set(
-            self.config.get("skip_help_fields", DEFAULT_SKIP_HELP_FIELDS)
-        )
+        self.skip_string_fields: set[str] = set(self.config.get("skip_string_fields", DEFAULT_SKIP_STRING_FIELDS))
+        self.skip_help_fields: set[str] = set(self.config.get("skip_help_fields", DEFAULT_SKIP_HELP_FIELDS))
         self.skip_docstring_methods: set[str] = (
-            set(self.config.get("skip_docstring_methods", []))
-            | DEFAULT_SKIP_DOCSTRING_METHODS
+            set(self.config.get("skip_docstring_methods", [])) | DEFAULT_SKIP_DOCSTRING_METHODS
         )
 
         # Docstring settings
         self.min_docstring_length: int = self.config.get("min_docstring_length", 10)
 
         # Path exclusions
-        self.exclude_paths: list[str] = self.config.get(
-            "exclude_paths", DEFAULT_EXCLUDE_PATHS
-        )
+        self.exclude_paths: list[str] = self.config.get("exclude_paths", DEFAULT_EXCLUDE_PATHS)
 
         # Changed files detector (lazy init)
         self._changed_detector: ChangedFilesDetector | None = None

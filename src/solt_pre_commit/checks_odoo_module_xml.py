@@ -38,9 +38,7 @@ class ChecksOdooModuleXML:
                         "file_error": xml_err,
                     }
                 )
-                self.checks_errors["xml_syntax_error"].append(
-                    f"{manifest_data['filename']} {xml_err}"
-                )
+                self.checks_errors["xml_syntax_error"].append(f"{manifest_data['filename']} {xml_err}")
 
     @staticmethod
     def _get_priority(view):
@@ -56,10 +54,7 @@ class ChecksOdooModuleXML:
             arch = view.xpath("field[@name='arch' and @type='xml'][1]")[0]
         except IndexError:
             return False
-        replaces = arch.xpath(
-            ".//field[@name='name' and @position='replace'][1] | "
-            ".//*[@position='replace'][1]"
-        )
+        replaces = arch.xpath(".//field[@name='name' and @position='replace'][1] | .//*[@position='replace'][1]")
         return bool(replaces)
 
     def check_xml_records(self):
@@ -68,15 +63,12 @@ class ChecksOdooModuleXML:
         xml_fields = defaultdict(list)
 
         for manifest_data in self.manifest_datas:
-            for record in manifest_data["node"].xpath(
-                "/odoo//record[@id] | /openerp//record[@id]"
-            ):
+            for record in manifest_data["node"].xpath("/odoo//record[@id] | /openerp//record[@id]"):
                 record_id = record.get("id")
 
                 # Detect duplicate xmlids
                 xmlid_key = (
-                    f"{manifest_data['data_section']}/{record_id}"
-                    f"_noupdate_{record.getparent().get('noupdate', '0')}"
+                    f"{manifest_data['data_section']}/{record_id}_noupdate_{record.getparent().get('noupdate', '0')}"
                 )
                 xmlids_section[xmlid_key].append((manifest_data, record))
 
@@ -103,9 +95,7 @@ class ChecksOdooModuleXML:
         # Report duplicate xmlids
         for xmlid_key, records in xmlids_section.items():
             if len(records) >= 2:
-                lines_str = ", ".join(
-                    f"{r[0]['filename']}:{r[1].sourceline}" for r in records[1:]
-                )
+                lines_str = ", ".join(f"{r[0]['filename']}:{r[1].sourceline}" for r in records[1:])
                 self.checks_errors["xml_duplicate_record_id"].append(
                     f"{records[0][0]['filename']}:{records[0][1].sourceline} "
                     f'Duplicate xml record id "{xmlid_key}" in {lines_str}'
@@ -123,9 +113,7 @@ class ChecksOdooModuleXML:
     def _visit_xml_record(self, manifest_data, record):
         """Detect redundant module name in xmlid."""
         record_id = record.get("id")
-        xmlid_module, xmlid_name = (
-            record_id.split(".") if "." in record_id else ["", record_id]
-        )
+        xmlid_module, xmlid_name = record_id.split(".") if "." in record_id else ["", record_id]
         if xmlid_module == self.module_name:
             self.checks_errors["xml_redundant_module_name"].append(
                 f"{manifest_data['filename']}:{record.sourceline} "
@@ -153,17 +141,14 @@ class ChecksOdooModuleXML:
         for node in record.xpath(xpath):
             attrs_found = ", ".join(set(node.attrib.keys()) & deprecate_attrs)
             self.checks_errors["xml_deprecated_tree_attribute"].append(
-                f"{manifest_data['filename']}:{node.sourceline} "
-                f'Deprecated "<tree {attrs_found}=..."'
+                f'{manifest_data["filename"]}:{node.sourceline} Deprecated "<tree {attrs_found}=..."'
             )
 
     def _visit_xml_record_user(self, manifest_data, record):
         """Validate user creation without no_reset_password."""
         if record.get("model") != "res.users":
             return
-        if record.xpath("field[@name='name'][1]") and "no_reset_password" not in (
-            record.get("context") or ""
-        ):
+        if record.xpath("field[@name='name'][1]") and "no_reset_password" not in (record.get("context") or ""):
             self.checks_errors["xml_create_user_wo_reset_password"].append(
                 f"{manifest_data['filename']}:{record.sourceline} "
                 "record res.users without context=\"{'no_reset_password': True}\""
@@ -176,8 +161,7 @@ class ChecksOdooModuleXML:
         fields = record.xpath("field[@name='name' or @name='user_id']")
         if fields and len(fields) == 1:
             self.checks_errors["xml_dangerous_filter_wo_user"].append(
-                f"{manifest_data['filename']}:{record.sourceline} "
-                "Dangerous filter without explicit `user_id`"
+                f"{manifest_data['filename']}:{record.sourceline} Dangerous filter without explicit `user_id`"
             )
 
     def check_xml_deprecated_data_node(self):
@@ -187,8 +171,7 @@ class ChecksOdooModuleXML:
                 children = list(odoo_node.iterchildren())
                 if len(children) == 1 and len(odoo_node.xpath("./data")) == 1:
                     self.checks_errors["xml_deprecated_data_node"].append(
-                        f"{manifest_data['filename']}:{odoo_node.sourceline} "
-                        "Use <odoo> instead of <odoo><data>"
+                        f"{manifest_data['filename']}:{odoo_node.sourceline} Use <odoo> instead of <odoo><data>"
                     )
 
     def check_xml_deprecated_openerp_node(self):
@@ -196,18 +179,14 @@ class ChecksOdooModuleXML:
         for manifest_data in self.manifest_datas:
             for openerp_node in manifest_data["node"].xpath("/openerp"):
                 self.checks_errors["xml_deprecated_openerp_xml_node"].append(
-                    f"{manifest_data['filename']}:{openerp_node.sourceline} "
-                    "Deprecated <openerp> xml node, use <odoo>"
+                    f"{manifest_data['filename']}:{openerp_node.sourceline} Deprecated <openerp> xml node, use <odoo>"
                 )
 
     def check_xml_deprecated_qweb_directive(self):
         """Detect deprecated QWeb directives."""
         deprecated = {"t-esc-options", "t-field-options", "t-raw-options"}
         deprecated_attrs = "|".join(f"@{d}" for d in deprecated)
-        xpath = (
-            f"/odoo//template//*[{deprecated_attrs}] | "
-            f"/openerp//template//*[{deprecated_attrs}]"
-        )
+        xpath = f"/odoo//template//*[{deprecated_attrs}] | /openerp//template//*[{deprecated_attrs}]"
 
         for manifest_data in self.manifest_datas:
             for node in manifest_data["node"].xpath(xpath):
@@ -224,10 +203,7 @@ class ChecksOdooModuleXML:
                 for node in manifest_data["node"].xpath(f".//{name}[@{attr}]"):
                     resource = node.get(attr, "")
                     ext = os.path.splitext(os.path.basename(resource))[1]
-                    if resource.startswith("/") and not re.search(
-                        r"^\.[a-zA-Z]+$", ext
-                    ):
+                    if resource.startswith("/") and not re.search(r"^\.[a-zA-Z]+$", ext):
                         self.checks_errors["xml_not_valid_char_link"].append(
-                            f"{manifest_data['filename']}:{node.sourceline} "
-                            "Resource contains invalid character"
+                            f"{manifest_data['filename']}:{node.sourceline} Resource contains invalid character"
                         )

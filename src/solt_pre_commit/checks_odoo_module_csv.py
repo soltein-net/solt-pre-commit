@@ -21,9 +21,7 @@ class ChecksOdooModuleCSV:
         for manifest_data in manifest_datas:
             manifest_data.update(
                 {
-                    "model": os.path.splitext(
-                        os.path.basename(manifest_data["filename"])
-                    )[0],
+                    "model": os.path.splitext(os.path.basename(manifest_data["filename"]))[0],
                 }
             )
 
@@ -54,9 +52,7 @@ class ChecksOdooModuleCSV:
                         )
 
             except (FileNotFoundError, csv.Error) as csv_err:
-                self.checks_errors["csv_syntax_error"].append(
-                    f"{manifest_data['filename']} {csv_err}"
-                )
+                self.checks_errors["csv_syntax_error"].append(f"{manifest_data['filename']} {csv_err}")
 
         # Report duplicates
         for csvid, records in csvids.items():
@@ -64,6 +60,5 @@ class ChecksOdooModuleCSV:
                 first = records[0]
                 others = ", ".join(f"{r[0]}:{r[1]}" for r in records[1:])
                 self.checks_errors["csv_duplicate_record_id"].append(
-                    f"{first[0]}:{first[1]} "
-                    f'Duplicate CSV record id "{csvid}" in {others}'
+                    f'{first[0]}:{first[1]} Duplicate CSV record id "{csvid}" in {others}'
                 )

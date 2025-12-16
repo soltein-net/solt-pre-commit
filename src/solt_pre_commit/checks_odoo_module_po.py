@@ -72,9 +72,7 @@ class ChecksOdooModulePO:
                     }
                 )
                 msg = str(po_err).replace(f"{manifest_data['filename']} ", "").strip()
-                self.checks_errors["po_syntax_error"].append(
-                    f"{manifest_data['filename']} {msg}"
-                )
+                self.checks_errors["po_syntax_error"].append(f"{manifest_data['filename']} {msg}")
 
     @staticmethod
     def _get_printf_str_args_kwargs(printf_str):
@@ -102,11 +100,7 @@ class ChecksOdooModulePO:
 
         for line in format_str.splitlines():
             try:
-                placeholders = [
-                    name
-                    for _, name, _, _ in string.Formatter().parse(line)
-                    if name is not None
-                ]
+                placeholders = [name for _, name, _, _ in string.Formatter().parse(line) if name is not None]
             except ValueError:
                 continue
 
@@ -120,9 +114,7 @@ class ChecksOdooModulePO:
 
         if format_str_args:
             max_val = max(format_str_args)
-            format_str_args = (
-                range(len(format_str_args)) if max_val == 0 else range(max_val)
-            )
+            format_str_args = range(len(format_str_args)) if max_val == 0 else range(max_val)
 
         return format_str_args, format_str_kwargs
 
@@ -146,9 +138,7 @@ class ChecksOdooModulePO:
     @staticmethod
     def parse_format(main_str, secondary_str):
         """Validate that secondary_str can be parsed with args from main_str."""
-        msgid_args, msgid_kwargs = ChecksOdooModulePO._get_format_str_args_kwargs(
-            main_str
-        )
+        msgid_args, msgid_kwargs = ChecksOdooModulePO._get_format_str_args_kwargs(main_str)
         if not msgid_args and not msgid_kwargs:
             return
 
@@ -178,8 +168,7 @@ class ChecksOdooModulePO:
         match = re.match(r"(module[s]?): (\w+)", entry.comment)
         if not match:
             self.checks_errors["po_requires_module"].append(
-                f"{manifest_data['filename']}:{entry.linenum} "
-                "Translation requires comment '#. module: MODULE'"
+                f"{manifest_data['filename']}:{entry.linenum} Translation requires comment '#. module: MODULE'"
             )
 
         # Verify variables in translation
@@ -190,14 +179,12 @@ class ChecksOdooModulePO:
             except PrintfStringParseError as exc:
                 linenum = self._get_po_line_number(entry)
                 self.checks_errors["po_python_parse_printf"].append(
-                    f"{manifest_data['filename']}:{linenum} "
-                    f"Translation parse error (printf): {exc}"
+                    f"{manifest_data['filename']}:{linenum} Translation parse error (printf): {exc}"
                 )
             except FormatStringParseError as exc:
                 linenum = self._get_po_line_number(entry)
                 self.checks_errors["po_python_parse_format"].append(
-                    f"{manifest_data['filename']}:{linenum} "
-                    f"Translation parse error (format): {exc}"
+                    f"{manifest_data['filename']}:{linenum} Translation parse error (format): {exc}"
                 )
 
     def check_po(self):
@@ -219,14 +206,11 @@ class ChecksOdooModulePO:
             for entries in duplicated.values():
                 if len(entries) >= 2:
                     linenum = self._get_po_line_number(entries[0])
-                    dup_lines = ", ".join(
-                        map(str, map(self._get_po_line_number, entries[1:]))
-                    )
+                    dup_lines = ", ".join(map(str, map(self._get_po_line_number, entries[1:])))
                     msg_short = re.sub(r"[\n\t]*", "", entries[0].msgid[:40]).strip()
                     if len(entries[0].msgid) > 40:
                         msg_short = f"{msg_short}..."
 
                     self.checks_errors["po_duplicate_message_definition"].append(
-                        f"{manifest_data['filename']}:{linenum} "
-                        f'Duplicate PO message "{msg_short}" in lines {dup_lines}'
+                        f'{manifest_data["filename"]}:{linenum} Duplicate PO message "{msg_short}" in lines {dup_lines}'
                     )

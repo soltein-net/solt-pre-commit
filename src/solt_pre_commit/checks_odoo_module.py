@@ -24,9 +24,7 @@ from . import (
     checks_odoo_module_xml_advanced,
 )
 
-DFTL_README_TMPL_URL = (
-    "https://github.com/soltein-net/solt-pre-commit/blob/main/docs/README_TEMPLATE.rst"
-)
+DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/main/docs/README_TEMPLATE.rst"
 DFTL_README_FILES = ["README.md", "README.txt", "README.rst"]
 DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "update_xml"]
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
@@ -158,9 +156,7 @@ class ChangedFilesDetector:
     def filter_module_files(self, module_path, all_module_files):
         """Filter module files to only those that changed."""
         changed = {os.path.realpath(f) for f in self.get_changed_files()}
-        return [
-            f for f in all_module_files if os.path.realpath(f["filename"]) in changed
-        ]
+        return [f for f in all_module_files if os.path.realpath(f["filename"]) in changed]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -375,11 +371,7 @@ class ResultPrinter:
         if module_name:
             print(self._bold(f"{'═' * 60}"))
             print(self._bold(f"📦 MODULE: {module_name}"))
-            scope_label = (
-                "changed files only"
-                if validation_scope == "changed"
-                else "full repository"
-            )
+            scope_label = "changed files only" if validation_scope == "changed" else "full repository"
             print(f"   Scope: {scope_label}")
             print(self._bold(f"{'═' * 60}"))
 
@@ -447,11 +439,7 @@ class ResultPrinter:
 
     def print_success(self, module_name="", validation_scope="full"):
         scope_label = "(changed files)" if validation_scope == "changed" else "(full)"
-        msg = (
-            f"✅ {module_name}: All checks passed! {scope_label}"
-            if module_name
-            else "✅ All checks passed!"
-        )
+        msg = f"✅ {module_name}: All checks passed! {scope_label}" if module_name else "✅ All checks passed!"
         print(self._color(msg, "\033[92m"))
 
 
@@ -475,9 +463,7 @@ def installable(method):
 class ChecksOdooModule:
     """Main class to run validations on Odoo modules."""
 
-    def __init__(
-        self, manifest_path, verbose=True, check_mode=None, severity_config=None
-    ):
+    def __init__(self, manifest_path, verbose=True, check_mode=None, severity_config=None):
         self.manifest_path = self._get_manifest_file_path(manifest_path)
         self.verbose = verbose
         self.check_mode = check_mode
@@ -493,9 +479,7 @@ class ChecksOdooModule:
         # Changed files detector
         self._changed_detector = None
         if self.severity_config.use_changed_files_only():
-            self._changed_detector = ChangedFilesDetector(
-                self.severity_config.base_branch
-            )
+            self._changed_detector = ChangedFilesDetector(self.severity_config.base_branch)
 
     @staticmethod
     def _get_manifest_file_path(original_manifest_path):
@@ -527,9 +511,7 @@ class ChecksOdooModule:
 
         for data_section in DFTL_MANIFEST_DATA_KEYS:
             for fname in self.manifest_dict.get(data_section) or []:
-                full_path = os.path.realpath(
-                    os.path.join(self.odoo_addon_path, os.path.normpath(fname))
-                )
+                full_path = os.path.realpath(os.path.join(self.odoo_addon_path, os.path.normpath(fname)))
                 # Check path exclusions
                 if self.severity_config.is_path_excluded(fname):
                     continue
@@ -544,9 +526,9 @@ class ChecksOdooModule:
                 )
 
         # PO/POT files
-        fnames = glob.glob(
-            os.path.join(self.odoo_addon_path, "i18n*", "*.po")
-        ) + glob.glob(os.path.join(self.odoo_addon_path, "i18n*", "*.pot"))
+        fnames = glob.glob(os.path.join(self.odoo_addon_path, "i18n*", "*.po")) + glob.glob(
+            os.path.join(self.odoo_addon_path, "i18n*", "*.pot")
+        )
         for fname in fnames:
             if self.severity_config.is_path_excluded(fname):
                 continue
@@ -561,11 +543,7 @@ class ChecksOdooModule:
 
         # Python files
         for root, dirs, files in os.walk(self.odoo_addon_path):
-            dirs[:] = [
-                d
-                for d in dirs
-                if d not in {"__pycache__", ".git", "node_modules", "static", "lib"}
-            ]
+            dirs[:] = [d for d in dirs if d not in {"__pycache__", ".git", "node_modules", "static", "lib"}]
             for fname in files:
                 if fname.endswith(".py"):
                     full_path = os.path.join(root, fname)
@@ -593,9 +571,7 @@ class ChecksOdooModule:
 
         # If using changed files only, filter them
         if self._changed_detector:
-            return self._changed_detector.filter_module_files(
-                self.odoo_addon_path, all_files
-            )
+            return self._changed_detector.filter_module_files(self.odoo_addon_path, all_files)
 
         return all_files
 
@@ -623,9 +599,7 @@ class ChecksOdooModule:
                 return
         self.check_result.add(
             "missing_readme",
-            [
-                f"{self.odoo_addon_path} missing README. Template: {DFTL_README_TMPL_URL}"
-            ],
+            [f"{self.odoo_addon_path} missing README. Template: {DFTL_README_TMPL_URL}"],
         )
 
     @installable
@@ -636,9 +610,7 @@ class ChecksOdooModule:
         if not manifest_datas:
             return
 
-        checks_obj = checks_odoo_module_xml.ChecksOdooModuleXML(
-            manifest_datas, self.odoo_addon_name
-        )
+        checks_obj = checks_odoo_module_xml.ChecksOdooModuleXML(manifest_datas, self.odoo_addon_name)
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
@@ -651,9 +623,7 @@ class ChecksOdooModule:
         if not manifest_datas:
             return
 
-        checks_obj = checks_odoo_module_xml_advanced.ChecksOdooModuleXMLAdvanced(
-            manifest_datas, self.odoo_addon_name
-        )
+        checks_obj = checks_odoo_module_xml_advanced.ChecksOdooModuleXMLAdvanced(manifest_datas, self.odoo_addon_name)
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
@@ -666,9 +636,7 @@ class ChecksOdooModule:
         if not manifest_datas:
             return
 
-        checks_obj = checks_odoo_module_csv.ChecksOdooModuleCSV(
-            manifest_datas, self.odoo_addon_name
-        )
+        checks_obj = checks_odoo_module_csv.ChecksOdooModuleCSV(manifest_datas, self.odoo_addon_name)
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
@@ -677,15 +645,11 @@ class ChecksOdooModule:
     def check_po(self):
         if not self._should_run_check("po"):
             return
-        manifest_datas = self._get_files_to_validate(
-            ".po"
-        ) + self._get_files_to_validate(".pot")
+        manifest_datas = self._get_files_to_validate(".po") + self._get_files_to_validate(".pot")
         if not manifest_datas:
             return
 
-        checks_obj = checks_odoo_module_po.ChecksOdooModulePO(
-            manifest_datas, self.odoo_addon_name
-        )
+        checks_obj = checks_odoo_module_po.ChecksOdooModulePO(manifest_datas, self.odoo_addon_name)
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
@@ -770,9 +734,7 @@ def run(
                     severity_config.validation_scope,
                 )
         elif verbose:
-            printer.print_success(
-                checks_obj.odoo_addon_name, severity_config.validation_scope
-            )
+            printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
 
     # Print final summary if multiple modules
     if len(manifest_paths) > 1 and verbose:
@@ -780,11 +742,7 @@ def run(
         print("=" * 60)
         print("📊 FINAL SUMMARY")
         print("=" * 60)
-        scope_label = (
-            "changed files only"
-            if severity_config.validation_scope == "changed"
-            else "full repository"
-        )
+        scope_label = "changed files only" if severity_config.validation_scope == "changed" else "full repository"
         print(f"  Validation scope: {scope_label}")
 
         total_counts = {Severity.ERROR: 0, Severity.WARNING: 0, Severity.INFO: 0}
@@ -813,25 +771,13 @@ def run(
 
 def main():
     """Console entry point."""
-    parser = argparse.ArgumentParser(
-        description="Solt Pre-commit: Odoo module validation hooks"
-    )
+    parser = argparse.ArgumentParser(description="Solt Pre-commit: Odoo module validation hooks")
     parser.add_argument("paths", nargs="*", help="Paths to Odoo modules to validate")
-    parser.add_argument(
-        "--check-xml-only", action="store_true", help="Run only XML checks"
-    )
-    parser.add_argument(
-        "--check-csv-only", action="store_true", help="Run only CSV checks"
-    )
-    parser.add_argument(
-        "--check-po-only", action="store_true", help="Run only PO/POT checks"
-    )
-    parser.add_argument(
-        "--check-python-only", action="store_true", help="Run only Python checks"
-    )
-    parser.add_argument(
-        "--config", default=None, help="Path to config file (default: .solt-hooks.yaml)"
-    )
+    parser.add_argument("--check-xml-only", action="store_true", help="Run only XML checks")
+    parser.add_argument("--check-csv-only", action="store_true", help="Run only CSV checks")
+    parser.add_argument("--check-po-only", action="store_true", help="Run only PO/POT checks")
+    parser.add_argument("--check-python-only", action="store_true", help="Run only Python checks")
+    parser.add_argument("--config", default=None, help="Path to config file (default: .solt-hooks.yaml)")
     parser.add_argument(
         "--show-info",
         action="store_true",

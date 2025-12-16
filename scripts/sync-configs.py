@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # Copyright 2025 Soltein SA. de CV.
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
@@ -243,11 +242,7 @@ Examples:
         print(f"❌ Repos file not found: {repos_file}")
         sys.exit(1)
 
-    repos = [
-        line.strip()
-        for line in repos_file.read_text().splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
+    repos = [line.strip() for line in repos_file.read_text().splitlines() if line.strip() and not line.startswith("#")]
 
     print(f"\n{'=' * 60}")
     print(f"🔄 Syncing to {len(repos)} repositories")
