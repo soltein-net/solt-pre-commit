@@ -1,0 +1,13 @@
+# Include essential files
+include LICENSE
+include README.md
+include requirements.txt
+include pyproject.toml
+
+# Include package data
+recursive-include src *.py
+
+# Exclude unnecessary files
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .git*
