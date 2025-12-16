@@ -1,0 +1,224 @@
+# =============================================================================
+# SOLT PRE-COMMIT - CI/CD Pipeline
+# =============================================================================
+# CI interno para el repositorio solt-pre-commit
+# Valida que los hooks funcionen correctamente antes de release
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # LINT & FORMAT
+  # ───────────────────────────────────────────────────────────────────────────
+  lint:
+    name: 🔍 Lint & Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install ruff
+
+      - name: Run Ruff linter
+        run: ruff check src/ scripts/
+
+      - name: Run Ruff formatter
+        run: ruff format --check src/ scripts/
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # TESTS
+  # ───────────────────────────────────────────────────────────────────────────
+  test:
+    name: 🧪 Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install package
+        run: |
+          pip install --upgrade pip
+          pip install -e ".[dev]" || pip install -e .
+          pip install pytest pytest-cov
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ]; then
+            pytest tests/ -v --tb=short --cov=solt_pre_commit --cov-report=xml
+          else
+            echo "No tests directory found, running basic import test"
+            python -c "from solt_pre_commit import ChecksOdooModule, SoltConfig; print('Import OK')"
+          fi
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # INTEGRATION TEST - Validate sample module
+  # ───────────────────────────────────────────────────────────────────────────
+  integration:
+    name: 🔗 Integration Test
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Create sample Odoo module
+        run: |
+          mkdir -p test_module
+          cat > test_module/__manifest__.py << 'EOF'
+          {
+              "name": "Test Module",
+              "version": "17.0.1.0.0",
+              "category": "Tools",
+              "summary": "Test module for solt-pre-commit",
+              "depends": ["base"],
+              "data": [],
+              "installable": True,
+              "license": "LGPL-3",
+          }
+          EOF
+
+          cat > test_module/__init__.py << 'EOF'
+          from . import models
+          EOF
+
+          mkdir -p test_module/models
+          cat > test_module/models/__init__.py << 'EOF'
+          from . import test_model
+          EOF
+
+          cat > test_module/models/test_model.py << 'EOF'
+          from odoo import fields, models
+
+          class TestModel(models.Model):
+              """Test model for validation."""
+
+              _name = "test.model"
+              _description = "Test Model"
+
+              name = fields.Char(string="Name", required=True)
+              active = fields.Boolean(default=True)
+              amount = fields.Float(string="Amount", help="The amount value")
+          EOF
+
+      - name: Run solt-check-odoo
+        run: |
+          echo "Testing solt-check-odoo..."
+          solt-check-odoo test_module --show-info || true
+
+      - name: Run solt-check-branch
+        run: |
+          echo "Testing solt-check-branch..."
+          solt-check-branch "feature/TEST-123-sample-branch"
+          solt-check-branch "fix/correct-bug"
+          solt-check-branch "release/17.0.1.0"
+
+      - name: Test invalid branch (should fail)
+        run: |
+          echo "Testing invalid branch name..."
+          ! solt-check-branch "invalid-branch-name"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # BUILD & PUBLISH
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: 📦 Build Package
+    runs-on: ubuntu-latest
+    needs: [integration]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build package
+        run: python -m build
+
+      - name: Check package
+        run: twine check dist/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # CREATE RELEASE
+  # ───────────────────────────────────────────────────────────────────────────
+  release:
+    name: 🚀 Create Release
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') }}

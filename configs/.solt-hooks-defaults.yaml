@@ -1,0 +1,145 @@
+# =============================================================================
+# SOLT PRE-COMMIT HOOKS - Default Configuration
+# =============================================================================
+# These are the system defaults. Users can override in their .solt-hooks.yaml
+# =============================================================================
+
+# Validation scope: 'changed' or 'full'
+# - changed: Only validate files modified in PR/commit (recommended for legacy repos)
+# - full: Validate entire repository
+validation_scope: changed
+
+# Base branch for detecting changed files (auto-detected if not set)
+# base_branch: main
+
+# =============================================================================
+# DISABLED CHECKS
+# =============================================================================
+disabled_checks: []
+
+# =============================================================================
+# SEVERITY LEVELS
+# =============================================================================
+# Levels: error, warning, info
+#   - error:   Always blocks commit/PR
+#   - warning: Blocks if in blocking_severities
+#   - info:    Never blocks
+
+severity:
+  # Syntax errors
+  xml_syntax_error: error
+  csv_syntax_error: error
+  python_syntax_error: error
+  manifest_syntax_error: error
+  po_syntax_error: error
+
+  # Duplicates
+  xml_duplicate_record_id: error
+  csv_duplicate_record_id: error
+  po_duplicate_message_definition: error
+  xml_duplicate_fields: error
+
+  # Odoo runtime warnings
+  python_duplicate_field_label: error
+  python_inconsistent_compute_sudo: error
+  python_tracking_without_mail_thread: error
+  python_selection_on_related: error
+  xml_deprecated_active_id_usage: error
+  xml_alert_missing_role: error
+
+  # Dangerous patterns
+  xml_view_dangerous_replace_low_priority: warning
+  xml_create_user_wo_reset_password: warning
+  xml_dangerous_filter_wo_user: warning
+  xml_hardcoded_id: warning
+  xml_duplicate_view_priority: warning
+
+  # Deprecations
+  xml_deprecated_tree_attribute: warning
+  xml_deprecated_data_node: warning
+  xml_deprecated_openerp_xml_node: warning
+  xml_deprecated_t_raw: warning
+  xml_deprecated_qweb_directive: warning
+  xml_button_without_type: warning
+
+  # Code quality
+  python_field_missing_string: warning
+  python_field_missing_help: warning
+  python_method_missing_docstring: warning
+  python_docstring_too_short: info
+  python_docstring_uninformative: info
+
+  # PO quality
+  po_requires_module: warning
+  po_python_parse_printf: warning
+  po_python_parse_format: warning
+
+  # Other
+  xml_redundant_module_name: info
+  xml_not_valid_char_link: warning
+  missing_readme: info
+
+# =============================================================================
+# BLOCKING SEVERITIES
+# =============================================================================
+blocking_severities:
+  - error
+
+# =============================================================================
+# SKIP LISTS
+# =============================================================================
+skip_string_fields:
+  - active
+  - name
+  - sequence
+  - company_id
+  - currency_id
+  - create_uid
+  - create_date
+  - write_uid
+  - write_date
+  - message_ids
+  - message_follower_ids
+  - activity_ids
+
+skip_help_fields:
+  - active
+  - name
+  - sequence
+  - company_id
+  - currency_id
+
+skip_docstring_methods: []
+
+min_docstring_length: 10
+
+# =============================================================================
+# PATH EXCLUSIONS
+# =============================================================================
+exclude_paths:
+  - "**/migrations/**"
+  - "**/tests/**"
+  - "**/static/**"
+  - "**/__pycache__/**"
+  - "**/node_modules/**"
+
+# =============================================================================
+# BRANCH NAMING
+# =============================================================================
+branch_naming:
+  strict: false
+  ticket_prefixes:
+    - SOLT
+    - PROJ
+  allowed_types:
+    - feature
+    - fix
+    - hotfix
+    - bugfix
+    - release
+    - refactor
+    - docs
+    - test
+    - chore
+  protected_branches: []
+  protected_patterns: []

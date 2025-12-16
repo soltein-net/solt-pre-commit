@@ -1,0 +1,221 @@
+# =============================================================================
+# PYLINT CONFIGURATION FOR ODOO MODULES
+# =============================================================================
+# This file is copied to client repositories by solt-pre-commit
+# =============================================================================
+
+[MASTER]
+load-plugins=pylint_odoo
+
+# Use multiple processes to speed up Pylint
+jobs=0
+
+# Pickle collected data for later comparisons
+persistent=yes
+
+# List of plugins (as comma separated values of python modules names)
+# to load, usually to register additional checkers
+extension-pkg-whitelist=lxml
+
+[MESSAGES CONTROL]
+# Disable specific messages
+disable=
+    # Standard pylint disables for Odoo
+    C0103,  # invalid-name (Odoo uses specific naming conventions)
+    C0114,  # missing-module-docstring
+    C0115,  # missing-class-docstring (handled by solt-pre-commit)
+    C0116,  # missing-function-docstring (handled by solt-pre-commit)
+    C0301,  # line-too-long (handled by black/ruff)
+    C0302,  # too-many-lines
+    C0411,  # wrong-import-order (handled by isort)
+    E0401,  # import-error (Odoo imports not available)
+    E1101,  # no-member (dynamic attributes in Odoo)
+    R0801,  # duplicate-code
+    R0901,  # too-many-ancestors
+    R0902,  # too-many-instance-attributes
+    R0903,  # too-few-public-methods
+    R0904,  # too-many-public-methods
+    R0912,  # too-many-branches
+    R0913,  # too-many-arguments
+    R0914,  # too-many-locals
+    R0915,  # too-many-statements
+    W0104,  # pointless-statement (Odoo field definitions)
+    W0212,  # protected-access (common in Odoo)
+    W0221,  # arguments-differ (Odoo overrides)
+    W0223,  # abstract-method
+    W0511,  # fixme
+    W0603,  # global-statement
+    W0612,  # unused-variable
+    W0613,  # unused-argument
+    W0621,  # redefined-outer-name
+    W0703,  # broad-except
+    W1203,  # logging-fstring-interpolation
+
+# Enable specific pylint-odoo checks
+enable=
+    odoolint,
+
+[REPORTS]
+# Set the output format
+output-format=colorized
+
+# Include message IDs in output
+msg-template={path}:{line}: [{msg_id}({symbol}), {obj}] {msg}
+
+# Reports disabled (only show messages)
+reports=no
+
+# Evaluation score disabled
+score=no
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120
+
+# Maximum number of lines in a module
+max-module-lines=2000
+
+# String used as indentation unit
+indent-string='    '
+
+# Number of spaces of indent required inside a hanging or continued line
+indent-after-paren=4
+
+[BASIC]
+# Good variable names which should always be accepted
+good-names=
+    i,
+    j,
+    k,
+    e,
+    ex,
+    f,
+    fp,
+    _,
+    id,
+    cr,
+    uid,
+    ids,
+    env,
+    cls,
+    rec,
+    res,
+    val,
+    vals,
+    obj,
+    ref,
+    xml,
+
+# Bad variable names which should always be refused
+bad-names=
+    foo,
+    bar,
+    baz,
+    toto,
+    tutu,
+    tata,
+
+# Naming style for constants
+const-naming-style=UPPER_CASE
+
+# Naming style for class names
+class-naming-style=PascalCase
+
+# Naming style for function names
+function-naming-style=snake_case
+
+# Naming style for method names
+method-naming-style=snake_case
+
+# Naming style for module names
+module-naming-style=snake_case
+
+# Naming style for variable names
+variable-naming-style=snake_case
+
+# Naming style for arguments
+argument-naming-style=snake_case
+
+# Naming style for attributes
+attr-naming-style=snake_case
+
+[SIMILARITIES]
+# Minimum lines number of a similarity
+min-similarity-lines=8
+
+# Ignore comments when computing similarities
+ignore-comments=yes
+
+# Ignore docstrings when computing similarities
+ignore-docstrings=yes
+
+# Ignore imports when computing similarities
+ignore-imports=yes
+
+[DESIGN]
+# Maximum number of arguments for function / method
+max-args=10
+
+# Maximum number of locals for function / method body
+max-locals=20
+
+# Maximum number of return / yield for function / method body
+max-returns=10
+
+# Maximum number of branch for function / method body
+max-branches=15
+
+# Maximum number of statements in function / method body
+max-statements=60
+
+# Maximum number of parents for a class
+max-parents=10
+
+# Maximum number of attributes for a class
+max-attributes=20
+
+# Minimum number of public methods for a class
+min-public-methods=0
+
+# Maximum number of public methods for a class
+max-public-methods=30
+
+[IMPORTS]
+# Allow wildcard imports from modules
+allow-wildcard-with-all=no
+
+# Analyse import fallback blocks
+analyse-fallback-blocks=no
+
+[EXCEPTIONS]
+# Exceptions that will emit a warning when being caught
+overgeneral-exceptions=
+    builtins.Exception,
+
+[ODOOLINT]
+# Manifest version format (regex)
+manifest_version_format=(\d+\.\d+\.\d+\.\d+\.\d+|\d+\.\d+\.\d+\.\d+)
+
+# Valid odoo versions
+valid_odoo_versions=
+    17.0,
+    18.0,
+
+# Readme filename (glob pattern)
+readme_template_url=https://github.com/OCA/maintainer-tools/blob/master/template/module/README.rst
+
+# External request timeout
+external_request_timeout=10
+
+# License allowed
+license_allowed=
+    AGPL-3,
+    GPL-2,
+    GPL-2 or any later version,
+    GPL-3,
+    GPL-3 or any later version,
+    LGPL-3,
+    OEEL-1,
+    OPL-1,
+    Other OSI approved licence,
+    Other proprietary,

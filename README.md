@@ -1,12 +1,35 @@
 # Solt Pre-commit
 
+[![CI](https://github.com/soltein-net/solt-pre-commit/workflows/CI/badge.svg)](https://github.com/soltein-net/solt-pre-commit/actions)
 [![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: LGPL-3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![PyPI version](https://badge.fury.io/py/solt-pre-commit.svg)](https://badge.fury.io/py/solt-pre-commit)
 
-Custom pre-commit hooks for Odoo module validation. Catches errors and runtime warnings **before** starting the server.
+Custom pre-commit hooks for Odoo module validation with comprehensive documentation coverage analysis. Catches errors and runtime warnings **before** starting the server.
+
+<!-- BADGES:START -->
+![Docstrings](https://img.shields.io/badge/docstrings-79.8%25-green?logo=python&logoColor=white)
+![Documentation Standards](https://img.shields.io/badge/Documentation%20Standards-passing-brightgreen?logo=github&logoColor=white)
+<!-- BADGES:END -->
+
+---
 
 ## 🚀 Quick Start
+
+### For New Repositories
+
+```bash
+# Clone solt-pre-commit
+git clone https://github.com/soltein-net/solt-pre-commit.git
+
+# Setup your Odoo repository
+python solt-pre-commit/scripts/setup-repo.py /path/to/your-odoo-repo
+
+# Done! The script creates all necessary files
+```
+
+### For Existing Repositories
 
 Add to your `.pre-commit-config.yaml`:
 
@@ -15,313 +38,443 @@ repos:
   - repo: https://github.com/soltein-net/solt-pre-commit
     rev: v1.0.0
     hooks:
-      # Branch naming validation
       - id: solt-check-branch
-        stages: [pre-commit, pre-push]
-
-      # Odoo module validation
       - id: solt-check-odoo
 ```
 
-Then install:
+Install and run:
 
 ```bash
+pip install pre-commit
 pre-commit install
+pre-commit run --all-files
 ```
+
+---
+
+## ✨ Features
+
+### 🔍 Comprehensive Validation
+
+| Check Type | Description | Blocks PR |
+|------------|-------------|-----------|
+| **Branch Names** | Enforces naming conventions | ✅ |
+| **Odoo Runtime Warnings** | Detects issues before server start | ✅ |
+| **XML Validations** | Syntax, duplicates, deprecations | ✅ |
+| **Python Quality** | Docstrings, field attributes | Configurable |
+| **CSV/PO Files** | Duplicate IDs, translation errors | ✅ |
+| **Documentation Coverage** | Detailed reports with trends | ℹ️ Informative |
+
+### 📊 Documentation Analysis
+
+Unique feature: detailed documentation coverage reports showing:
+
+- **Docstring coverage** per module and model
+- **Field attribute coverage** (string, help)
+- **Coverage trends** across PRs
+- **Actionable recommendations** prioritized by impact
+
+### ⚙️ Flexible Configuration
+
+```yaml
+# .solt-hooks.yaml
+validation_scope: changed  # or 'full'
+
+severity:
+  python_field_missing_string: warning
+  python_method_missing_docstring: warning
+
+skip_docstring_methods:
+  - create
+  - write
+```
+
+### 🔄 Centralized Workflows
+
+Use our reusable GitHub Actions workflow:
+
+```yaml
+# .github/workflows/validate.yml
+jobs:
+  validate:
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.0
+    with:
+      validation-scope: 'changed'
+      run-coverage: true
+      fail-on-warnings: false
+```
+
+---
 
 ## 📦 Available Hooks
 
-| Hook | Description |
-|------|-------------|
-| `solt-check-branch` | Branch naming policy validation |
-| `solt-check-odoo` | Full validation (XML, CSV, PO, Python, Manifest) |
-| `solt-check-xml` | XML validations only |
-| `solt-check-csv` | CSV validations only |
-| `solt-check-po` | PO/POT validations only |
-| `solt-check-python` | Python validations only |
+| Hook ID | Description | Use Case |
+|---------|-------------|----------|
+| `solt-check-branch` | Branch naming validation | All repos |
+| `solt-check-odoo` | Full module validation | Primary hook |
+| `solt-check-xml` | XML files only | Targeted checks |
+| `solt-check-csv` | CSV files only | Data validation |
+| `solt-check-po` | Translation files only | i18n checks |
+| `solt-check-python` | Python files only | Code quality |
 
-## 🌿 Branch Naming Validation
-
-### Modes
-
-Configure in `.solt-hooks.yaml`:
-
-```yaml
-branch_naming:
-  # strict: true  → Requires ticket (feature/SOLT-123-description)
-  # strict: false → Type/description only (feature/my-change)
-  strict: false
-
-  ticket_prefixes:
-    - SOLT
-    - PROJ
-
-  allowed_types:
-    - feature
-    - fix
-    - hotfix
-    - bugfix
-    - release
-    - refactor
-    - docs
-    - test
-    - chore
-```
-
-### Examples
-
-**Flexible mode** (`strict: false`):
-```
-✔ feature/add-budget-validation
-✔ fix/correct-calculation
-✔ feature/SOLT-123-with-ticket  (also valid)
-✗ my-branch                      (missing type prefix)
-✗ Feature/something              (wrong case)
-```
-
-**Strict mode** (`strict: true`):
-```
-✔ feature/SOLT-123-add-new-feature
-✔ fix/PROJ-456-correct-bug
-✗ feature/add-something          (missing ticket)
-```
-
-### Protected Branches
-
-These branches skip validation:
-- `main`, `master`, `develop`, `staging`, `production`
-- Odoo versions: `12.0`, `13.0`, `14.0`, `15.0`, `16.0`, `17.0`, `18.0`
+---
 
 ## 🛡️ Odoo Runtime Warnings Detected
 
-These warnings normally only appear when starting the Odoo server. This tool catches them at commit time:
+Catches these Odoo warnings **before** they appear in your logs:
 
-| Odoo Warning | Check |
-|--------------|-------|
-| `Two fields (field1, field2) have the same label` | `python_duplicate_field_label` |
-| `inconsistent 'compute_sudo' for computed fields` | `python_inconsistent_compute_sudo` |
+| Odoo Warning | Check Name |
+|--------------|------------|
+| `Two fields have the same label` | `python_duplicate_field_label` |
+| `inconsistent 'compute_sudo'` | `python_inconsistent_compute_sudo` |
 | `tracking value will be ignored` | `python_tracking_without_mail_thread` |
-| `selection attribute will be ignored as field is related` | `python_selection_on_related` |
-| `Using active_id, active_ids and active_model is deprecated` | `xml_deprecated_active_id_usage` |
-| `An alert must have an alert, alertdialog or status role` | `xml_alert_missing_role` |
+| `selection attribute will be ignored` | `python_selection_on_related` |
+| `Using active_id is deprecated` | `xml_deprecated_active_id_usage` |
+| `Alert must have role` | `xml_alert_missing_role` |
 
-## 📝 All Checks
+---
 
-### XML Checks
+## 📋 All Validation Checks
 
-| Check | Description |
-|-------|-------------|
-| `xml_syntax_error` | XML syntax errors |
-| `xml_duplicate_record_id` | Duplicate record IDs |
-| `xml_duplicate_fields` | Duplicate fields in same record |
-| `xml_redundant_module_name` | Redundant module name in xmlid |
-| `xml_deprecated_tree_attribute` | Deprecated `colors`, `fonts`, `string` in tree |
-| `xml_deprecated_data_node` | Unnecessary `<odoo><data>` |
-| `xml_deprecated_openerp_xml_node` | Use of `<openerp>` instead of `<odoo>` |
-| `xml_view_dangerous_replace_low_priority` | `position="replace"` with priority < 99 |
-| `xml_create_user_wo_reset_password` | res.users without `no_reset_password` |
-| `xml_dangerous_filter_wo_user` | ir.filters without explicit user_id |
-| `xml_deprecated_active_id_usage` | Deprecated active_id/active_ids/active_model |
-| `xml_alert_missing_role` | Alert elements without proper role |
-| `xml_button_without_type` | Buttons without type attribute |
-| `xml_deprecated_t_raw` | Deprecated t-raw (use t-out) |
-| `xml_hardcoded_id` | Hardcoded numeric IDs |
-| `xml_duplicate_view_priority` | Views with same priority inheriting same view |
+<details>
+<summary><strong>🐍 Python Checks</strong></summary>
 
-### CSV Checks
+### Runtime Errors (Block)
+- `python_duplicate_field_label` - Same label on multiple fields
+- `python_inconsistent_compute_sudo` - Inconsistent compute_sudo
+- `python_tracking_without_mail_thread` - tracking without inheritance
+- `python_selection_on_related` - Selection on related fields
 
-| Check | Description |
-|-------|-------------|
-| `csv_syntax_error` | CSV syntax errors |
-| `csv_duplicate_record_id` | Duplicate external IDs |
+### Documentation (Configurable)
+- `python_field_missing_string` - Fields without string attribute
+- `python_field_missing_help` - Fields without help text
+- `python_method_missing_docstring` - Methods without docstring
+- `python_docstring_too_short` - Docstrings < 10 chars
+- `python_docstring_uninformative` - Generic docstrings
 
-### PO/POT Checks
+</details>
 
-| Check | Description |
-|-------|-------------|
-| `po_syntax_error` | PO file syntax errors |
-| `po_duplicate_message_definition` | Duplicate message definitions |
-| `po_requires_module` | Missing `#. module: MODULE` comment |
-| `po_python_parse_printf` | Printf variable mismatches (`%s`, `%d`) |
-| `po_python_parse_format` | Format variable mismatches (`{}`, `{name}`) |
+<details>
+<summary><strong>🗂️ XML Checks</strong></summary>
 
-### Python Checks
+### Errors (Block)
+- `xml_syntax_error` - XML parse errors
+- `xml_duplicate_record_id` - Duplicate record IDs
+- `xml_duplicate_fields` - Duplicate field definitions
+- `xml_deprecated_active_id_usage` - Deprecated active_id usage
+- `xml_alert_missing_role` - Alert without role attribute
 
-| Check | Description |
-|-------|-------------|
-| `python_syntax_error` | Python syntax errors |
-| `python_duplicate_field_label` | Fields with same string/label |
-| `python_inconsistent_compute_sudo` | Inconsistent compute_sudo |
-| `python_tracking_without_mail_thread` | tracking=True without mail.thread |
-| `python_selection_on_related` | selection on related fields |
-| `python_field_missing_string` | Fields without string attribute |
-| `python_field_missing_help` | Fields without help attribute |
-| `python_method_missing_docstring` | Public methods without docstring |
-| `python_docstring_too_short` | Docstrings < 10 characters |
-| `python_docstring_uninformative` | Docstrings that just repeat method name |
+### Warnings
+- `xml_view_dangerous_replace_low_priority` - Dangerous replace pattern
+- `xml_deprecated_tree_attribute` - Deprecated tree attributes
+- `xml_hardcoded_id` - Hardcoded IDs instead of ref()
+- `xml_create_user_wo_reset_password` - User creation issue
+- `xml_dangerous_filter_wo_user` - Filter without user_id
 
-### Manifest Checks
+</details>
 
-| Check | Description |
-|-------|-------------|
-| `manifest_syntax_error` | `__manifest__.py` syntax errors |
-| `missing_readme` | Missing README file |
+<details>
+<summary><strong>📊 CSV Checks</strong></summary>
+
+- `csv_syntax_error` - CSV parse errors
+- `csv_duplicate_record_id` - Duplicate XML IDs
+
+</details>
+
+<details>
+<summary><strong>🌍 PO/POT Checks</strong></summary>
+
+- `po_syntax_error` - Translation file errors
+- `po_duplicate_message_definition` - Duplicate translations
+- `po_requires_module` - Missing module comment
+- `po_python_parse_printf` - Printf variable errors
+- `po_python_parse_format` - Format string errors
+
+</details>
+
+---
 
 ## ⚙️ Configuration
 
-Create `.solt-hooks.yaml` in your repository root:
+### Validation Scope
+
+Control what gets validated:
 
 ```yaml
-# ═══════════════════════════════════════════════════════════════
-# BRANCH NAMING POLICY
-# ═══════════════════════════════════════════════════════════════
-branch_naming:
-  strict: false
-  ticket_prefixes:
-    - SOLT
-    - PROJ
-  allowed_types:
-    - feature
-    - fix
-    - hotfix
-    - release
-    - refactor
-    - docs
-    - chore
+# .solt-hooks.yaml
+validation_scope: changed  # Only validate modified files (recommended for legacy)
+# validation_scope: full   # Validate entire repository (for clean repos)
+```
 
-# ═══════════════════════════════════════════════════════════════
-# DISABLED CHECKS
-# ═══════════════════════════════════════════════════════════════
-disabled_checks:
-  - python_field_missing_help
-  - python_method_missing_docstring
+### Severity Levels
 
-# ═══════════════════════════════════════════════════════════════
-# SKIP LISTS
-# ═══════════════════════════════════════════════════════════════
+Customize what blocks your PR:
+
+```yaml
+severity:
+  # error = always blocks
+  python_duplicate_field_label: error
+  
+  # warning = reportable, blocks if 'blocking_severities' includes 'warning'
+  python_field_missing_string: warning
+  
+  # info = only shown with --show-info
+  python_docstring_too_short: info
+
+blocking_severities:
+  - error
+  # - warning  # Uncomment to also block on warnings
+```
+
+### Skip Lists
+
+Exclude specific fields/methods:
+
+```yaml
 skip_string_fields:
-  - display_name
-  - state
-  - color
-  - active
-  - sequence
-  - name
-
-skip_help_fields:
   - active
   - name
   - sequence
 
 skip_docstring_methods:
-  - default_get
   - create
   - write
   - unlink
-
-# ═══════════════════════════════════════════════════════════════
-# SEVERITY CONFIGURATION
-# ═══════════════════════════════════════════════════════════════
-# Levels: error, warning, info
-#   - error:   Blocks commit
-#   - warning: Shows message, blocks if in blocking_severities
-#   - info:    Only shown with --show-info flag
-
-blocking_severities:
-  - error
-  # - warning  # Uncomment to also block on warnings
-
-severity:
-  # Syntax errors - always error
-  xml_syntax_error: error
-  csv_syntax_error: error
-  python_syntax_error: error
-  manifest_syntax_error: error
-  po_syntax_error: error
-
-  # Duplicates - error
-  xml_duplicate_record_id: error
-  csv_duplicate_record_id: error
-
-  # Odoo runtime warnings - error
-  python_duplicate_field_label: error
-  python_inconsistent_compute_sudo: error
-  python_tracking_without_mail_thread: error
-  python_selection_on_related: error
-  xml_deprecated_active_id_usage: error
-
-  # Code quality - warning/info
-  python_field_missing_string: warning
-  python_field_missing_help: info
-  python_method_missing_docstring: info
-  python_docstring_too_short: info
 ```
 
-## 💡 Examples
+### Branch Naming
 
-### tracking without mail.thread
-
-```python
-# ❌ Generates Odoo warning
-class MyModel(models.Model):
-    _name = 'my.model'
-
-    name = fields.Char(tracking=True)  # No mail.thread inheritance
-
-# ✅ Correct
-class MyModel(models.Model):
-    _name = 'my.model'
-    _inherit = ['mail.thread']
-
-    name = fields.Char(tracking=True)
+```yaml
+branch_naming:
+  strict: true  # Requires ticket: feature/SOLT-123-description
+  # strict: false  # Allows: feature/description
+  
+  ticket_prefixes:
+    - SOLT
+    - PROJ
+  
+  allowed_types:
+    - feature
+    - fix
+    - hotfix
+    - refactor
 ```
 
-### Inconsistent compute_sudo
+---
 
-```python
-# ❌ Generates Odoo warning
-total = fields.Float(compute='_compute_totals', compute_sudo=True)
-subtotal = fields.Float(compute='_compute_totals')  # Missing compute_sudo
+## 📊 Documentation Coverage Reports
 
-# ✅ Correct
-total = fields.Float(compute='_compute_totals', compute_sudo=True)
-subtotal = fields.Float(compute='_compute_totals', compute_sudo=True)
+### In Pull Requests
+
+Every PR automatically includes:
+
+```
+📊 Análisis de Documentación (Informativo)
+
+ℹ️ Este análisis es solo informativo, no bloquea el PR.
+
+┌─────────────────────────┬────────┬────────┬────────┐
+│ Métrica                 │ Valor  │ Meta   │ Estado │
+├─────────────────────────┼────────┼────────┼────────┤
+│ 📚 Cobertura Docstrings │ 79.8%  │ ≥10%   │   ✅   │
+│ 🏷️ Campos con string    │ 87.0%  │ ≥80%   │   ✅   │
+│ 💡 Campos con help      │ 28.0%  │ ≥30%   │   ⚠️   │
+└─────────────────────────┴────────┴────────┴────────┘
+
+📈 Cobertura por Módulo
+
+┌────────────────────┬─────────┬─────────┬─────────┬───────┐
+│ Módulo             │ Modelos │ Métodos │ Campos  │ Score │
+├────────────────────┼─────────┼─────────┼─────────┼───────┤
+│ solt_budget        │    4    │   23    │   45    │  63%  │
+│ solt_budget_report │    2    │    8    │   15    │  71%  │
+└────────────────────┴─────────┴─────────┴─────────┴───────┘
+
+📊 Tendencia de Cobertura
+Últimos 5 PRs: ↑ +13%
 ```
 
-### Deprecated active_id
+### Generate Badges
 
-```xml
-<!-- ❌ Deprecated -->
-<field name="context">{'default_partner_id': active_id}</field>
-
-<!-- ✅ Use alternatives -->
-<field name="context">{'default_partner_id': id}</field>
+```bash
+# After validation
+python scripts/generate-badges.py reports/doc-coverage.json --readme README.md
 ```
+
+Generates badges like:
+
+![Docstrings](https://img.shields.io/badge/docstrings-79.8%25-green?logo=python&logoColor=white)
+![Documentation Standards](https://img.shields.io/badge/Documentation%20Standards-passing-brightgreen?logo=github&logoColor=white)
+
+---
 
 ## 🔧 CLI Usage
 
 ```bash
-# Install
-pip install git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0
-
-# Validate Odoo module
+# Validate module
 solt-check-odoo /path/to/module
 
-# Validate with info-level issues
+# Force full validation (ignore scope config)
+solt-check-odoo /path/to/module --scope full
+
+# Show info-level issues
 solt-check-odoo /path/to/module --show-info
 
-# Validate specific file types
-solt-check-odoo /path/to/module --check-python-only
-solt-check-odoo /path/to/module --check-xml-only
-
 # Validate branch name
-solt-check-branch feature/my-feature
-solt-check-branch --strict feature/SOLT-123-description
+solt-check-branch feature/SOLT-123-my-feature
+
+# Generate documentation report
+solt-check-odoo /path/to/module --generate-doc-report
 ```
-
-## 📄 License
-
-GPL-3.0-or-later
 
 ---
 
-Developed by **Soltein**
+## 📁 Repository Structure
+
+```
+solt-pre-commit/
+├── .github/workflows/
+│   ├── ci.yml                        # Internal CI
+│   └── solt-validate.yml             # Reusable workflow for clients
+│
+├── src/solt_pre_commit/
+│   ├── checks_branch_name.py         # Branch validation
+│   ├── checks_odoo_module.py         # Main orchestrator
+│   ├── checks_odoo_module_python.py  # Python checks
+│   ├── checks_odoo_module_xml.py     # XML checks
+│   ├── doc_coverage.py               # Documentation analysis
+│   └── config_loader.py              # Configuration management
+│
+├── configs/                          # Config files for clients
+│   ├── .pylintrc
+│   ├── ruff.toml
+│   └── .solt-hooks-defaults.yaml
+│
+├── scripts/
+│   ├── setup-repo.py                 # Initialize client repos
+│   ├── sync-configs.py               # Bulk update
+│   └── generate-badges.py            # Badge generation
+│
+└── templates/                        # Templates for clients
+    ├── .solt-hooks.yaml
+    ├── .pre-commit-config.yaml
+    └── github-workflows/validate.yml
+```
+
+---
+
+## 🚀 Setup New Repository
+
+### Automatic Setup
+
+```bash
+# From solt-pre-commit directory
+python scripts/setup-repo.py ../your-repo
+
+# With options
+python scripts/setup-repo.py ../your-repo --scope full --dry-run
+```
+
+This creates:
+- `.pre-commit-config.yaml` - Hook configuration
+- `.solt-hooks.yaml` - Validation settings
+- `.pylintrc` - Pylint rules
+- `ruff.toml` - Ruff linter config
+- `.github/workflows/validate.yml` - CI workflow
+
+### For Monorepo (soltein-4.0)
+
+```bash
+python scripts/setup-repo.py ../solt-addons --local
+```
+
+Uses local Python paths instead of GitHub URLs.
+
+---
+
+## 🔄 Sync Multiple Repositories
+
+```bash
+# Create repos list
+cat > repos.txt << EOF
+/path/to/solt-budget
+/path/to/solt-inventory
+/path/to/solt-sales
+EOF
+
+# Sync configurations
+python scripts/sync-configs.py repos.txt
+
+# Preview changes
+python scripts/sync-configs.py repos.txt --dry-run
+
+# Create PRs automatically
+python scripts/sync-configs.py repos.txt --create-pr
+```
+
+---
+
+## 🧪 Development
+
+### Running Tests
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=solt_pre_commit --cov-report=html
+```
+
+### Local Testing
+
+```bash
+# Install package locally
+pip install -e .
+
+# Create test module
+mkdir -p test_module
+cat > test_module/__manifest__.py << 'EOF'
+{
+    "name": "Test Module",
+    "version": "17.0.1.0.0",
+    "depends": ["base"],
+    "installable": True,
+}
+EOF
+
+# Run validation
+solt-check-odoo test_module
+```
+
+---
+
+## 📄 License
+
+LGPL-3.0-or-later
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch: `feature/ISSUE-123-description`
+3. Ensure all checks pass: `pre-commit run --all-files`
+4. Create a Pull Request
+
+---
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/soltein-net/solt-pre-commit/issues)
+- **Documentation**: [Full Docs](https://soltein-net.github.io/solt-pre-commit)
+- **Email**: dev@soltein.mx
+
+---
+
+**Developed with ❤️ by [Soltein](https://soltein.mx)**

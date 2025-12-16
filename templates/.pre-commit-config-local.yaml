@@ -1,0 +1,72 @@
+# =============================================================================
+# PRE-COMMIT CONFIGURATION - For repos in soltein-4.0 monorepo
+# =============================================================================
+# Install: pip install pre-commit && pre-commit install
+# Run: pre-commit run --all-files
+# =============================================================================
+
+repos:
+  # ─────────────────────────────────────────────────────────────────────────
+  # SOLT PRE-COMMIT HOOKS (local path for monorepo)
+  # ─────────────────────────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: solt-check-branch
+        name: Solt - Validate Branch Name
+        entry: python -m solt_pre_commit.checks_branch_name
+        language: python
+        always_run: true
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
+        additional_dependencies: [pyyaml]
+
+      - id: solt-check-odoo
+        name: Solt - Validate Odoo Module
+        entry: python -m solt_pre_commit.checks_odoo_module
+        language: python
+        files: (__manifest__|__openerp__)\.py$
+        pass_filenames: true
+        types: [python]
+        additional_dependencies: [lxml, polib, pyyaml]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PYTHON CODE QUALITY - Ruff (fast linter and formatter)
+  # Uses configuration from pyproject.toml
+  # ─────────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ODOO-SPECIFIC LINTING (OCA)
+  # ─────────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/OCA/pylint-odoo
+    rev: v9.1.2
+    hooks:
+      - id: pylint_odoo
+        args: [--rcfile=.pylintrc]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # GENERAL CODE QUALITY
+  # ─────────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: debug-statements
+
+# =============================================================================
+# CI CONFIGURATION
+# =============================================================================
+ci:
+  autofix_prs: true
+  autoupdate_schedule: weekly

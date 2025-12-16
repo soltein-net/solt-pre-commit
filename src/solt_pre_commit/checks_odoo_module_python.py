@@ -15,25 +15,57 @@ Detects patterns that generate runtime warnings:
 
 import ast
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 
 class OdooFieldVisitor(ast.NodeVisitor):
     """AST visitor to extract Odoo field and method information."""
 
     FIELD_TYPES = {
-        "Char", "Text", "Html", "Integer", "Float", "Monetary",
-        "Boolean", "Date", "Datetime", "Binary", "Selection",
-        "Many2one", "One2many", "Many2many", "Reference", "Image",
-        "Json", "Properties", "PropertiesDefinition",
+        "Char",
+        "Text",
+        "Html",
+        "Integer",
+        "Float",
+        "Monetary",
+        "Boolean",
+        "Date",
+        "Datetime",
+        "Binary",
+        "Selection",
+        "Many2one",
+        "One2many",
+        "Many2many",
+        "Reference",
+        "Image",
+        "Json",
+        "Properties",
+        "PropertiesDefinition",
     }
 
-    SKIP_DOCSTRING_METHODS = {
-        "__init__", "__str__", "__repr__", "__len__", "__bool__",
-        "__getitem__", "__setitem__", "__delitem__", "__iter__",
-        "__next__", "__contains__", "__call__", "__enter__", "__exit__",
-        "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__",
-        "__hash__", "__format__",
+    DEFAULT_SKIP_DOCSTRING_METHODS = {
+        "__init__",
+        "__str__",
+        "__repr__",
+        "__len__",
+        "__bool__",
+        "__getitem__",
+        "__setitem__",
+        "__delitem__",
+        "__iter__",
+        "__next__",
+        "__contains__",
+        "__call__",
+        "__enter__",
+        "__exit__",
+        "__eq__",
+        "__ne__",
+        "__lt__",
+        "__le__",
+        "__gt__",
+        "__ge__",
+        "__hash__",
+        "__format__",
     }
 
     def __init__(self, filename: str):
@@ -63,13 +95,17 @@ class OdooFieldVisitor(ast.NodeVisitor):
             if isinstance(item, ast.Assign):
                 for target in item.targets:
                     if isinstance(target, ast.Name):
-                        if target.id == "_name" and isinstance(item.value, ast.Constant):
+                        if target.id == "_name" and isinstance(
+                            item.value, ast.Constant
+                        ):
                             model_info["_name"] = item.value.value
                             model_info["is_odoo_model"] = True
                         elif target.id == "_inherit":
                             model_info["_inherit"] = self._extract_inherit(item.value)
                             model_info["is_odoo_model"] = True
-                        elif target.id == "_description" and isinstance(item.value, ast.Constant):
+                        elif target.id == "_description" and isinstance(
+                            item.value, ast.Constant
+                        ):
                             model_info["_description"] = item.value.value
 
         for base in node.bases:
@@ -88,10 +124,7 @@ class OdooFieldVisitor(ast.NodeVisitor):
         if isinstance(node, ast.Constant):
             return [node.value]
         elif isinstance(node, ast.List):
-            return [
-                elt.value for elt in node.elts
-                if isinstance(elt, ast.Constant)
-            ]
+            return [elt.value for elt in node.elts if isinstance(elt, ast.Constant)]
         return []
 
     def _check_mail_thread(self, inherit_list: List[str]) -> bool:
@@ -106,12 +139,10 @@ class OdooFieldVisitor(ast.NodeVisitor):
         return bool(set(inherit_list) & mail_mixins)
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        """Visit function/method definitions."""
         self._process_function(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        """Visit async function definitions."""
         self._process_function(node)
         self.generic_visit(node)
 
@@ -130,9 +161,12 @@ class OdooFieldVisitor(ast.NodeVisitor):
             "decorators": [],
         }
 
-        if (node.body and isinstance(node.body[0], ast.Expr) and
-                isinstance(node.body[0].value, ast.Constant) and
-                isinstance(node.body[0].value.value, str)):
+        if (
+            node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        ):
             method_info["has_docstring"] = True
             method_info["docstring"] = node.body[0].value.value
 
@@ -158,14 +192,15 @@ class OdooFieldVisitor(ast.NodeVisitor):
         for target in node.targets:
             if not isinstance(target, ast.Name):
                 continue
-
             field_info = self._extract_field_info(target.id, node.value, node.lineno)
             if field_info:
                 self.fields[self.current_class].append(field_info)
 
         self.generic_visit(node)
 
-    def _extract_field_info(self, field_name: str, value_node, lineno: int) -> Optional[dict]:
+    def _extract_field_info(
+        self, field_name: str, value_node, lineno: int
+    ) -> Optional[dict]:
         """Extract information from an Odoo field."""
         if not isinstance(value_node, ast.Call):
             return None
@@ -229,7 +264,6 @@ class OdooFieldVisitor(ast.NodeVisitor):
         return field_info
 
     def _get_bool_value(self, node, default=None):
-        """Extract boolean value from an AST node."""
         if isinstance(node, ast.Constant):
             return node.value
         return default
@@ -238,19 +272,54 @@ class OdooFieldVisitor(ast.NodeVisitor):
 class ChecksOdooModulePython:
     """Python validator for Odoo modules."""
 
-    SKIP_STRING_FIELDS = {
-        "active", "name", "sequence", "company_id", "currency_id",
-        "create_uid", "create_date", "write_uid", "write_date",
-        "message_ids", "message_follower_ids", "activity_ids",
+    DEFAULT_SKIP_STRING_FIELDS: Set[str] = {
+        "active",
+        "name",
+        "sequence",
+        "company_id",
+        "currency_id",
+        "create_uid",
+        "create_date",
+        "write_uid",
+        "write_date",
+        "message_ids",
+        "message_follower_ids",
+        "activity_ids",
     }
 
-    def __init__(self, manifest_datas: List[dict], module_name: str):
+    DEFAULT_SKIP_HELP_FIELDS: Set[str] = {
+        "active",
+        "name",
+        "sequence",
+        "company_id",
+        "currency_id",
+    }
+
+    def __init__(self, manifest_datas: List[dict], module_name: str, config=None):
         self.module_name = module_name
         self.manifest_datas = manifest_datas
+        self.config = config
         self.checks_errors = defaultdict(list)
         self.all_models: Dict[str, dict] = {}
         self.all_fields: Dict[str, List[dict]] = defaultdict(list)
         self.all_methods: Dict[str, List[dict]] = defaultdict(list)
+
+        # Load settings from config or use defaults
+        if config:
+            self.skip_string_fields = config.skip_string_fields
+            self.skip_help_fields = config.skip_help_fields
+            self.skip_docstring_methods = (
+                config.skip_docstring_methods
+                | OdooFieldVisitor.DEFAULT_SKIP_DOCSTRING_METHODS
+            )
+            self.min_docstring_length = config.min_docstring_length
+        else:
+            self.skip_string_fields = self.DEFAULT_SKIP_STRING_FIELDS
+            self.skip_help_fields = self.DEFAULT_SKIP_HELP_FIELDS
+            self.skip_docstring_methods = (
+                OdooFieldVisitor.DEFAULT_SKIP_DOCSTRING_METHODS
+            )
+            self.min_docstring_length = 10
 
         for manifest_data in manifest_datas:
             self._parse_python_file(manifest_data)
@@ -273,26 +342,33 @@ class ChecksOdooModulePython:
                 self.all_fields[key] = visitor.fields.get(class_name, [])
                 self.all_methods[key] = visitor.methods.get(class_name, [])
 
-            manifest_data.update({
-                "models": visitor.models,
-                "fields": visitor.fields,
-                "methods": visitor.methods,
-                "parse_error": None,
-            })
+            manifest_data.update(
+                {
+                    "models": visitor.models,
+                    "fields": visitor.fields,
+                    "methods": visitor.methods,
+                    "parse_error": None,
+                }
+            )
 
         except SyntaxError as err:
-            manifest_data.update({
-                "models": {},
-                "fields": {},
-                "methods": {},
-                "parse_error": err,
-            })
+            manifest_data.update(
+                {
+                    "models": {},
+                    "fields": {},
+                    "methods": {},
+                    "parse_error": err,
+                }
+            )
             self.checks_errors["python_syntax_error"].append(
                 f"{filename}:{err.lineno} {err.msg}"
             )
 
     def check_duplicate_field_labels(self):
-        """Detect fields with same string/label in the same model."""
+        """Detect fields with same string/label in the same model.
+
+        Odoo Warning: Two fields (field1, field2) have the same label
+        """
         for model_key, fields in self.all_fields.items():
             model_info = self.all_models[model_key]
             filename = model_info["filename"]
@@ -308,12 +384,15 @@ class ChecksOdooModulePython:
                     field_names = ", ".join(f["name"] for f in label_fields)
                     first_field = label_fields[0]
                     self.checks_errors["python_duplicate_field_label"].append(
-                        f'{filename}:{first_field["lineno"]} '
+                        f"{filename}:{first_field['lineno']} "
                         f'Fields ({field_names}) have the same label: "{label}"'
                     )
 
     def check_inconsistent_compute_sudo(self):
-        """Detect inconsistent compute_sudo on fields with same compute."""
+        """Detect inconsistent compute_sudo on fields with same compute.
+
+        Odoo Warning: inconsistent 'compute_sudo' for computed fields
+        """
         for model_key, fields in self.all_fields.items():
             model_info = self.all_models[model_key]
             filename = model_info["filename"]
@@ -334,33 +413,38 @@ class ChecksOdooModulePython:
                     field_names = ", ".join(f["name"] for f in compute_fields)
                     first_field = compute_fields[0]
                     self.checks_errors["python_inconsistent_compute_sudo"].append(
-                        f'{filename}:{first_field["lineno"]} '
+                        f"{filename}:{first_field['lineno']} "
                         f"Inconsistent 'compute_sudo' for fields ({field_names}) "
                         f"using compute='{compute_method}'"
                     )
 
     def check_tracking_without_mail_thread(self):
-        """Detect tracking=True on models without mail.thread."""
+        """Detect tracking=True on models without mail.thread.
+
+        Odoo Warning: tracking value will be ignored
+        """
         for model_key, fields in self.all_fields.items():
             model_info = self.all_models[model_key]
             filename = model_info["filename"]
 
             if model_info.get("has_mail_thread"):
                 continue
-
             if not model_info.get("is_odoo_model"):
                 continue
 
             for field in fields:
                 if field.get("tracking"):
                     self.checks_errors["python_tracking_without_mail_thread"].append(
-                        f'{filename}:{field["lineno"]} '
+                        f"{filename}:{field['lineno']} "
                         f'Field "{field["name"]}" has tracking but model '
-                        f'does not inherit from mail.thread'
+                        f"does not inherit from mail.thread"
                     )
 
     def check_selection_on_related_field(self):
-        """Detect selection on related fields."""
+        """Detect selection on related fields.
+
+        Odoo Warning: selection attribute will be ignored as field is related
+        """
         for model_key, fields in self.all_fields.items():
             model_info = self.all_models[model_key]
             filename = model_info["filename"]
@@ -368,7 +452,7 @@ class ChecksOdooModulePython:
             for field in fields:
                 if field.get("related") and field.get("selection"):
                     self.checks_errors["python_selection_on_related"].append(
-                        f'{filename}:{field["lineno"]} '
+                        f"{filename}:{field['lineno']} "
                         f'Field "{field["name"]}" is related but has selection '
                         f"(will be ignored)"
                     )
@@ -385,14 +469,14 @@ class ChecksOdooModulePython:
             for field in fields:
                 if field.get("is_private"):
                     continue
-                if field["name"] in self.SKIP_STRING_FIELDS:
+                if field["name"] in self.skip_string_fields:
                     continue
                 if field.get("related"):
                     continue
 
                 if not field.get("string"):
                     self.checks_errors["python_field_missing_string"].append(
-                        f'{filename}:{field["lineno"]} '
+                        f"{filename}:{field['lineno']} "
                         f'Field "{field["name"]}" is missing string attribute'
                     )
 
@@ -408,14 +492,14 @@ class ChecksOdooModulePython:
             for field in fields:
                 if field.get("is_private"):
                     continue
-                if field["name"] in self.SKIP_STRING_FIELDS:
+                if field["name"] in self.skip_help_fields:
                     continue
                 if field.get("related"):
                     continue
 
                 if not field.get("help"):
                     self.checks_errors["python_field_missing_help"].append(
-                        f'{filename}:{field["lineno"]} '
+                        f"{filename}:{field['lineno']} "
                         f'Field "{field["name"]}" is missing help attribute'
                     )
 
@@ -431,12 +515,12 @@ class ChecksOdooModulePython:
             for method in methods:
                 if method.get("is_private"):
                     continue
-                if method["name"] in OdooFieldVisitor.SKIP_DOCSTRING_METHODS:
+                if method["name"] in self.skip_docstring_methods:
                     continue
 
                 if not method.get("has_docstring"):
                     self.checks_errors["python_method_missing_docstring"].append(
-                        f'{filename}:{method["lineno"]} '
+                        f"{filename}:{method['lineno']} "
                         f'Public method "{method["name"]}" is missing docstring'
                     )
 
@@ -457,16 +541,17 @@ class ChecksOdooModulePython:
 
                 docstring = method.get("docstring", "")
 
-                if len(docstring.strip()) < 10:
+                if len(docstring.strip()) < self.min_docstring_length:
                     self.checks_errors["python_docstring_too_short"].append(
-                        f'{filename}:{method["lineno"]} '
-                        f'Method "{method["name"]}" has too short docstring'
+                        f"{filename}:{method['lineno']} "
+                        f'Method "{method["name"]}" has too short docstring '
+                        f"(min {self.min_docstring_length} chars)"
                     )
 
                 method_name_clean = method["name"].replace("_", " ").strip().lower()
                 docstring_clean = docstring.strip().lower().rstrip(".")
                 if docstring_clean == method_name_clean:
                     self.checks_errors["python_docstring_uninformative"].append(
-                        f'{filename}:{method["lineno"]} '
+                        f"{filename}:{method['lineno']} "
                         f'Method "{method["name"]}" has uninformative docstring'
                     )

@@ -25,12 +25,10 @@
 - id: solt-check-odoo
   name: Solt - Validate Odoo Module (Full)
   description: |
-    Run all validations on Odoo modules:
-    - XML: syntax, duplicates, deprecated nodes, active_id usage, alerts
-    - CSV: duplicate record IDs
-    - PO/POT: syntax, duplicates, printf/format variables
-    - Python: fields, docstrings, tracking, compute_sudo
-    - Manifest: syntax, missing README
+    Run all validations on Odoo modules.
+    Respects validation_scope in .solt-hooks.yaml:
+    - "changed": Only validate files changed in PR/commit
+    - "full": Validate entire repository
   entry: solt-check-odoo
   language: python
   files: (__manifest__|__openerp__)\.py$
@@ -42,22 +40,7 @@
 # -----------------------------------------------------------------------------
 - id: solt-check-xml
   name: Solt - Validate Odoo XML
-  description: |
-    Validate XML files:
-    - Syntax errors
-    - Duplicate record IDs
-    - Duplicate fields in records
-    - Redundant module name in xmlid
-    - Deprecated tree attributes (colors, fonts, string)
-    - Deprecated <odoo><data> and <openerp> nodes
-    - Dangerous view replace with low priority
-    - Users without no_reset_password
-    - Filters without user_id
-    - Deprecated active_id/active_ids/active_model usage
-    - Alert elements without proper role
-    - Buttons without type attribute
-    - Deprecated t-raw directive
-    - Hardcoded numeric IDs
+  description: Validate XML files (syntax, duplicates, deprecations, etc.)
   entry: solt-check-odoo
   language: python
   files: \.xml$
@@ -69,10 +52,7 @@
 # -----------------------------------------------------------------------------
 - id: solt-check-csv
   name: Solt - Validate Odoo CSV
-  description: |
-    Validate CSV files:
-    - Syntax errors
-    - Duplicate record IDs (external IDs)
+  description: Validate CSV files (syntax, duplicate IDs)
   entry: solt-check-odoo
   language: python
   files: \.csv$
@@ -84,13 +64,7 @@
 # -----------------------------------------------------------------------------
 - id: solt-check-po
   name: Solt - Validate Odoo PO/POT
-  description: |
-    Validate translation files:
-    - Syntax errors
-    - Duplicate message definitions
-    - Missing module comment (#. module: MODULE)
-    - Printf variable mismatches (%s, %d)
-    - Format variable mismatches ({}, {name})
+  description: Validate translation files (syntax, duplicates, variables)
   entry: solt-check-odoo
   language: python
   files: \.(po|pot)$
@@ -104,15 +78,9 @@
   name: Solt - Validate Odoo Python
   description: |
     Validate Python files:
-    - Syntax errors
-    - Duplicate field labels (same string on multiple fields)
-    - Inconsistent compute_sudo on fields with same compute method
-    - tracking=True on models without mail.thread
-    - selection attribute on related fields
-    - Missing string attribute on fields
-    - Missing help attribute on fields
-    - Missing docstrings on public methods
-    - Too short or uninformative docstrings
+    - Fields: string, help attributes
+    - Docstrings: presence and quality
+    - Runtime warnings: tracking, compute_sudo, etc.
   entry: solt-check-odoo
   language: python
   files: \.py$

@@ -24,7 +24,7 @@ setup(
     description="Custom pre-commit hooks for Odoo module validation - Soltein",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    author="Soltein",
+    author="Soltein SA de CV",
     author_email="dev@soltein.mx",
     url="https://github.com/soltein-net/solt-pre-commit",
     packages=find_packages("src"),
@@ -49,6 +49,7 @@ setup(
     entry_points={
         "console_scripts": [
             "solt-check-odoo=solt_pre_commit.checks_odoo_module:main",
+            "solt-check-branch=solt_pre_commit.checks_branch_name:main",
         ]
     },
 )

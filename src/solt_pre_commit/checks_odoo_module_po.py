@@ -31,16 +31,19 @@ PRINTF_PATTERN = re.compile(
 
 class StringParseError(TypeError):
     """Base error for string parsing."""
+
     pass
 
 
 class PrintfStringParseError(StringParseError):
     """Error in printf parsing."""
+
     pass
 
 
 class FormatStringParseError(StringParseError):
     """Error in format parsing."""
+
     pass
 
 
@@ -55,18 +58,22 @@ class ChecksOdooModulePO:
         for manifest_data in manifest_datas:
             try:
                 polib_file = polib.pofile(manifest_data["filename"])
-                manifest_data.update({
-                    "po": polib_file,
-                    "file_error": None,
-                })
+                manifest_data.update(
+                    {
+                        "po": polib_file,
+                        "file_error": None,
+                    }
+                )
             except OSError as po_err:
-                manifest_data.update({
-                    "po": None,
-                    "file_error": po_err,
-                })
-                msg = str(po_err).replace(f'{manifest_data["filename"]} ', "").strip()
+                manifest_data.update(
+                    {
+                        "po": None,
+                        "file_error": po_err,
+                    }
+                )
+                msg = str(po_err).replace(f"{manifest_data['filename']} ", "").strip()
                 self.checks_errors["po_syntax_error"].append(
-                    f'{manifest_data["filename"]} {msg}'
+                    f"{manifest_data['filename']} {msg}"
                 )
 
     @staticmethod
@@ -96,7 +103,8 @@ class ChecksOdooModulePO:
         for line in format_str.splitlines():
             try:
                 placeholders = [
-                    name for _, name, _, _ in string.Formatter().parse(line)
+                    name
+                    for _, name, _, _ in string.Formatter().parse(line)
                     if name is not None
                 ]
             except ValueError:
@@ -113,8 +121,7 @@ class ChecksOdooModulePO:
         if format_str_args:
             max_val = max(format_str_args)
             format_str_args = (
-                range(len(format_str_args)) if max_val == 0
-                else range(max_val)
+                range(len(format_str_args)) if max_val == 0 else range(max_val)
             )
 
         return format_str_args, format_str_kwargs
@@ -139,7 +146,9 @@ class ChecksOdooModulePO:
     @staticmethod
     def parse_format(main_str, secondary_str):
         """Validate that secondary_str can be parsed with args from main_str."""
-        msgid_args, msgid_kwargs = ChecksOdooModulePO._get_format_str_args_kwargs(main_str)
+        msgid_args, msgid_kwargs = ChecksOdooModulePO._get_format_str_args_kwargs(
+            main_str
+        )
         if not msgid_args and not msgid_kwargs:
             return
 
@@ -169,7 +178,7 @@ class ChecksOdooModulePO:
         match = re.match(r"(module[s]?): (\w+)", entry.comment)
         if not match:
             self.checks_errors["po_requires_module"].append(
-                f'{manifest_data["filename"]}:{entry.linenum} '
+                f"{manifest_data['filename']}:{entry.linenum} "
                 "Translation requires comment '#. module: MODULE'"
             )
 
@@ -181,13 +190,13 @@ class ChecksOdooModulePO:
             except PrintfStringParseError as exc:
                 linenum = self._get_po_line_number(entry)
                 self.checks_errors["po_python_parse_printf"].append(
-                    f'{manifest_data["filename"]}:{linenum} '
+                    f"{manifest_data['filename']}:{linenum} "
                     f"Translation parse error (printf): {exc}"
                 )
             except FormatStringParseError as exc:
                 linenum = self._get_po_line_number(entry)
                 self.checks_errors["po_python_parse_format"].append(
-                    f'{manifest_data["filename"]}:{linenum} '
+                    f"{manifest_data['filename']}:{linenum} "
                     f"Translation parse error (format): {exc}"
                 )
 
@@ -218,6 +227,6 @@ class ChecksOdooModulePO:
                         msg_short = f"{msg_short}..."
 
                     self.checks_errors["po_duplicate_message_definition"].append(
-                        f'{manifest_data["filename"]}:{linenum} '
+                        f"{manifest_data['filename']}:{linenum} "
                         f'Duplicate PO message "{msg_short}" in lines {dup_lines}'
                     )
