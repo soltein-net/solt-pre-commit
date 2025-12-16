@@ -228,7 +228,7 @@ def setup_repo(
     # Add workflow file
     files.append(WORKFLOW_FILE)
 
-    for src, dest_rel, description in files:
+    for src, dest_rel, _description in files:
         dest = target / dest_rel
         if src.exists():
             copy_file(src, dest, dry_run, force)

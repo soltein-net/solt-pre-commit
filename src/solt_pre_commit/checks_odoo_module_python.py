@@ -95,17 +95,13 @@ class OdooFieldVisitor(ast.NodeVisitor):
             if isinstance(item, ast.Assign):
                 for target in item.targets:
                     if isinstance(target, ast.Name):
-                        if target.id == "_name" and isinstance(
-                            item.value, ast.Constant
-                        ):
+                        if target.id == "_name" and isinstance(item.value, ast.Constant):
                             model_info["_name"] = item.value.value
                             model_info["is_odoo_model"] = True
                         elif target.id == "_inherit":
                             model_info["_inherit"] = self._extract_inherit(item.value)
                             model_info["is_odoo_model"] = True
-                        elif target.id == "_description" and isinstance(
-                            item.value, ast.Constant
-                        ):
+                        elif target.id == "_description" and isinstance(item.value, ast.Constant):
                             model_info["_description"] = item.value.value
 
         for base in node.bases:
@@ -198,9 +194,7 @@ class OdooFieldVisitor(ast.NodeVisitor):
 
         self.generic_visit(node)
 
-    def _extract_field_info(
-        self, field_name: str, value_node, lineno: int
-    ) -> Optional[dict]:
+    def _extract_field_info(self, field_name: str, value_node, lineno: int) -> Optional[dict]:
         """Extract information from an Odoo field."""
         if not isinstance(value_node, ast.Call):
             return None
@@ -309,16 +303,13 @@ class ChecksOdooModulePython:
             self.skip_string_fields = config.skip_string_fields
             self.skip_help_fields = config.skip_help_fields
             self.skip_docstring_methods = (
-                config.skip_docstring_methods
-                | OdooFieldVisitor.DEFAULT_SKIP_DOCSTRING_METHODS
+                config.skip_docstring_methods | OdooFieldVisitor.DEFAULT_SKIP_DOCSTRING_METHODS
             )
             self.min_docstring_length = config.min_docstring_length
         else:
             self.skip_string_fields = self.DEFAULT_SKIP_STRING_FIELDS
             self.skip_help_fields = self.DEFAULT_SKIP_HELP_FIELDS
-            self.skip_docstring_methods = (
-                OdooFieldVisitor.DEFAULT_SKIP_DOCSTRING_METHODS
-            )
+            self.skip_docstring_methods = OdooFieldVisitor.DEFAULT_SKIP_DOCSTRING_METHODS
             self.min_docstring_length = 10
 
         for manifest_data in manifest_datas:
@@ -360,9 +351,7 @@ class ChecksOdooModulePython:
                     "parse_error": err,
                 }
             )
-            self.checks_errors["python_syntax_error"].append(
-                f"{filename}:{err.lineno} {err.msg}"
-            )
+            self.checks_errors["python_syntax_error"].append(f"{filename}:{err.lineno} {err.msg}")
 
     def check_duplicate_field_labels(self):
         """Detect fields with same string/label in the same model.
@@ -384,8 +373,7 @@ class ChecksOdooModulePython:
                     field_names = ", ".join(f["name"] for f in label_fields)
                     first_field = label_fields[0]
                     self.checks_errors["python_duplicate_field_label"].append(
-                        f"{filename}:{first_field['lineno']} "
-                        f'Fields ({field_names}) have the same label: "{label}"'
+                        f'{filename}:{first_field["lineno"]} Fields ({field_names}) have the same label: "{label}"'
                     )
 
     def check_inconsistent_compute_sudo(self):
@@ -476,8 +464,7 @@ class ChecksOdooModulePython:
 
                 if not field.get("string"):
                     self.checks_errors["python_field_missing_string"].append(
-                        f"{filename}:{field['lineno']} "
-                        f'Field "{field["name"]}" is missing string attribute'
+                        f'{filename}:{field["lineno"]} Field "{field["name"]}" is missing string attribute'
                     )
 
     def check_field_missing_help(self):
@@ -499,8 +486,7 @@ class ChecksOdooModulePython:
 
                 if not field.get("help"):
                     self.checks_errors["python_field_missing_help"].append(
-                        f"{filename}:{field['lineno']} "
-                        f'Field "{field["name"]}" is missing help attribute'
+                        f'{filename}:{field["lineno"]} Field "{field["name"]}" is missing help attribute'
                     )
 
     def check_public_method_missing_docstring(self):
@@ -520,8 +506,7 @@ class ChecksOdooModulePython:
 
                 if not method.get("has_docstring"):
                     self.checks_errors["python_method_missing_docstring"].append(
-                        f"{filename}:{method['lineno']} "
-                        f'Public method "{method["name"]}" is missing docstring'
+                        f'{filename}:{method["lineno"]} Public method "{method["name"]}" is missing docstring'
                     )
 
     def check_docstring_quality(self):
@@ -552,6 +537,5 @@ class ChecksOdooModulePython:
                 docstring_clean = docstring.strip().lower().rstrip(".")
                 if docstring_clean == method_name_clean:
                     self.checks_errors["python_docstring_uninformative"].append(
-                        f"{filename}:{method['lineno']} "
-                        f'Method "{method["name"]}" has uninformative docstring'
+                        f'{filename}:{method["lineno"]} Method "{method["name"]}" has uninformative docstring'
                     )

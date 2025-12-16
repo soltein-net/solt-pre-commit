@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright 2025 Soltein SA. de CV.
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
@@ -14,13 +13,25 @@ from typing import List, Optional, Tuple
 import yaml
 
 DEFAULT_BRANCH_TYPES = [
-    "feature", "fix", "hotfix", "bugfix", "release",
-    "refactor", "docs", "test", "chore",
+    "feature",
+    "fix",
+    "hotfix",
+    "bugfix",
+    "release",
+    "refactor",
+    "docs",
+    "test",
+    "chore",
 ]
 
 DEFAULT_PROTECTED_BRANCHES = {
-    "main", "master", "develop", "development",
-    "staging", "production", "HEAD",
+    "main",
+    "master",
+    "develop",
+    "development",
+    "staging",
+    "production",
+    "HEAD",
 }
 
 # Odoo version branches pattern (e.g., 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0)
@@ -90,13 +101,9 @@ class BranchNameValidator:
 
         for branch_type in self.allowed_types:
             if branch_type == "release":
-                self.patterns[branch_type] = re.compile(
-                    r"^release/\d+\.\d+\.\d+(\.\d+)?$"
-                )
+                self.patterns[branch_type] = re.compile(r"^release/\d+\.\d+\.\d+(\.\d+)?$")
             elif self.strict:
-                self.patterns[branch_type] = re.compile(
-                    f"^{branch_type}/{prefix_pattern}-\\d+-.+$"
-                )
+                self.patterns[branch_type] = re.compile(f"^{branch_type}/{prefix_pattern}-\\d+-.+$")
             else:
                 self.patterns[branch_type] = re.compile(
                     f"^{branch_type}/([a-z0-9][-a-z0-9]*|{prefix_pattern}-\\d+-.+)$"
@@ -106,7 +113,9 @@ class BranchNameValidator:
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, check=True,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             return result.stdout.strip()
         except subprocess.CalledProcessError:
@@ -200,7 +209,7 @@ Common mistakes:
 
         message += f"""
 Protected branches (no validation required):
-  {', '.join(sorted(protected))}
+  {", ".join(sorted(protected))}
   Odoo versions: 12.0, 13.0, ..., 17.0, 18.0
 """
         return message

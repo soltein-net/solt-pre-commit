@@ -77,8 +77,7 @@ class ChecksOdooModuleXMLAdvanced:
 
                     for match in matches:
                         self.checks_errors["xml_deprecated_active_id_usage"].append(
-                            f"{filename}:{node.sourceline} "
-                            f'Deprecated use of "{match}" in {attr}="{value[:50]}..."'
+                            f'{filename}:{node.sourceline} Deprecated use of "{match}" in {attr}="{value[:50]}..."'
                         )
 
     def check_alert_missing_role(self):
@@ -121,8 +120,7 @@ class ChecksOdooModuleXMLAdvanced:
             for node in tree.xpath("//button[not(@type)]"):
                 name = node.get("name", "unnamed")
                 self.checks_errors["xml_button_without_type"].append(
-                    f"{filename}:{node.sourceline} "
-                    f'Button "{name}" is missing type attribute'
+                    f'{filename}:{node.sourceline} Button "{name}" is missing type attribute'
                 )
 
     def check_t_raw_usage(self):
@@ -137,8 +135,7 @@ class ChecksOdooModuleXMLAdvanced:
             for node in tree.xpath("//*[@t-raw]"):
                 value = node.get("t-raw", "")
                 self.checks_errors["xml_deprecated_t_raw"].append(
-                    f"{filename}:{node.sourceline} "
-                    f'Deprecated t-raw="{value}", use t-out with markup() instead'
+                    f'{filename}:{node.sourceline} Deprecated t-raw="{value}", use t-out with markup() instead'
                 )
 
     def check_hardcoded_ids(self):
@@ -188,9 +185,7 @@ class ChecksOdooModuleXMLAdvanced:
                 priority = "16"
 
                 if priority_node:
-                    priority = priority_node[0].get(
-                        "eval", priority_node[0].text or "16"
-                    )
+                    priority = priority_node[0].get("eval", priority_node[0].text or "16")
 
                 key = (inherit_ref, priority)
                 inherit_groups[key].append(

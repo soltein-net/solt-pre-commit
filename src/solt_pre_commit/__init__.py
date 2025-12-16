@@ -23,7 +23,8 @@ __version__ = "1.0.0"
 __author__ = "Soltein SA de CV"
 
 from .checks_branch_name import BranchNameValidator
-from .checks_odoo_module import ChecksOdooModule, run as run_checks
+from .checks_odoo_module import ChecksOdooModule
+from .checks_odoo_module import run as run_checks
 from .checks_odoo_module_csv import ChecksOdooModuleCSV
 from .checks_odoo_module_po import ChecksOdooModulePO
 from .checks_odoo_module_python import ChecksOdooModulePython
