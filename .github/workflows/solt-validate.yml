@@ -439,7 +439,7 @@ jobs:
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
-  # PRE-COMMIT HOOKS
+  # PRE-COMMIT HOOKS (Solo archivos cambiados - Bloqueante)
   # ───────────────────────────────────────────────────────────────────────────
   pre-commit:
     name: 🪝 Pre-commit Hooks
@@ -448,31 +448,102 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Run pre-commit
-        uses: pre-commit/action@v3.0.1
-        continue-on-error: true
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Get changed files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            # PR: comparar contra base branch
+            git fetch origin ${{ github.base_ref }} --depth=1
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          else
+            # Push: comparar contra commit anterior
+            CHANGED_FILES=$(git diff --name-only HEAD~1...HEAD 2>/dev/null | tr '\n' ' ' || echo "")
+          fi
+          
+          # Filtrar solo archivos que existen
+          VALID_FILES=""
+          for f in $CHANGED_FILES; do
+            if [ -f "$f" ]; then
+              VALID_FILES="$VALID_FILES $f"
+            fi
+          done
+          VALID_FILES=$(echo "$VALID_FILES" | xargs)
+          
+          echo "files=$VALID_FILES" >> $GITHUB_OUTPUT
+          
+          FILE_COUNT=$(echo "$VALID_FILES" | wc -w | tr -d ' ')
+          echo "count=$FILE_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $FILE_COUNT changed files"
+
+      - name: Run pre-commit on changed files
         id: precommit
+        run: |
+          CHANGED_FILES="${{ steps.changed.outputs.files }}"
+          FILE_COUNT="${{ steps.changed.outputs.count }}"
+          
+          if [ -z "$CHANGED_FILES" ] || [ "$FILE_COUNT" == "0" ]; then
+            echo "No files to check, skipping pre-commit"
+            echo "status=skipped" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Running pre-commit on $FILE_COUNT changed files..."
+          echo "Files: $CHANGED_FILES"
+          echo ""
+          
+          # Run pre-commit only on changed files
+          if pre-commit run --files $CHANGED_FILES 2>&1 | tee precommit_output.txt; then
+            echo "status=passed" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Pre-commit summary
         if: always()
         run: |
           echo "## 🪝 Pre-commit Hooks" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          
+          FILE_COUNT="${{ steps.changed.outputs.count }}"
+          FILE_COUNT=${FILE_COUNT:-0}
+          
+          echo "| Scope | Files Checked |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|---------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Changed files only | $FILE_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "${{ steps.precommit.outcome }}" == "success" ]; then
+          STATUS="${{ steps.precommit.outputs.status }}"
+          
+          if [ "$STATUS" == "skipped" ]; then
+            echo "⏭️ No files to check" >> $GITHUB_STEP_SUMMARY
+          elif [ "$STATUS" == "passed" ]; then
             echo "✅ All hooks passed" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Some hooks failed" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Run \`pre-commit run --all-files\` locally to see details" >> $GITHUB_STEP_SUMMARY
+            echo "<details open><summary><strong>Ver errores</strong></summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            if [ -f precommit_output.txt ]; then
+              cat precommit_output.txt >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Para corregir localmente:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "pre-commit run --files ${{ steps.changed.outputs.files }}" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
-
-      - name: Fail if hooks failed
-        if: steps.precommit.outcome == 'failure'
-        run: exit 1
