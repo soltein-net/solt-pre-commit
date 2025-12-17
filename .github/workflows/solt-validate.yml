@@ -296,64 +296,12 @@ jobs:
           echo "> ℹ️ Este análisis es solo informativo, **no bloquea** el PR." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Extract documentation metrics from validation output
           if [ -f reports/validation.txt ]; then
-            # Count issues by type - ensure we get clean integers
-            MISSING_DOCSTRING=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || echo "0")
-            MISSING_STRING=$(grep -c "missing string" reports/validation.txt 2>/dev/null || echo "0")
-            MISSING_HELP=$(grep -c "missing help" reports/validation.txt 2>/dev/null || echo "0")
-            
-            # Clean variables - remove any whitespace/newlines
-            MISSING_DOCSTRING=$(echo "$MISSING_DOCSTRING" | tr -d '[:space:]')
-            MISSING_STRING=$(echo "$MISSING_STRING" | tr -d '[:space:]')
-            MISSING_HELP=$(echo "$MISSING_HELP" | tr -d '[:space:]')
-            
-            # Ensure they are valid integers
-            MISSING_DOCSTRING=${MISSING_DOCSTRING:-0}
-            MISSING_STRING=${MISSING_STRING:-0}
-            MISSING_HELP=${MISSING_HELP:-0}
-            
-            # Initialize counters
-            RUFF_ERRORS=0
-            PYLINT_ERRORS=0
-            
-            # Calculate docstring coverage (simplified estimate)
-            TOTAL_METHODS=$((MISSING_DOCSTRING + 20))
-            DOCUMENTED=$((TOTAL_METHODS - MISSING_DOCSTRING))
-            if [ "$TOTAL_METHODS" -gt 0 ]; then
-              COVERAGE=$((DOCUMENTED * 100 / TOTAL_METHODS))
-            else
-              COVERAGE=100
-            fi
-
-            # Main metrics table
-            echo "| Métrica | Valor | Meta | Estado |" >> $GITHUB_STEP_SUMMARY
-            echo "|---------|-------|------|--------|" >> $GITHUB_STEP_SUMMARY
-            
-            # Docstring coverage
-            if [ "$COVERAGE" -ge 10 ]; then
-              echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ✅ |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ⚠️ |" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            # Ruff errors
-            if [ "$RUFF_ERRORS" -eq 0 ]; then
-              echo "| 🔍 Errores Ruff | **${RUFF_ERRORS}** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| 🔍 Errores Ruff | **${RUFF_ERRORS}** | 0 | ⚠️ |" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            # Pylint errors
-            if [ "$PYLINT_ERRORS" -eq 0 ]; then
-              echo "| 🐍 Errores Pylint | **${PYLINT_ERRORS}** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| 🐍 Errores Pylint | **${PYLINT_ERRORS}** | 0 | ⚠️ |" >> $GITHUB_STEP_SUMMARY
-            fi
-            
+            echo "✅ Reporte de validación generado correctamente." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Ver artifacts para detalles completos." >> $GITHUB_STEP_SUMMARY
           else
-            echo "No se encontró reporte de validación." >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ No se encontró reporte de validación." >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload validation report
