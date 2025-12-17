@@ -111,7 +111,7 @@ jobs:
         run: |
           MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
           MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
-          [ -z "$MODULE_COUNT" ] && MODULE_COUNT="0"
+          MODULE_COUNT="${MODULE_COUNT:-0}"
           echo "modules=$MODULES" >> $GITHUB_OUTPUT
           echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
 
@@ -120,7 +120,9 @@ jobs:
         run: |
           mkdir -p reports
           ARGS="--scope ${{ inputs.validation-scope }}"
-          [ "${{ inputs.show-info }}" == "true" ] && ARGS="$ARGS --show-info"
+          if [ "${{ inputs.show-info }}" == "true" ]; then
+            ARGS="$ARGS --show-info"
+          fi
           
           set +e
           START_TIME=$(date +%s)
@@ -143,7 +145,8 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          # Changed files
+          
+          # Get changed Python files
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
             CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || echo "")
@@ -151,15 +154,20 @@ jobs:
             CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || echo "")
           fi
           
-          RUFF_CHANGED="0"
+          RUFF_CHANGED=0
           if [ -n "$CHANGED_PY" ]; then
-            ruff check $CHANGED_PY --output-format=text 2>&1 | tee reports/ruff-changed.txt || true
+            # Use 'concise' format instead of 'text'
+            ruff check $CHANGED_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
             RUFF_CHANGED=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-changed.txt 2>/dev/null || echo "0")
           fi
           
-          # Full repo
-          ruff check ${{ steps.find-modules.outputs.modules }} --output-format=text 2>&1 | tee reports/ruff-full.txt || true
+          # Full repo - use 'concise' format
+          ruff check ${{ steps.find-modules.outputs.modules }} --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
           RUFF_FULL=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-full.txt 2>/dev/null || echo "0")
+          
+          # Ensure we have valid numbers
+          RUFF_CHANGED="${RUFF_CHANGED:-0}"
+          RUFF_FULL="${RUFF_FULL:-0}"
           
           set -e
           echo "changed=$RUFF_CHANGED" >> $GITHUB_OUTPUT
@@ -170,14 +178,15 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          # Changed files
+          
+          # Get changed Python files
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || echo "")
           else
             CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || echo "")
           fi
           
-          PYLINT_CHANGED="0"
+          PYLINT_CHANGED=0
           if [ -n "$CHANGED_PY" ]; then
             echo "$CHANGED_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-changed.txt || true
             PYLINT_CHANGED=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-changed.txt 2>/dev/null || echo "0")
@@ -187,6 +196,10 @@ jobs:
           find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-full.txt || true
           PYLINT_FULL=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-full.txt 2>/dev/null || echo "0")
           
+          # Ensure we have valid numbers
+          PYLINT_CHANGED="${PYLINT_CHANGED:-0}"
+          PYLINT_FULL="${PYLINT_FULL:-0}"
+          
           set -e
           echo "changed=$PYLINT_CHANGED" >> $GITHUB_OUTPUT
           echo "full=$PYLINT_FULL" >> $GITHUB_OUTPUT
@@ -194,7 +207,7 @@ jobs:
       - name: Calculate real metrics
         id: metrics
         run: |
-          # Count REAL issues from validation output
+          # Count REAL issues from validation output with safe defaults
           # PR scope (from validation.txt)
           MISSING_DOCSTRING_PR=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || echo "0")
           MISSING_STRING_PR=$(grep -c "missing string" reports/validation.txt 2>/dev/null || echo "0")
@@ -206,35 +219,48 @@ jobs:
           MISSING_HELP_FULL=$(grep -c "missing help" reports/validation-full.txt 2>/dev/null || echo "0")
           
           # Count total methods and fields by analyzing Python files
-          TOTAL_METHODS=$(find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" -exec grep -l "def " {} \; 2>/dev/null | xargs grep -c "def " 2>/dev/null | awk -F: '{sum+=$2} END {print sum}' || echo "0")
-          TOTAL_FIELDS=$(find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" -exec grep -l "fields\." {} \; 2>/dev/null | xargs grep -c "fields\." 2>/dev/null | awk -F: '{sum+=$2} END {print sum}' || echo "0")
+          TOTAL_METHODS=$(find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" -exec grep -l "def " {} \; 2>/dev/null | xargs grep -c "def " 2>/dev/null | awk -F: '{sum+=$2} END {print sum+0}' || echo "1")
+          TOTAL_FIELDS=$(find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" -exec grep -l "fields\." {} \; 2>/dev/null | xargs grep -c "fields\." 2>/dev/null | awk -F: '{sum+=$2} END {print sum+0}' || echo "1")
           
-          # Ensure we have valid numbers
-          [ -z "$TOTAL_METHODS" ] || [ "$TOTAL_METHODS" == "0" ] && TOTAL_METHODS="1"
-          [ -z "$TOTAL_FIELDS" ] || [ "$TOTAL_FIELDS" == "0" ] && TOTAL_FIELDS="1"
+          # Ensure we have valid numbers (minimum 1 to avoid division by zero)
+          TOTAL_METHODS=$((TOTAL_METHODS > 0 ? TOTAL_METHODS : 1))
+          TOTAL_FIELDS=$((TOTAL_FIELDS > 0 ? TOTAL_FIELDS : 1))
           
-          # Calculate documented counts
+          # Ensure issue counts are valid numbers
+          MISSING_DOCSTRING_FULL=$((MISSING_DOCSTRING_FULL + 0))
+          MISSING_STRING_FULL=$((MISSING_STRING_FULL + 0))
+          MISSING_HELP_FULL=$((MISSING_HELP_FULL + 0))
+          
+          # Calculate documented counts (ensure non-negative)
           DOCUMENTED_METHODS=$((TOTAL_METHODS - MISSING_DOCSTRING_FULL))
-          [ "$DOCUMENTED_METHODS" -lt 0 ] && DOCUMENTED_METHODS="0"
+          DOCUMENTED_METHODS=$((DOCUMENTED_METHODS > 0 ? DOCUMENTED_METHODS : 0))
           
           FIELDS_WITH_STRING=$((TOTAL_FIELDS - MISSING_STRING_FULL))
-          [ "$FIELDS_WITH_STRING" -lt 0 ] && FIELDS_WITH_STRING="0"
+          FIELDS_WITH_STRING=$((FIELDS_WITH_STRING > 0 ? FIELDS_WITH_STRING : 0))
           
           FIELDS_WITH_HELP=$((TOTAL_FIELDS - MISSING_HELP_FULL))
-          [ "$FIELDS_WITH_HELP" -lt 0 ] && FIELDS_WITH_HELP="0"
+          FIELDS_WITH_HELP=$((FIELDS_WITH_HELP > 0 ? FIELDS_WITH_HELP : 0))
           
-          # Calculate percentages
+          # Calculate percentages (safe division)
           DOCSTRING_COV=$((DOCUMENTED_METHODS * 100 / TOTAL_METHODS))
           STRING_COV=$((FIELDS_WITH_STRING * 100 / TOTAL_FIELDS))
           HELP_COV=$((FIELDS_WITH_HELP * 100 / TOTAL_FIELDS))
           
           # Clamp to 0-100
-          [ "$DOCSTRING_COV" -lt 0 ] && DOCSTRING_COV="0"
-          [ "$DOCSTRING_COV" -gt 100 ] && DOCSTRING_COV="100"
-          [ "$STRING_COV" -lt 0 ] && STRING_COV="0"
-          [ "$STRING_COV" -gt 100 ] && STRING_COV="100"
-          [ "$HELP_COV" -lt 0 ] && HELP_COV="0"
-          [ "$HELP_COV" -gt 100 ] && HELP_COV="100"
+          DOCSTRING_COV=$((DOCSTRING_COV < 0 ? 0 : (DOCSTRING_COV > 100 ? 100 : DOCSTRING_COV)))
+          STRING_COV=$((STRING_COV < 0 ? 0 : (STRING_COV > 100 ? 100 : STRING_COV)))
+          HELP_COV=$((HELP_COV < 0 ? 0 : (HELP_COV > 100 ? 100 : HELP_COV)))
+          
+          # Get ruff/pylint values with defaults
+          RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
+          RUFF_FULL="${{ steps.ruff.outputs.full }}"
+          PYLINT_CHANGED="${{ steps.pylint.outputs.changed }}"
+          PYLINT_FULL="${{ steps.pylint.outputs.full }}"
+          
+          RUFF_CHANGED="${RUFF_CHANGED:-0}"
+          RUFF_FULL="${RUFF_FULL:-0}"
+          PYLINT_CHANGED="${PYLINT_CHANGED:-0}"
+          PYLINT_FULL="${PYLINT_FULL:-0}"
           
           # Output all metrics
           echo "total_methods=$TOTAL_METHODS" >> $GITHUB_OUTPUT
@@ -245,23 +271,26 @@ jobs:
           echo "docstring_cov=$DOCSTRING_COV" >> $GITHUB_OUTPUT
           echo "string_cov=$STRING_COV" >> $GITHUB_OUTPUT
           echo "help_cov=$HELP_COV" >> $GITHUB_OUTPUT
-          echo "missing_docstring_pr=$MISSING_DOCSTRING_PR" >> $GITHUB_OUTPUT
-          echo "missing_string_pr=$MISSING_STRING_PR" >> $GITHUB_OUTPUT
-          echo "missing_help_pr=$MISSING_HELP_PR" >> $GITHUB_OUTPUT
-          echo "ruff_changed=${{ steps.ruff.outputs.changed }}" >> $GITHUB_OUTPUT
-          echo "ruff_full=${{ steps.ruff.outputs.full }}" >> $GITHUB_OUTPUT
-          echo "pylint_changed=${{ steps.pylint.outputs.changed }}" >> $GITHUB_OUTPUT
-          echo "pylint_full=${{ steps.pylint.outputs.full }}" >> $GITHUB_OUTPUT
+          echo "missing_docstring_pr=${MISSING_DOCSTRING_PR:-0}" >> $GITHUB_OUTPUT
+          echo "missing_string_pr=${MISSING_STRING_PR:-0}" >> $GITHUB_OUTPUT
+          echo "missing_help_pr=${MISSING_HELP_PR:-0}" >> $GITHUB_OUTPUT
+          echo "ruff_changed=$RUFF_CHANGED" >> $GITHUB_OUTPUT
+          echo "ruff_full=$RUFF_FULL" >> $GITHUB_OUTPUT
+          echo "pylint_changed=$PYLINT_CHANGED" >> $GITHUB_OUTPUT
+          echo "pylint_full=$PYLINT_FULL" >> $GITHUB_OUTPUT
 
       - name: Generate summary
         id: summary
         run: |
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
           EXIT_CODE=$(echo "$EXIT_CODE" | tr -cd '0-9')
-          [ -z "$EXIT_CODE" ] && EXIT_CODE="0"
+          EXIT_CODE="${EXIT_CODE:-0}"
           
-          RESULT="success"
-          [ "$EXIT_CODE" -ne 0 ] && RESULT="failure"
+          if [ "$EXIT_CODE" -ne 0 ] 2>/dev/null; then
+            RESULT="failure"
+          else
+            RESULT="success"
+          fi
           
           echo "result=$RESULT" >> $GITHUB_OUTPUT
           echo "errors=0" >> $GITHUB_OUTPUT
@@ -280,28 +309,28 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const moduleCount = '${{ steps.find-modules.outputs.count }}';
-            const exitCode = '${{ steps.validate.outputs.exit_code }}';
-            const duration = '${{ steps.validate.outputs.duration }}';
+            const moduleCount = '${{ steps.find-modules.outputs.count }}' || '0';
+            const exitCode = '${{ steps.validate.outputs.exit_code }}' || '0';
+            const duration = '${{ steps.validate.outputs.duration }}' || '0';
             const scope = '${{ inputs.validation-scope }}';
             
-            const totalMethods = '${{ steps.metrics.outputs.total_methods }}';
-            const totalFields = '${{ steps.metrics.outputs.total_fields }}';
-            const documentedMethods = '${{ steps.metrics.outputs.documented_methods }}';
-            const fieldsWithString = '${{ steps.metrics.outputs.fields_with_string }}';
-            const fieldsWithHelp = '${{ steps.metrics.outputs.fields_with_help }}';
-            const docstringCov = '${{ steps.metrics.outputs.docstring_cov }}';
-            const stringCov = '${{ steps.metrics.outputs.string_cov }}';
-            const helpCov = '${{ steps.metrics.outputs.help_cov }}';
+            const totalMethods = '${{ steps.metrics.outputs.total_methods }}' || '1';
+            const totalFields = '${{ steps.metrics.outputs.total_fields }}' || '1';
+            const documentedMethods = '${{ steps.metrics.outputs.documented_methods }}' || '0';
+            const fieldsWithString = '${{ steps.metrics.outputs.fields_with_string }}' || '0';
+            const fieldsWithHelp = '${{ steps.metrics.outputs.fields_with_help }}' || '0';
+            const docstringCov = '${{ steps.metrics.outputs.docstring_cov }}' || '0';
+            const stringCov = '${{ steps.metrics.outputs.string_cov }}' || '0';
+            const helpCov = '${{ steps.metrics.outputs.help_cov }}' || '0';
             
-            const missingDocstringPr = '${{ steps.metrics.outputs.missing_docstring_pr }}';
-            const missingStringPr = '${{ steps.metrics.outputs.missing_string_pr }}';
-            const missingHelpPr = '${{ steps.metrics.outputs.missing_help_pr }}';
+            const missingDocstringPr = '${{ steps.metrics.outputs.missing_docstring_pr }}' || '0';
+            const missingStringPr = '${{ steps.metrics.outputs.missing_string_pr }}' || '0';
+            const missingHelpPr = '${{ steps.metrics.outputs.missing_help_pr }}' || '0';
             
-            const ruffChanged = '${{ steps.metrics.outputs.ruff_changed }}';
-            const ruffFull = '${{ steps.metrics.outputs.ruff_full }}';
-            const pylintChanged = '${{ steps.metrics.outputs.pylint_changed }}';
-            const pylintFull = '${{ steps.metrics.outputs.pylint_full }}';
+            const ruffChanged = '${{ steps.metrics.outputs.ruff_changed }}' || '0';
+            const ruffFull = '${{ steps.metrics.outputs.ruff_full }}' || '0';
+            const pylintChanged = '${{ steps.metrics.outputs.pylint_changed }}' || '0';
+            const pylintFull = '${{ steps.metrics.outputs.pylint_full }}' || '0';
             
             function icon(val, threshold, reverse) {
               const v = parseInt(val) || 0;
@@ -386,7 +415,7 @@ jobs:
       - name: Check result
         run: |
           RESULT="${{ steps.summary.outputs.result }}"
-          [ -z "$RESULT" ] && RESULT="success"
+          RESULT="${RESULT:-success}"
           if [ "$RESULT" == "failure" ]; then
             echo "::error::Validation failed"
             exit 1
@@ -428,7 +457,7 @@ jobs:
           VALID_FILES=$(echo "$VALID_FILES" | xargs)
           
           FILE_COUNT=$(echo "$VALID_FILES" | wc -w | tr -d ' ')
-          [ -z "$FILE_COUNT" ] && FILE_COUNT="0"
+          FILE_COUNT="${FILE_COUNT:-0}"
           
           echo "files=$VALID_FILES" >> $GITHUB_OUTPUT
           echo "count=$FILE_COUNT" >> $GITHUB_OUTPUT
@@ -438,6 +467,7 @@ jobs:
         run: |
           FILES="${{ steps.changed.outputs.files }}"
           COUNT="${{ steps.changed.outputs.count }}"
+          COUNT="${COUNT:-0}"
           
           if [ -z "$FILES" ] || [ "$COUNT" == "0" ]; then
             echo "No files to check"
@@ -462,6 +492,7 @@ jobs:
           echo "| Changed only | ${{ steps.changed.outputs.count }} |" >> $GITHUB_STEP_SUMMARY
           
           STATUS="${{ steps.precommit.outputs.status }}"
+          STATUS="${STATUS:-unknown}"
           if [ "$STATUS" == "passed" ]; then
             echo "All hooks passed" >> $GITHUB_STEP_SUMMARY
           elif [ "$STATUS" == "skipped" ]; then
@@ -491,7 +522,7 @@ jobs:
         run: |
           pip install coverage pytest pytest-cov
           mkdir -p reports
-          COVERAGE="0"
+          COVERAGE=0
           
           if [ -d "tests" ]; then
             coverage run -m pytest tests/ -v --tb=short 2>&1 | tee reports/test_output.txt || true
@@ -499,21 +530,23 @@ jobs:
             COVERAGE=$(tail -1 reports/coverage.txt 2>/dev/null | awk '{print $NF}' | tr -cd '0-9' || echo "0")
           fi
           
-          [ -z "$COVERAGE" ] && COVERAGE="0"
+          COVERAGE="${COVERAGE:-0}"
           echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
 
       - name: Check threshold
         run: |
           COV="${{ steps.coverage.outputs.percentage }}"
           THRESHOLD="${{ inputs.coverage-threshold }}"
+          
+          # Clean and default values
           COV=$(echo "$COV" | tr -cd '0-9')
-          [ -z "$COV" ] && COV="0"
+          COV="${COV:-0}"
           THRESHOLD=$(echo "$THRESHOLD" | tr -cd '0-9')
-          [ -z "$THRESHOLD" ] && THRESHOLD="60"
+          THRESHOLD="${THRESHOLD:-60}"
           
           echo "## Coverage: ${COV}%" >> $GITHUB_STEP_SUMMARY
           
-          if [ "$COV" != "0" ] && [ "$COV" -lt "$THRESHOLD" ]; then
+          if [ "$COV" != "0" ] && [ "$COV" -lt "$THRESHOLD" ] 2>/dev/null; then
             echo "::error::Coverage ${COV}% < ${THRESHOLD}%"
             exit 1
           fi
