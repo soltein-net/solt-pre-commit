@@ -657,6 +657,36 @@ class ChecksOdooModule:
                     file_data["methods"] = manifest_data.get("methods", {})
                     break
 
+    def collect_coverage_data(self):
+        """Collect coverage data from ALL Python files (ignores validation_scope).
+
+        This method is for generating global repository metrics without blocking.
+        It does NOT add errors to check_result, only collects metadata.
+        """
+        all_py_files = self.manifest_referenced_files.get(".py", [])
+        if not all_py_files:
+            return
+
+        # Parse all files for coverage data only (no error reporting)
+        # The constructor already parses files and populates models/fields/methods
+        _parser = checks_odoo_module_python.ChecksOdooModulePython(
+            all_py_files,
+            self.odoo_addon_name,
+            config=self.severity_config,
+        )
+        # _parser is used only for side effects (populating all_py_files dicts)
+        del _parser  # Explicitly delete to avoid unused variable warning
+
+        # Store coverage data in ALL files
+        for file_data in all_py_files:
+            filename = file_data["filename"]
+            for manifest_data in all_py_files:
+                if manifest_data["filename"] == filename:
+                    file_data["models"] = manifest_data.get("models", {})
+                    file_data["fields"] = manifest_data.get("fields", {})
+                    file_data["methods"] = manifest_data.get("methods", {})
+                    break
+
     @staticmethod
     def _get_check_methods(obj):
         for attr in dir(obj):
@@ -672,6 +702,103 @@ class ChecksOdooModule:
                 yield getattr(obj_or_class, attr)
 
 
+def _print_global_coverage_metrics(checks_objects, severity_config):
+    """Print global coverage metrics for the repository.
+
+    These metrics are informational and do NOT affect the exit code.
+    They show coverage of the entire repository, not just changed files.
+    """
+    total_models = 0
+    total_fields = 0
+    total_methods = 0
+    fields_with_string = 0
+    fields_with_help = 0
+    methods_with_docstring = 0
+    public_methods = 0
+
+    # Skip list from config
+    skip_string = severity_config.skip_string_fields
+    skip_help = severity_config.skip_help_fields
+    skip_docstring = severity_config.skip_docstring_methods
+
+    for _module_name, checks_obj in checks_objects:
+        for file_data in checks_obj.manifest_referenced_files.get(".py", []):
+            models = file_data.get("models", {})
+            fields = file_data.get("fields", {})
+            methods = file_data.get("methods", {})
+
+            for _class_name, model_info in models.items():
+                if model_info.get("is_odoo_model"):
+                    total_models += 1
+
+            for _class_name, field_list in fields.items():
+                for fld in field_list:
+                    if fld.get("name", "").startswith("_"):
+                        continue
+                    if fld.get("related"):
+                        continue
+
+                    total_fields += 1
+
+                    # Check string
+                    if fld.get("name") not in skip_string:
+                        if fld.get("string"):
+                            fields_with_string += 1
+                    else:
+                        fields_with_string += 1  # Skip counts as covered
+
+                    # Check help
+                    if fld.get("name") not in skip_help:
+                        if fld.get("help"):
+                            fields_with_help += 1
+                    else:
+                        fields_with_help += 1  # Skip counts as covered
+
+            for _class_name, method_list in methods.items():
+                for meth in method_list:
+                    name = meth.get("name", "")
+                    if name.startswith("_") and not name.startswith("__"):
+                        continue  # Skip private
+                    if name in skip_docstring:
+                        continue
+
+                    total_methods += 1
+                    public_methods += 1
+
+                    if meth.get("has_docstring"):
+                        methods_with_docstring += 1
+
+    if total_fields == 0 and total_methods == 0:
+        return  # No data to show
+
+    # Calculate percentages
+    string_pct = (fields_with_string / total_fields * 100) if total_fields > 0 else 100
+    help_pct = (fields_with_help / total_fields * 100) if total_fields > 0 else 100
+    docstring_pct = (methods_with_docstring / public_methods * 100) if public_methods > 0 else 100
+
+    # Get thresholds from config (or defaults)
+    docstring_threshold = 80
+    string_threshold = 90
+    help_threshold = 50
+
+    print("")
+    print("-" * 60)
+    print("REPOSITORY COVERAGE (Informational)")
+    print("-" * 60)
+    print(f"  Modules analyzed: {len(checks_objects)}")
+    print(f"  Models: {total_models} | Fields: {total_fields} | Methods: {public_methods}")
+    print("")
+    print(f"  Docstrings:          {docstring_pct:5.1f}%  ({methods_with_docstring}/{public_methods})  "
+          f"{'PASS' if docstring_pct >= docstring_threshold else 'WARN'} (goal: >={docstring_threshold}%)")
+    print(f"  Fields with string:  {string_pct:5.1f}%  ({fields_with_string}/{total_fields})  "
+          f"{'PASS' if string_pct >= string_threshold else 'WARN'} (goal: >={string_threshold}%)")
+    print(f"  Fields with help:    {help_pct:5.1f}%  ({fields_with_help}/{total_fields})  "
+          f"{'PASS' if help_pct >= help_threshold else 'WARN'} (goal: >={help_threshold}%)")
+    print("-" * 60)
+    print("These metrics are informational and do NOT block validation.")
+    print("")
+
+
 def run(
     manifest_paths=None,
     verbose=True,
@@ -681,6 +808,7 @@ def run(
     show_info=False,
     force_scope=None,
     json_report=None,
+    show_coverage=True,
 ):
     """Main entry point."""
     if manifest_paths is None:
@@ -708,6 +836,9 @@ def run(
         for check in checks_obj.getattr_checks():
             check(checks_obj)
 
+        # Collect coverage data from ALL files (for metrics display)
+        checks_obj.collect_coverage_data()
+
         checks_objects.append((checks_obj.odoo_addon_name, checks_obj))
 
         if not checks_obj.check_result.is_empty():
@@ -723,6 +854,10 @@ def run(
                 )
         elif verbose:
             printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
+
+    # Show global coverage metrics
+    if verbose and show_coverage:
+        _print_global_coverage_metrics(checks_objects, severity_config)
 
     if len(manifest_paths) > 1 and verbose:
         print("")

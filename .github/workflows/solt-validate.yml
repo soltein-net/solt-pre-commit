@@ -360,9 +360,9 @@ jobs:
             const overallStatus = exitCode === 0 ? ':white_check_mark: Passed' : ':x: Failed';
             
             const lines = [
-              '## :bar_chart: Reporte de Validacion Solt',
+              '## :bar_chart: Reporte de Validación',
               '',
-              '> :information_source: Este analisis es **informativo**. El check bloqueante es "Odoo Module Validation".',
+              '> :information_source: Este análisis es **informativo**. El check bloqueante es "Odoo Module Validation".',
               '',
               '### :clipboard: Resumen',
               '',
@@ -373,7 +373,7 @@ jobs:
               `| Scope | \`${scope}\` |`,
               `| Tiempo | ${duration}s |`,
               '',
-              '### :books: Cobertura de Documentacion (Repositorio)',
+              '### :books: Cobertura de Documentación (Repositorio)',
               '',
               '| Metrica | Cobertura | Detalle | Meta | Estado |',
               '|---------|-----------|---------|------|--------|',
@@ -409,7 +409,7 @@ jobs:
             });
             
             const botComment = comments.find(c => 
-              c.user.type === 'Bot' && c.body.includes('Reporte de Validacion Solt')
+              c.user.type === 'Bot' && c.body.includes('Reporte de Validación')
             );
             
             if (botComment) {
@@ -523,7 +523,7 @@ jobs:
   # COVERAGE ANALYSIS (Optional)
   # ---------------------------------------------------------------------------
   coverage:
-    name: Test Coverage
+    name: Coverage Analysis
     runs-on: ubuntu-latest
     if: inputs.run-coverage
     needs: validate
