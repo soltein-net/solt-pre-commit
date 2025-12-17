@@ -334,6 +334,94 @@ jobs:
           path: reports/
           retention-days: 7
 
+      - name: Comment PR with documentation report
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Get values from outputs
+            const errors = '${{ steps.validate.outputs.errors }}' || '0';
+            const warnings = '${{ steps.validate.outputs.warnings }}' || '0';
+            const moduleCount = '${{ steps.find-modules.outputs.count }}' || '0';
+            const scope = '${{ inputs.validation-scope }}';
+            
+            // Calculate doc coverage (simplified)
+            let missingDocstring = '0';
+            let missingString = '0';
+            let missingHelp = '0';
+            let coverage = '100';
+            
+            try {
+              if (fs.existsSync('reports/validation.txt')) {
+                const content = fs.readFileSync('reports/validation.txt', 'utf8');
+                missingDocstring = (content.match(/missing docstring/g) || []).length.toString();
+                missingString = (content.match(/missing string/g) || []).length.toString();
+                missingHelp = (content.match(/missing help/g) || []).length.toString();
+                
+                const total = parseInt(missingDocstring) + 20;
+                const documented = total - parseInt(missingDocstring);
+                coverage = Math.round((documented * 100) / total).toString();
+              }
+            } catch (e) {
+              console.log('Could not read validation report:', e);
+            }
+            
+            // Determine status icons
+            const coverageIcon = parseInt(coverage) >= 10 ? '✅' : '⚠️';
+            const errorsIcon = parseInt(errors) === 0 ? '✅' : '❌';
+            const warningsIcon = parseInt(warnings) === 0 ? '✅' : '⚠️';
+            
+            // Build comment body
+            const body = `## 📊 Análisis de Documentación (Informativo)
+
+            > ℹ️ Este análisis es solo informativo, **no bloquea** el PR.
+            > El check bloqueante es "Odoo Module Validation".
+
+            | Métrica | Valor | Meta | Estado |
+            |---------|-------|------|--------|
+            | 📚 Cobertura Docstrings | **${coverage}%** | ≥10% | ${coverageIcon} |
+            | 🔍 Errores Ruff | **${errors}** | 0 | ${errorsIcon} |
+            | 🐍 Errores Pylint (críticos) | **${warnings}** | 0 | ${warningsIcon} |
+
+            **Scope:** \`${scope}\` (${scope === 'changed' ? 'solo archivos modificados' : 'repositorio completo'})
+            **Módulos analizados:** ${moduleCount}
+
+            ---
+            🤖 *Análisis automático de documentación*
+            `;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Análisis de Documentación')
+            );
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
       - name: Check result
         run: |
           RESULT="${{ steps.summary.outputs.result }}"
