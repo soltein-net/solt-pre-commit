@@ -30,9 +30,9 @@ DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "upda
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # SEVERITY SYSTEM
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class Severity:
@@ -99,9 +99,9 @@ DEFAULT_SEVERITY = {
 }
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # CHANGED FILES DETECTION
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class ChangedFilesDetector:
@@ -123,14 +123,11 @@ class ChangedFilesDetector:
                 return f"origin/{branch}"
             except subprocess.CalledProcessError:
                 continue
-
-        # Fallback to HEAD~1 for local commits
         return "HEAD~1"
 
     def get_changed_files(self):
         """Get list of changed files compared to base branch."""
         try:
-            # Try to get diff against base branch
             result = subprocess.run(
                 ["git", "diff", "--name-only", "--diff-filter=ACMR", self.base_branch],
                 capture_output=True,
@@ -140,7 +137,6 @@ class ChangedFilesDetector:
             files = result.stdout.strip().split("\n")
             return [f for f in files if f]
         except subprocess.CalledProcessError:
-            # Fallback: get staged files
             try:
                 result = subprocess.run(
                     ["git", "diff", "--name-only", "--cached", "--diff-filter=ACMR"],
@@ -159,9 +155,9 @@ class ChangedFilesDetector:
         return [f for f in all_module_files if os.path.realpath(f["filename"]) in changed]
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class SeverityConfig:
@@ -175,11 +171,9 @@ class SeverityConfig:
         self.disabled_checks = set(self.config.get("disabled_checks", []))
         self.blocking_severities = self._get_blocking_severities()
 
-        # Validation scope
         self.validation_scope = self.config.get("validation_scope", "changed")
         self.base_branch = self.config.get("base_branch")
 
-        # Skip lists
         self.skip_string_fields = set(
             self.config.get(
                 "skip_string_fields",
@@ -202,19 +196,12 @@ class SeverityConfig:
         self.skip_help_fields = set(
             self.config.get(
                 "skip_help_fields",
-                [
-                    "active",
-                    "name",
-                    "sequence",
-                    "company_id",
-                    "currency_id",
-                ],
+                ["active", "name", "sequence", "company_id", "currency_id"],
             )
         )
         self.skip_docstring_methods = set(self.config.get("skip_docstring_methods", []))
         self.min_docstring_length = self.config.get("min_docstring_length", 10)
 
-        # Path exclusions
         self.exclude_paths = self.config.get(
             "exclude_paths",
             [
@@ -369,11 +356,11 @@ class ResultPrinter:
 
         print("")
         if module_name:
-            print(self._bold(f"{'═' * 60}"))
-            print(self._bold(f"📦 MODULE: {module_name}"))
+            print(self._bold("=" * 60))
+            print(self._bold(f"MODULE: {module_name}"))
             scope_label = "changed files only" if validation_scope == "changed" else "full repository"
             print(f"   Scope: {scope_label}")
-            print(self._bold(f"{'═' * 60}"))
+            print(self._bold("=" * 60))
 
         for severity in [Severity.ERROR, Severity.WARNING, Severity.INFO]:
             checks = by_severity[severity]
@@ -390,7 +377,7 @@ class ResultPrinter:
             if is_blocking:
                 header += self._color(" [BLOCKING]", Severity.COLORS[Severity.ERROR])
             print(header)
-            print("─" * 50)
+            print("-" * 50)
 
             for check_name, messages in sorted(checks.items()):
                 check_display = self._format_check_name(check_name)
@@ -399,14 +386,14 @@ class ResultPrinter:
                 for msg in messages[:10]:
                     if len(msg) > 120:
                         msg = msg[:117] + "..."
-                    print(f"    • {msg}")
+                    print(f"    - {msg}")
 
                 if len(messages) > 10:
                     remaining = len(messages) - 10
                     print(f"    ... and {remaining} more")
 
         print("")
-        print("─" * 50)
+        print("-" * 50)
         self._print_summary(counts, blocking)
 
     def _print_summary(self, counts, blocking):
@@ -427,19 +414,14 @@ class ResultPrinter:
         if not check_result.has_blocking_issues():
             return
         print("")
-        print(self._color("═" * 60, Severity.COLORS[Severity.ERROR]))
-        print(
-            self._color(
-                "❌ VALIDATION FAILED - Blocking issues found",
-                Severity.COLORS[Severity.ERROR],
-            )
-        )
-        print(self._color("═" * 60, Severity.COLORS[Severity.ERROR]))
+        print(self._color("=" * 60, Severity.COLORS[Severity.ERROR]))
+        print(self._color("VALIDATION FAILED - Blocking issues found", Severity.COLORS[Severity.ERROR]))
+        print(self._color("=" * 60, Severity.COLORS[Severity.ERROR]))
         print("")
 
     def print_success(self, module_name="", validation_scope="full"):
         scope_label = "(changed files)" if validation_scope == "changed" else "(full)"
-        msg = f"✅ {module_name}: All checks passed! {scope_label}" if module_name else "✅ All checks passed!"
+        msg = f"{module_name}: All checks passed! {scope_label}" if module_name else "All checks passed!"
         print(self._color(msg, "\033[92m"))
 
 
@@ -476,7 +458,6 @@ class ChecksOdooModule:
         self.manifest_referenced_files = self._referenced_files_by_extension()
         self.check_result = CheckResult(self.severity_config)
 
-        # Changed files detector
         self._changed_detector = None
         if self.severity_config.use_changed_files_only():
             self._changed_detector = ChangedFilesDetector(self.severity_config.base_branch)
@@ -512,7 +493,6 @@ class ChecksOdooModule:
         for data_section in DFTL_MANIFEST_DATA_KEYS:
             for fname in self.manifest_dict.get(data_section) or []:
                 full_path = os.path.realpath(os.path.join(self.odoo_addon_path, os.path.normpath(fname)))
-                # Check path exclusions
                 if self.severity_config.is_path_excluded(fname):
                     continue
 
@@ -525,7 +505,6 @@ class ChecksOdooModule:
                     }
                 )
 
-        # PO/POT files
         fnames = glob.glob(os.path.join(self.odoo_addon_path, "i18n*", "*.po")) + glob.glob(
             os.path.join(self.odoo_addon_path, "i18n*", "*.pot")
         )
@@ -541,13 +520,13 @@ class ChecksOdooModule:
                 }
             )
 
-        # Python files
         for root, dirs, files in os.walk(self.odoo_addon_path):
             dirs[:] = [d for d in dirs if d not in {"__pycache__", ".git", "node_modules", "static", "lib"}]
             for fname in files:
                 if fname.endswith(".py"):
-                    full_path = os.path.join(root, fname)
-                    rel_path = os.path.relpath(full_path, self.odoo_addon_path)
+                    full_path = os.path.join(str(root), fname)
+                    addon_path = str(self.odoo_addon_path)
+                    rel_path = os.path.relpath(full_path, addon_path)
 
                     if self.severity_config.is_path_excluded(rel_path):
                         continue
@@ -565,14 +544,10 @@ class ChecksOdooModule:
     def _get_files_to_validate(self, extension):
         """Get files to validate based on scope configuration."""
         all_files = self.manifest_referenced_files.get(extension, [])
-
         if not all_files:
             return []
-
-        # If using changed files only, filter them
         if self._changed_detector:
             return self._changed_detector.filter_module_files(self.odoo_addon_path, all_files)
-
         return all_files
 
     def _should_run_check(self, check_type):
@@ -656,13 +631,13 @@ class ChecksOdooModule:
 
     @installable
     def check_python(self):
+        """Run Python validations and store analysis data for coverage report."""
         if not self._should_run_check("python"):
             return
         manifest_datas = self._get_files_to_validate(".py")
         if not manifest_datas:
             return
 
-        # Pass configuration to Python checker
         checks_obj = checks_odoo_module_python.ChecksOdooModulePython(
             manifest_datas,
             self.odoo_addon_name,
@@ -671,6 +646,16 @@ class ChecksOdooModule:
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
+
+        # Store analysis data for coverage report
+        for file_data in self.manifest_referenced_files.get(".py", []):
+            filename = file_data["filename"]
+            for manifest_data in manifest_datas:
+                if manifest_data["filename"] == filename:
+                    file_data["models"] = manifest_data.get("models", {})
+                    file_data["fields"] = manifest_data.get("fields", {})
+                    file_data["methods"] = manifest_data.get("methods", {})
+                    break
 
     @staticmethod
     def _get_check_methods(obj):
@@ -695,6 +680,7 @@ def run(
     config_path=None,
     show_info=False,
     force_scope=None,
+    json_report=None,
 ):
     """Main entry point."""
     if manifest_paths is None:
@@ -702,13 +688,13 @@ def run(
 
     severity_config = SeverityConfig(config_path)
 
-    # Allow CLI to override scope
     if force_scope:
         severity_config.validation_scope = force_scope
 
     printer = ResultPrinter(use_colors=True, verbose=show_info)
 
     all_results = []
+    checks_objects = []
     has_blocking = False
 
     for manifest_path in manifest_paths:
@@ -721,6 +707,8 @@ def run(
 
         for check in checks_obj.getattr_checks():
             check(checks_obj)
+
+        checks_objects.append((checks_obj.odoo_addon_name, checks_obj))
 
         if not checks_obj.check_result.is_empty():
             all_results.append((checks_obj.odoo_addon_name, checks_obj.check_result))
@@ -736,11 +724,10 @@ def run(
         elif verbose:
             printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
 
-    # Print final summary if multiple modules
     if len(manifest_paths) > 1 and verbose:
         print("")
         print("=" * 60)
-        print("📊 FINAL SUMMARY")
+        print("FINAL SUMMARY")
         print("=" * 60)
         scope_label = "changed files only" if severity_config.validation_scope == "changed" else "full repository"
         print(f"  Validation scope: {scope_label}")
@@ -753,13 +740,26 @@ def run(
 
         print(f"  Modules checked: {len(manifest_paths)}")
         print(f"  Modules with issues: {len(all_results)}")
-        print(f"  ❌ Errors: {total_counts[Severity.ERROR]}")
-        print(f"  ⚠️  Warnings: {total_counts[Severity.WARNING]}")
-        print(f"  ℹ️  Info: {total_counts[Severity.INFO]}")
+        print(f"  Errors: {total_counts[Severity.ERROR]}")
+        print(f"  Warnings: {total_counts[Severity.WARNING]}")
+        print(f"  Info: {total_counts[Severity.INFO]}")
 
     if has_blocking and verbose:
         if all_results:
             printer.print_blocking_notice(all_results[0][1])
+
+    # Generate JSON coverage report if requested
+    if json_report:
+        try:
+            from . import doc_coverage
+
+            report = doc_coverage.build_coverage_report(checks_objects)
+            report.save(json_report)
+            if verbose:
+                print(f"\nCoverage report saved to: {json_report}")
+        except Exception as e:
+            if verbose:
+                print(f"\nFailed to generate coverage report: {e}")
 
     exit_code = 1 if has_blocking else 0
 
@@ -777,19 +777,20 @@ def main():
     parser.add_argument("--check-csv-only", action="store_true", help="Run only CSV checks")
     parser.add_argument("--check-po-only", action="store_true", help="Run only PO/POT checks")
     parser.add_argument("--check-python-only", action="store_true", help="Run only Python checks")
-    parser.add_argument("--config", default=None, help="Path to config file (default: .solt-hooks.yaml)")
-    parser.add_argument(
-        "--show-info",
-        action="store_true",
-        help="Show info-level issues (hidden by default)",
-    )
+    parser.add_argument("--config", default=None, help="Path to config file")
+    parser.add_argument("--show-info", action="store_true", help="Show info-level issues")
     parser.add_argument(
         "--scope",
         choices=["changed", "full"],
         default=None,
-        help="Override validation scope: 'changed' for PR files only, 'full' for entire repo",
+        help="Override validation scope",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress output")
+    parser.add_argument(
+        "--json-report",
+        default=None,
+        help="Generate JSON coverage report to specified file path",
+    )
 
     args = parser.parse_args()
 
@@ -812,6 +813,7 @@ def main():
         config_path=args.config,
         show_info=args.show_info,
         force_scope=args.scope,
+        json_report=args.json_report,
     )
 
 

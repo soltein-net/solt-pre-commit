@@ -31,6 +31,7 @@ from .checks_odoo_module_python import ChecksOdooModulePython
 from .checks_odoo_module_xml import ChecksOdooModuleXML
 from .checks_odoo_module_xml_advanced import ChecksOdooModuleXMLAdvanced
 from .config_loader import ChangedFilesDetector, Severity, SoltConfig
+from .doc_coverage import CoverageReport, build_coverage_report
 
 __all__ = [
     # Main classes
@@ -45,6 +46,9 @@ __all__ = [
     "SoltConfig",
     "Severity",
     "ChangedFilesDetector",
+    # Doc coverage
+    "CoverageReport",
+    "build_coverage_report",
     # Functions
     "run_checks",
 ]
