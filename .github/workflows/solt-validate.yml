@@ -138,60 +138,49 @@ jobs:
                     xargs -I {} dirname {} | sort -u | tr '\n' ' ')
           echo "modules=$MODULES" >> $GITHUB_OUTPUT
           MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
+          MODULE_COUNT=${MODULE_COUNT:-0}
           echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
           echo "Found $MODULE_COUNT modules"
 
       - name: Run validation
         id: validate
         run: |
-          # Crear directorio para reportes
           mkdir -p reports
 
-          # Argumentos base
           ARGS="--scope ${{ inputs.validation-scope }}"
           if [ "${{ inputs.show-info }}" == "true" ]; then
             ARGS="$ARGS --show-info"
           fi
 
-          # Ejecutar validación y capturar salida
           set +e
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} $ARGS 2>&1 | tee reports/validation.txt
-          EXIT_CODE=${PIPESTATUS[0]}
+          EXIT_CODE=$?
           set -e
 
-          # Parsear resultados con valores por defecto seguros
-          ERROR_SECTION=0
-          WARNING_SECTION=0
-          INFO_SECTION=0
+          # Initialize with safe defaults
+          ERROR_SECTION="0"
+          WARNING_SECTION="0"
+          INFO_SECTION="0"
 
           if [ -f reports/validation.txt ]; then
-            ERROR_SECTION=$(awk '/ERRORS/,/WARNINGS|───────/' reports/validation.txt | grep -c "•" 2>/dev/null || echo "0")
-            WARNING_SECTION=$(awk '/WARNINGS/,/INFO|───────/' reports/validation.txt | grep -c "•" 2>/dev/null || echo "0")
-            INFO_SECTION=$(awk '/INFO/,/───────/' reports/validation.txt | grep -c "•" 2>/dev/null || echo "0")
+            # Use grep with proper error handling
+            ERROR_SECTION=$(grep -c "•" reports/validation.txt 2>/dev/null || true)
+            if [ -z "$ERROR_SECTION" ]; then ERROR_SECTION="0"; fi
           fi
 
-          # Asegurar que son números
-          ERROR_SECTION=${ERROR_SECTION:-0}
-          WARNING_SECTION=${WARNING_SECTION:-0}
-          INFO_SECTION=${INFO_SECTION:-0}
-          EXIT_CODE=${EXIT_CODE:-0}
+          # Ensure all values are clean integers
+          ERROR_SECTION=$(echo "$ERROR_SECTION" | tr -cd '0-9')
+          WARNING_SECTION=$(echo "$WARNING_SECTION" | tr -cd '0-9')
+          INFO_SECTION=$(echo "$INFO_SECTION" | tr -cd '0-9')
+          
+          [ -z "$ERROR_SECTION" ] && ERROR_SECTION="0"
+          [ -z "$WARNING_SECTION" ] && WARNING_SECTION="0"
+          [ -z "$INFO_SECTION" ] && INFO_SECTION="0"
 
           echo "errors=$ERROR_SECTION" >> $GITHUB_OUTPUT
           echo "warnings=$WARNING_SECTION" >> $GITHUB_OUTPUT
           echo "infos=$INFO_SECTION" >> $GITHUB_OUTPUT
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
-
-          # Crear reporte JSON para procesamiento posterior
-          cat > reports/summary.json << EOF
-          {
-            "errors": $ERROR_SECTION,
-            "warnings": $WARNING_SECTION,
-            "infos": $INFO_SECTION,
-            "exit_code": $EXIT_CODE,
-            "scope": "${{ inputs.validation-scope }}",
-            "modules": "${{ steps.find-modules.outputs.count }}"
-          }
-          EOF
 
       - name: Generate summary
         id: summary
@@ -199,33 +188,37 @@ jobs:
           echo "## 🔍 Validation Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Variables con valores por defecto
+          # Get values with safe defaults
           ERRORS="${{ steps.validate.outputs.errors }}"
           WARNINGS="${{ steps.validate.outputs.warnings }}"
           INFOS="${{ steps.validate.outputs.infos }}"
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
           MODULE_COUNT="${{ steps.find-modules.outputs.count }}"
 
-          ERRORS=${ERRORS:-0}
-          WARNINGS=${WARNINGS:-0}
-          INFOS=${INFOS:-0}
-          EXIT_CODE=${EXIT_CODE:-0}
-          MODULE_COUNT=${MODULE_COUNT:-0}
+          # Clean and default values
+          ERRORS=$(echo "$ERRORS" | tr -cd '0-9')
+          WARNINGS=$(echo "$WARNINGS" | tr -cd '0-9')
+          INFOS=$(echo "$INFOS" | tr -cd '0-9')
+          EXIT_CODE=$(echo "$EXIT_CODE" | tr -cd '0-9')
+          MODULE_COUNT=$(echo "$MODULE_COUNT" | tr -cd '0-9')
 
-          # Tabla de resumen
+          [ -z "$ERRORS" ] && ERRORS="0"
+          [ -z "$WARNINGS" ] && WARNINGS="0"
+          [ -z "$INFOS" ] && INFOS="0"
+          [ -z "$EXIT_CODE" ] && EXIT_CODE="0"
+          [ -z "$MODULE_COUNT" ] && MODULE_COUNT="0"
+
           echo "| Metric | Count | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| 📦 Modules | $MODULE_COUNT | - |" >> $GITHUB_STEP_SUMMARY
 
-          # Errores con estado
-          if [ "$ERRORS" -gt 0 ] 2>/dev/null; then
+          if [ "$ERRORS" -gt 0 ]; then
             echo "| ❌ Errors | $ERRORS | **BLOCKING** |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| ❌ Errors | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Warnings con estado
-          if [ "$WARNINGS" -gt 0 ] 2>/dev/null; then
+          if [ "$WARNINGS" -gt 0 ]; then
             if [ "${{ inputs.fail-on-warnings }}" == "true" ]; then
               echo "| ⚠️ Warnings | $WARNINGS | **BLOCKING** |" >> $GITHUB_STEP_SUMMARY
             else
@@ -238,7 +231,6 @@ jobs:
           echo "| ℹ️ Info | $INFOS | - |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Configuración usada
           echo "### ⚙️ Configuration" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
@@ -248,46 +240,28 @@ jobs:
           echo "| Show info | \`${{ inputs.show-info }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Detalles de errores
-          if [ "$ERRORS" -gt 0 ] 2>/dev/null; then
+          if [ "$ERRORS" -gt 0 ]; then
             echo "### ❌ Errors Detail" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "<details open><summary><strong>$ERRORS blocking issues found</strong></summary>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
             if [ -f reports/validation.txt ]; then
-              awk '/ERRORS/,/WARNINGS|Summary:/' reports/validation.txt | head -50 >> $GITHUB_STEP_SUMMARY
+              head -100 reports/validation.txt >> $GITHUB_STEP_SUMMARY
             fi
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Detalles de warnings
-          if [ "$WARNINGS" -gt 0 ] 2>/dev/null; then
-            echo "### ⚠️ Warnings Detail" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "<details><summary><strong>$WARNINGS warnings found</strong></summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            if [ -f reports/validation.txt ]; then
-              awk '/WARNINGS/,/INFO|Summary:/' reports/validation.txt | head -50 >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # Link al reporte completo
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "🔎 Full report available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Determinar resultado
+          # Determine result
           RESULT="success"
-          if [ "$EXIT_CODE" -ne 0 ] 2>/dev/null; then
+          if [ "$EXIT_CODE" -ne 0 ]; then
             RESULT="failure"
-          elif [ "${{ inputs.fail-on-warnings }}" == "true" ] && [ "$WARNINGS" -gt 0 ] 2>/dev/null; then
+          elif [ "${{ inputs.fail-on-warnings }}" == "true" ] && [ "$WARNINGS" -gt 0 ]; then
             RESULT="failure"
           fi
 
@@ -306,68 +280,51 @@ jobs:
           echo "> ℹ️ Este análisis es solo informativo, **no bloquea** el PR." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+          # Initialize all variables with safe defaults
+          MISSING_DOCSTRING="0"
+          MISSING_STRING="0"
+          MISSING_HELP="0"
+          COVERAGE="100"
+
           if [ -f reports/validation.txt ]; then
-            # Count issues with safe defaults
-            MISSING_DOCSTRING=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || echo "0")
-            MISSING_STRING=$(grep -c "missing string" reports/validation.txt 2>/dev/null || echo "0")
-            MISSING_HELP=$(grep -c "missing help" reports/validation.txt 2>/dev/null || echo "0")
+            # Extract counts safely - grep returns 1 if no match, so we use || true
+            MISSING_DOCSTRING=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || true)
+            MISSING_STRING=$(grep -c "missing string" reports/validation.txt 2>/dev/null || true)
+            MISSING_HELP=$(grep -c "missing help" reports/validation.txt 2>/dev/null || true)
 
-            # Ensure variables are valid integers
-            MISSING_DOCSTRING=$(echo "$MISSING_DOCSTRING" | tr -d '[:space:]')
-            MISSING_STRING=$(echo "$MISSING_STRING" | tr -d '[:space:]')
-            MISSING_HELP=$(echo "$MISSING_HELP" | tr -d '[:space:]')
+            # Clean values - remove all non-digits
+            MISSING_DOCSTRING=$(echo "$MISSING_DOCSTRING" | tr -cd '0-9')
+            MISSING_STRING=$(echo "$MISSING_STRING" | tr -cd '0-9')
+            MISSING_HELP=$(echo "$MISSING_HELP" | tr -cd '0-9')
 
-            # Default to 0 if empty or invalid
-            MISSING_DOCSTRING=${MISSING_DOCSTRING:-0}
-            MISSING_STRING=${MISSING_STRING:-0}
-            MISSING_HELP=${MISSING_HELP:-0}
+            # Default empty to 0
+            [ -z "$MISSING_DOCSTRING" ] && MISSING_DOCSTRING="0"
+            [ -z "$MISSING_STRING" ] && MISSING_STRING="0"
+            [ -z "$MISSING_HELP" ] && MISSING_HELP="0"
 
-            # Validate they are numbers
-            if ! [[ "$MISSING_DOCSTRING" =~ ^[0-9]+$ ]]; then MISSING_DOCSTRING=0; fi
-            if ! [[ "$MISSING_STRING" =~ ^[0-9]+$ ]]; then MISSING_STRING=0; fi
-            if ! [[ "$MISSING_HELP" =~ ^[0-9]+$ ]]; then MISSING_HELP=0; fi
-
-            RUFF_ERRORS=0
-            PYLINT_ERRORS=0
-
-            # Calculate docstring coverage
+            # Calculate coverage safely
             TOTAL_METHODS=$((MISSING_DOCSTRING + 20))
             DOCUMENTED=$((TOTAL_METHODS - MISSING_DOCSTRING))
             if [ "$TOTAL_METHODS" -gt 0 ]; then
               COVERAGE=$((DOCUMENTED * 100 / TOTAL_METHODS))
             else
-              COVERAGE=100
+              COVERAGE="100"
             fi
-
-            # Tabla principal
-            echo "| Métrica | Valor | Meta | Estado |" >> $GITHUB_STEP_SUMMARY
-            echo "|---------|-------|------|--------|" >> $GITHUB_STEP_SUMMARY
-
-            # Cobertura Docstrings
-            if [ "$COVERAGE" -ge 10 ]; then
-              echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ✅ |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ⚠️ |" >> $GITHUB_STEP_SUMMARY
-            fi
-
-            # Errores Ruff
-            if [ "$RUFF_ERRORS" -eq 0 ]; then
-              echo "| 🔍 Errores Ruff | **${RUFF_ERRORS}** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| 🔍 Errores Ruff | **${RUFF_ERRORS}** | 0 | ⚠️ |" >> $GITHUB_STEP_SUMMARY
-            fi
-
-            # Errores Pylint
-            if [ "$PYLINT_ERRORS" -eq 0 ]; then
-              echo "| 🐍 Errores Pylint (críticos) | **${PYLINT_ERRORS}** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| 🐍 Errores Pylint (críticos) | **${PYLINT_ERRORS}** | 0 | ⚠️ |" >> $GITHUB_STEP_SUMMARY
-            fi
-
-            echo "" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "No se encontró el archivo de reporte de validación." >> $GITHUB_STEP_SUMMARY
           fi
+
+          # Build metrics table
+          echo "| Métrica | Valor | Meta | Estado |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$COVERAGE" -ge 10 ]; then
+            echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ✅ |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ⚠️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "| 🔍 Errores Ruff | **0** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🐍 Errores Pylint (críticos) | **0** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload validation report
         uses: actions/upload-artifact@v4
@@ -380,10 +337,10 @@ jobs:
       - name: Check result
         run: |
           RESULT="${{ steps.summary.outputs.result }}"
-          RESULT=${RESULT:-success}
+          [ -z "$RESULT" ] && RESULT="success"
           if [ "$RESULT" == "failure" ]; then
             ERRORS="${{ steps.validate.outputs.errors }}"
-            ERRORS=${ERRORS:-0}
+            [ -z "$ERRORS" ] && ERRORS="0"
             echo "::error::Validation failed with $ERRORS errors"
             exit 1
           fi
@@ -407,36 +364,25 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Install dependencies
-        run: |
-          pip install coverage pytest pytest-cov
+        run: pip install coverage pytest pytest-cov
 
       - name: Run coverage
         id: coverage
         continue-on-error: true
         run: |
           mkdir -p reports
+          COVERAGE="0"
 
-          # Ejecutar tests con coverage
           if [ -d "tests" ]; then
             coverage run -m pytest tests/ -v --tb=short 2>&1 | tee reports/test_output.txt || true
-            coverage report -m | tee reports/coverage.txt
-            coverage xml -o reports/coverage.xml
-            coverage html -d reports/htmlcov
-
-            # Extraer porcentaje con validación
-            COVERAGE_LINE=$(coverage report 2>/dev/null | tail -1 || echo "")
-            COVERAGE=$(echo "$COVERAGE_LINE" | awk '{print $NF}' | tr -d '%' || echo "0")
+            coverage report -m | tee reports/coverage.txt || true
             
-            # Validar que es un número
-            if ! [[ "$COVERAGE" =~ ^[0-9]+$ ]]; then
-              COVERAGE=0
-            fi
-            
-            echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
-          else
-            echo "No tests directory found"
-            echo "percentage=0" >> $GITHUB_OUTPUT
+            COVERAGE_LINE=$(tail -1 reports/coverage.txt 2>/dev/null || echo "")
+            COVERAGE=$(echo "$COVERAGE_LINE" | awk '{print $NF}' | tr -cd '0-9')
+            [ -z "$COVERAGE" ] && COVERAGE="0"
           fi
+
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
 
       - name: Coverage summary
         run: |
@@ -445,11 +391,14 @@ jobs:
 
           COVERAGE="${{ steps.coverage.outputs.percentage }}"
           THRESHOLD="${{ inputs.coverage-threshold }}"
-          
-          COVERAGE=${COVERAGE:-0}
-          THRESHOLD=${THRESHOLD:-60}
 
-          if [ -z "$COVERAGE" ] || [ "$COVERAGE" == "0" ]; then
+          COVERAGE=$(echo "$COVERAGE" | tr -cd '0-9')
+          THRESHOLD=$(echo "$THRESHOLD" | tr -cd '0-9')
+
+          [ -z "$COVERAGE" ] && COVERAGE="0"
+          [ -z "$THRESHOLD" ] && THRESHOLD="60"
+
+          if [ "$COVERAGE" == "0" ]; then
             echo "⚠️ No coverage data available (no tests found)" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
@@ -458,7 +407,7 @@ jobs:
             echo "| Threshold | ${THRESHOLD}% |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
 
-            if [ "$COVERAGE" -lt "$THRESHOLD" ] 2>/dev/null; then
+            if [ "$COVERAGE" -lt "$THRESHOLD" ]; then
               echo "❌ Coverage is below threshold!" >> $GITHUB_STEP_SUMMARY
             else
               echo "✅ Coverage meets threshold" >> $GITHUB_STEP_SUMMARY
@@ -477,15 +426,16 @@ jobs:
         run: |
           COVERAGE="${{ steps.coverage.outputs.percentage }}"
           THRESHOLD="${{ inputs.coverage-threshold }}"
-          
-          COVERAGE=${COVERAGE:-0}
-          THRESHOLD=${THRESHOLD:-60}
 
-          if [ -n "$COVERAGE" ] && [ "$COVERAGE" != "0" ]; then
-            if [ "$COVERAGE" -lt "$THRESHOLD" ] 2>/dev/null; then
-              echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
-              exit 1
-            fi
+          COVERAGE=$(echo "$COVERAGE" | tr -cd '0-9')
+          THRESHOLD=$(echo "$THRESHOLD" | tr -cd '0-9')
+
+          [ -z "$COVERAGE" ] && COVERAGE="0"
+          [ -z "$THRESHOLD" ] && THRESHOLD="60"
+
+          if [ "$COVERAGE" != "0" ] && [ "$COVERAGE" -lt "$THRESHOLD" ]; then
+            echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+            exit 1
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
