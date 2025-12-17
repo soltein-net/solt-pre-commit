@@ -788,12 +788,18 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     print(f"  Modules analyzed: {len(checks_objects)}")
     print(f"  Models: {total_models} | Fields: {total_fields} | Methods: {public_methods}")
     print("")
-    print(f"  Docstrings:          {docstring_pct:5.1f}%  ({methods_with_docstring}/{public_methods})  "
-          f"{'PASS' if docstring_pct >= docstring_threshold else 'WARN'} (goal: >={docstring_threshold}%)")
-    print(f"  Fields with string:  {string_pct:5.1f}%  ({fields_with_string}/{total_fields})  "
-          f"{'PASS' if string_pct >= string_threshold else 'WARN'} (goal: >={string_threshold}%)")
-    print(f"  Fields with help:    {help_pct:5.1f}%  ({fields_with_help}/{total_fields})  "
-          f"{'PASS' if help_pct >= help_threshold else 'WARN'} (goal: >={help_threshold}%)")
+    print(
+        f"  Docstrings:          {docstring_pct:5.1f}%  ({methods_with_docstring}/{public_methods})  "
+        f"{'PASS' if docstring_pct >= docstring_threshold else 'WARN'} (goal: >={docstring_threshold}%)"
+    )
+    print(
+        f"  Fields with string:  {string_pct:5.1f}%  ({fields_with_string}/{total_fields})  "
+        f"{'PASS' if string_pct >= string_threshold else 'WARN'} (goal: >={string_threshold}%)"
+    )
+    print(
+        f"  Fields with help:    {help_pct:5.1f}%  ({fields_with_help}/{total_fields})  "
+        f"{'PASS' if help_pct >= help_threshold else 'WARN'} (goal: >={help_threshold}%)"
+    )
     print("-" * 60)
     print("These metrics are informational and do NOT block validation.")
     print("")
