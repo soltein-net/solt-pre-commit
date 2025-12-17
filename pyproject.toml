@@ -7,7 +7,7 @@ name = "solt-pre-commit"
 version = "1.0.0"
 description = "Custom pre-commit hooks for Odoo module validation - Soltein"
 readme = "README.md"
-license = "LGPL-3.0-or-later"
+license = {text = "LGPL-3.0-or-later"}
 requires-python = ">=3.8"
 authors = [
     {name = "Soltein", email = "dev@soltein.mx"}
