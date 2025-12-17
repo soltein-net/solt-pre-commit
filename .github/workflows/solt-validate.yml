@@ -53,9 +53,9 @@ on:
         value: ${{ jobs.validate.outputs.warnings }}
 
 jobs:
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   # BRANCH VALIDATION
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   branch-check:
     name: 🌿 Branch Name
     runs-on: ubuntu-latest
@@ -79,9 +79,9 @@ jobs:
             exit 1
           fi
 
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   # MAIN VALIDATION
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   validate:
     name: 🔍 Odoo Module Validation
     runs-on: ubuntu-latest
@@ -139,30 +139,79 @@ jobs:
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
 
-      - name: Run Ruff check
-        id: ruff
+      - name: Run Ruff check (changed files)
+        id: ruff-changed
         continue-on-error: true
         run: |
           set +e
-          ruff check ${{ steps.find-modules.outputs.modules }} --output-format=text 2>&1 | tee reports/ruff.txt
-          RUFF_EXIT=$?
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' | tr '\n' ' ')
+          else
+            CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || echo "")
+          fi
+          
+          if [ -n "$CHANGED_PY" ]; then
+            ruff check $CHANGED_PY --output-format=text 2>&1 | tee reports/ruff-changed.txt
+          else
+            echo "No Python files changed" > reports/ruff-changed.txt
+          fi
           set -e
           
-          RUFF_ERRORS=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff.txt 2>/dev/null || echo "0")
+          RUFF_ERRORS=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-changed.txt 2>/dev/null || echo "0")
           RUFF_ERRORS=$(echo "$RUFF_ERRORS" | tr -cd '0-9')
           [ -z "$RUFF_ERRORS" ] && RUFF_ERRORS="0"
           
           echo "errors=$RUFF_ERRORS" >> $GITHUB_OUTPUT
 
-      - name: Run Pylint-Odoo check
-        id: pylint
+      - name: Run Ruff check (full repo)
+        id: ruff-full
         continue-on-error: true
         run: |
           set +e
-          find ${{ steps.find-modules.outputs.modules }} -name "*.py" 2>/dev/null | head -50 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint.txt || true
+          ruff check ${{ steps.find-modules.outputs.modules }} --output-format=text 2>&1 | tee reports/ruff-full.txt
           set -e
           
-          PYLINT_ERRORS=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint.txt 2>/dev/null || echo "0")
+          RUFF_ERRORS=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-full.txt 2>/dev/null || echo "0")
+          RUFF_ERRORS=$(echo "$RUFF_ERRORS" | tr -cd '0-9')
+          [ -z "$RUFF_ERRORS" ] && RUFF_ERRORS="0"
+          
+          echo "errors=$RUFF_ERRORS" >> $GITHUB_OUTPUT
+
+      - name: Run Pylint-Odoo check (changed files)
+        id: pylint-changed
+        continue-on-error: true
+        run: |
+          set +e
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
+            CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || echo "")
+          else
+            CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ' || echo "")
+          fi
+          
+          if [ -n "$CHANGED_PY" ]; then
+            echo "$CHANGED_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-changed.txt || true
+          else
+            echo "No Python files changed" > reports/pylint-changed.txt
+          fi
+          set -e
+          
+          PYLINT_ERRORS=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-changed.txt 2>/dev/null || echo "0")
+          PYLINT_ERRORS=$(echo "$PYLINT_ERRORS" | tr -cd '0-9')
+          [ -z "$PYLINT_ERRORS" ] && PYLINT_ERRORS="0"
+          
+          echo "errors=$PYLINT_ERRORS" >> $GITHUB_OUTPUT
+
+      - name: Run Pylint-Odoo check (full repo)
+        id: pylint-full
+        continue-on-error: true
+        run: |
+          set +e
+          find ${{ steps.find-modules.outputs.modules }} -name "*.py" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-full.txt || true
+          set -e
+          
+          PYLINT_ERRORS=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-full.txt 2>/dev/null || echo "0")
           PYLINT_ERRORS=$(echo "$PYLINT_ERRORS" | tr -cd '0-9')
           [ -z "$PYLINT_ERRORS" ] && PYLINT_ERRORS="0"
           
@@ -171,39 +220,64 @@ jobs:
       - name: Calculate metrics
         id: metrics
         run: |
-          MISSING_DOCSTRING=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || echo "0")
-          MISSING_STRING=$(grep -c "missing string" reports/validation.txt 2>/dev/null || echo "0")
-          MISSING_HELP=$(grep -c "missing help" reports/validation.txt 2>/dev/null || echo "0")
+          # Metrics for changed files
+          MISSING_DOCSTRING_CHANGED=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || echo "0")
+          MISSING_STRING_CHANGED=$(grep -c "missing string" reports/validation.txt 2>/dev/null || echo "0")
+          MISSING_HELP_CHANGED=$(grep -c "missing help" reports/validation.txt 2>/dev/null || echo "0")
           
-          MISSING_DOCSTRING=$(echo "$MISSING_DOCSTRING" | tr -cd '0-9'); [ -z "$MISSING_DOCSTRING" ] && MISSING_DOCSTRING="0"
-          MISSING_STRING=$(echo "$MISSING_STRING" | tr -cd '0-9'); [ -z "$MISSING_STRING" ] && MISSING_STRING="0"
-          MISSING_HELP=$(echo "$MISSING_HELP" | tr -cd '0-9'); [ -z "$MISSING_HELP" ] && MISSING_HELP="0"
+          MISSING_DOCSTRING_CHANGED=$(echo "$MISSING_DOCSTRING_CHANGED" | tr -cd '0-9'); [ -z "$MISSING_DOCSTRING_CHANGED" ] && MISSING_DOCSTRING_CHANGED="0"
+          MISSING_STRING_CHANGED=$(echo "$MISSING_STRING_CHANGED" | tr -cd '0-9'); [ -z "$MISSING_STRING_CHANGED" ] && MISSING_STRING_CHANGED="0"
+          MISSING_HELP_CHANGED=$(echo "$MISSING_HELP_CHANGED" | tr -cd '0-9'); [ -z "$MISSING_HELP_CHANGED" ] && MISSING_HELP_CHANGED="0"
           
-          TOTAL_METHODS=$((MISSING_DOCSTRING + 25))
-          [ "$TOTAL_METHODS" -eq 0 ] && TOTAL_METHODS=1
-          DOCSTRING_COV=$((100 - (MISSING_DOCSTRING * 100 / TOTAL_METHODS)))
-          [ "$DOCSTRING_COV" -lt 0 ] && DOCSTRING_COV="0"
-          [ "$DOCSTRING_COV" -gt 100 ] && DOCSTRING_COV="100"
+          # Calculate coverage for changed files
+          TOTAL_METHODS_CHANGED=$((MISSING_DOCSTRING_CHANGED + 25))
+          [ "$TOTAL_METHODS_CHANGED" -eq 0 ] && TOTAL_METHODS_CHANGED=1
+          DOCSTRING_COV_CHANGED=$((100 - (MISSING_DOCSTRING_CHANGED * 100 / TOTAL_METHODS_CHANGED)))
+          [ "$DOCSTRING_COV_CHANGED" -lt 0 ] && DOCSTRING_COV_CHANGED="0"
+          [ "$DOCSTRING_COV_CHANGED" -gt 100 ] && DOCSTRING_COV_CHANGED="100"
           
-          TOTAL_FIELDS=$((MISSING_STRING + MISSING_HELP + 40))
-          [ "$TOTAL_FIELDS" -eq 0 ] && TOTAL_FIELDS=1
-          STRING_COV=$((100 - (MISSING_STRING * 100 / TOTAL_FIELDS)))
-          HELP_COV=$((100 - (MISSING_HELP * 100 / TOTAL_FIELDS)))
-          [ "$STRING_COV" -lt 0 ] && STRING_COV="0"
-          [ "$HELP_COV" -lt 0 ] && HELP_COV="0"
+          TOTAL_FIELDS_CHANGED=$((MISSING_STRING_CHANGED + MISSING_HELP_CHANGED + 40))
+          [ "$TOTAL_FIELDS_CHANGED" -eq 0 ] && TOTAL_FIELDS_CHANGED=1
+          STRING_COV_CHANGED=$((100 - (MISSING_STRING_CHANGED * 100 / TOTAL_FIELDS_CHANGED)))
+          HELP_COV_CHANGED=$((100 - (MISSING_HELP_CHANGED * 100 / TOTAL_FIELDS_CHANGED)))
+          [ "$STRING_COV_CHANGED" -lt 0 ] && STRING_COV_CHANGED="0"
+          [ "$HELP_COV_CHANGED" -lt 0 ] && HELP_COV_CHANGED="0"
           
-          echo "docstring_coverage=$DOCSTRING_COV" >> $GITHUB_OUTPUT
-          echo "string_coverage=$STRING_COV" >> $GITHUB_OUTPUT
-          echo "help_coverage=$HELP_COV" >> $GITHUB_OUTPUT
-          echo "ruff_errors=${{ steps.ruff.outputs.errors }}" >> $GITHUB_OUTPUT
-          echo "pylint_errors=${{ steps.pylint.outputs.errors }}" >> $GITHUB_OUTPUT
+          # Run full repo validation for repo-wide metrics
+          solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full 2>&1 | tee reports/validation-full.txt || true
           
-          # Extract top 10 files with issues
-          FILES_WITH_ISSUES=""
-          if [ -f reports/validation.txt ]; then
-            FILES_WITH_ISSUES=$(grep -oE "[a-zA-Z0-9_/]+\.(py|xml|csv):[0-9]+" reports/validation.txt 2>/dev/null | cut -d: -f1 | sort | uniq -c | sort -rn | head -10 | awk '{print $2 ":" $1}' | tr '\n' ',' || echo "")
-          fi
-          echo "files_with_issues=$FILES_WITH_ISSUES" >> $GITHUB_OUTPUT
+          MISSING_DOCSTRING_FULL=$(grep -c "missing docstring" reports/validation-full.txt 2>/dev/null || echo "0")
+          MISSING_STRING_FULL=$(grep -c "missing string" reports/validation-full.txt 2>/dev/null || echo "0")
+          MISSING_HELP_FULL=$(grep -c "missing help" reports/validation-full.txt 2>/dev/null || echo "0")
+          
+          MISSING_DOCSTRING_FULL=$(echo "$MISSING_DOCSTRING_FULL" | tr -cd '0-9'); [ -z "$MISSING_DOCSTRING_FULL" ] && MISSING_DOCSTRING_FULL="0"
+          MISSING_STRING_FULL=$(echo "$MISSING_STRING_FULL" | tr -cd '0-9'); [ -z "$MISSING_STRING_FULL" ] && MISSING_STRING_FULL="0"
+          MISSING_HELP_FULL=$(echo "$MISSING_HELP_FULL" | tr -cd '0-9'); [ -z "$MISSING_HELP_FULL" ] && MISSING_HELP_FULL="0"
+          
+          # Calculate coverage for full repo
+          TOTAL_METHODS_FULL=$((MISSING_DOCSTRING_FULL + 50))
+          [ "$TOTAL_METHODS_FULL" -eq 0 ] && TOTAL_METHODS_FULL=1
+          DOCSTRING_COV_FULL=$((100 - (MISSING_DOCSTRING_FULL * 100 / TOTAL_METHODS_FULL)))
+          [ "$DOCSTRING_COV_FULL" -lt 0 ] && DOCSTRING_COV_FULL="0"
+          [ "$DOCSTRING_COV_FULL" -gt 100 ] && DOCSTRING_COV_FULL="100"
+          
+          TOTAL_FIELDS_FULL=$((MISSING_STRING_FULL + MISSING_HELP_FULL + 80))
+          [ "$TOTAL_FIELDS_FULL" -eq 0 ] && TOTAL_FIELDS_FULL=1
+          STRING_COV_FULL=$((100 - (MISSING_STRING_FULL * 100 / TOTAL_FIELDS_FULL)))
+          HELP_COV_FULL=$((100 - (MISSING_HELP_FULL * 100 / TOTAL_FIELDS_FULL)))
+          [ "$STRING_COV_FULL" -lt 0 ] && STRING_COV_FULL="0"
+          [ "$HELP_COV_FULL" -lt 0 ] && HELP_COV_FULL="0"
+          
+          echo "docstring_cov_changed=$DOCSTRING_COV_CHANGED" >> $GITHUB_OUTPUT
+          echo "string_cov_changed=$STRING_COV_CHANGED" >> $GITHUB_OUTPUT
+          echo "help_cov_changed=$HELP_COV_CHANGED" >> $GITHUB_OUTPUT
+          echo "docstring_cov_full=$DOCSTRING_COV_FULL" >> $GITHUB_OUTPUT
+          echo "string_cov_full=$STRING_COV_FULL" >> $GITHUB_OUTPUT
+          echo "help_cov_full=$HELP_COV_FULL" >> $GITHUB_OUTPUT
+          echo "ruff_changed=${{ steps.ruff-changed.outputs.errors }}" >> $GITHUB_OUTPUT
+          echo "ruff_full=${{ steps.ruff-full.outputs.errors }}" >> $GITHUB_OUTPUT
+          echo "pylint_changed=${{ steps.pylint-changed.outputs.errors }}" >> $GITHUB_OUTPUT
+          echo "pylint_full=${{ steps.pylint-full.outputs.errors }}" >> $GITHUB_OUTPUT
 
       - name: Generate summary
         id: summary
@@ -234,103 +308,67 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // Get all metrics
             const moduleCount = '${{ steps.find-modules.outputs.count }}' || '0';
             const errors = '${{ steps.validate.outputs.errors }}' || '0';
             const exitCode = '${{ steps.validate.outputs.exit_code }}' || '0';
             const duration = '${{ steps.validate.outputs.duration }}' || '0';
             const scope = '${{ inputs.validation-scope }}';
             
-            const docstringCov = '${{ steps.metrics.outputs.docstring_coverage }}' || '0';
-            const stringCov = '${{ steps.metrics.outputs.string_coverage }}' || '0';
-            const helpCov = '${{ steps.metrics.outputs.help_coverage }}' || '0';
-            const ruffErrors = '${{ steps.metrics.outputs.ruff_errors }}' || '0';
-            const pylintErrors = '${{ steps.metrics.outputs.pylint_errors }}' || '0';
-            const filesWithIssues = '${{ steps.metrics.outputs.files_with_issues }}' || '';
+            const docstringCovChanged = '${{ steps.metrics.outputs.docstring_cov_changed }}' || '0';
+            const stringCovChanged = '${{ steps.metrics.outputs.string_cov_changed }}' || '0';
+            const helpCovChanged = '${{ steps.metrics.outputs.help_cov_changed }}' || '0';
+            const docstringCovFull = '${{ steps.metrics.outputs.docstring_cov_full }}' || '0';
+            const stringCovFull = '${{ steps.metrics.outputs.string_cov_full }}' || '0';
+            const helpCovFull = '${{ steps.metrics.outputs.help_cov_full }}' || '0';
             
-            // Helper functions
+            const ruffChanged = '${{ steps.metrics.outputs.ruff_changed }}' || '0';
+            const ruffFull = '${{ steps.metrics.outputs.ruff_full }}' || '0';
+            const pylintChanged = '${{ steps.metrics.outputs.pylint_changed }}' || '0';
+            const pylintFull = '${{ steps.metrics.outputs.pylint_full }}' || '0';
+            
             const icon = (val, threshold, reverse = false) => {
               const v = parseInt(val) || 0;
               const t = parseInt(threshold) || 0;
-              return reverse ? (v <= t ? '✅' : '❌') : (v >= t ? '✅' : '⚠️');
+              if (reverse) return v <= t ? ':white_check_mark:' : ':x:';
+              return v >= t ? ':white_check_mark:' : ':warning:';
             };
             
-            const badgeColor = (val, good, warn) => {
-              const v = parseInt(val) || 0;
-              if (v >= good) return 'brightgreen';
-              if (v >= warn) return 'yellow';
-              return 'red';
-            };
+            const fmt = (val) => (parseInt(val) || 0).toString();
             
-            // Build files table
-            let filesTable = '';
-            if (filesWithIssues && filesWithIssues.length > 0) {
-              const files = filesWithIssues.split(',').filter(f => f.length > 0);
-              if (files.length > 0) {
-                filesTable = `
-            ### 📁 Archivos con más Issues (Top 10)
-
-            | Archivo | Issues |
-            |---------|--------|
-            `;
-                files.forEach(f => {
-                  const [file, count] = f.split(':');
-                  if (file && count) {
-                    filesTable += `| \`${file}\` | ${count} |\n`;
-                  }
-                });
-              }
-            }
+            const overallStatus = parseInt(exitCode) === 0 ? ':white_check_mark: Passed' : ':x: Failed';
             
-            // Determine overall status
-            const overallStatus = parseInt(exitCode) === 0 ? '✅ Passed' : '❌ Failed';
-            const statusIcon = parseInt(exitCode) === 0 ? '✅' : '❌';
-            const scopeLabel = scope === 'changed' ? 'Solo archivos modificados' : 'Repositorio completo';
-            
-            const body = `## 📊 Reporte de Validación Solt
-
-            > ℹ️ Este análisis es **informativo**. El check bloqueante es "Odoo Module Validation".
-
-            ### 📋 Resumen de Validación
-
-            | Métrica | Valor | Estado |
-            |---------|-------|--------|
-            | **Estado general** | ${overallStatus} | ${statusIcon} |
-            | Módulos analizados | ${moduleCount} | - |
-            | Scope | \`${scope}\` | - |
-            | ⏱️ Tiempo de ejecución | ${duration}s | - |
-
-            ### 📚 Cobertura de Documentación
-
-            | Métrica | Cobertura | Meta | Estado |
-            |---------|-----------|------|--------|
-            | Docstrings en métodos | **${docstringCov}%** | ≥80% | ${icon(docstringCov, 80)} |
-            | Campos con \`string\` | **${stringCov}%** | ≥90% | ${icon(stringCov, 90)} |
-            | Campos con \`help\` | **${helpCov}%** | ≥50% | ${icon(helpCov, 50)} |
-
-            ### 🔍 Calidad de Código
-
-            | Herramienta | Issues | Meta | Estado |
-            |-------------|--------|------|--------|
-            | 🔧 Ruff | **${ruffErrors}** | 0 | ${icon(ruffErrors, 0, true)} |
-            | 🐍 Pylint-Odoo | **${pylintErrors}** | 0 | ${icon(pylintErrors, 0, true)} |
-            ${filesTable}
-            ### 🏷️ Badges para README
-
-            \`\`\`markdown
-            ![Docstrings](https://img.shields.io/badge/docstrings-${docstringCov}%25-${badgeColor(docstringCov, 80, 60)}?logo=python&logoColor=white)
-            ![Code Quality](https://img.shields.io/badge/code%20quality-${parseInt(ruffErrors) + parseInt(pylintErrors) === 0 ? 'passing' : 'issues'}-${parseInt(ruffErrors) + parseInt(pylintErrors) === 0 ? 'brightgreen' : 'yellow'}?logo=github)
-            \`\`\`
-
-            ### 📖 Documentación
-
-            - [Guía de Docstrings para Odoo](https://www.odoo.com/documentation/17.0/contributing/development/coding_guidelines.html)
-            - [Configuración de Ruff](https://docs.astral.sh/ruff/configuration/)
-            - [Pylint-Odoo Checks](https://github.com/OCA/pylint-odoo#valid-codes)
-
-            ---
-            🤖 *Generado automáticamente por [solt-pre-commit](https://github.com/soltein-net/solt-pre-commit)*
-            `;
+            const body = [
+              '## :bar_chart: Reporte de Validacion',
+              '',
+              '> :information_source: Este analisis es **informativo**. El check bloqueante es "Odoo Module Validation".',
+              '',
+              '### :clipboard: Resumen de Validacion',
+              '',
+              '| Metrica | Valor |',
+              '|---------|-------|',
+              `| **Estado general** | ${overallStatus} |`,
+              `| Modulos analizados | ${moduleCount} |`,
+              `| Scope | \`${scope}\` |`,
+              `| Tiempo de ejecucion | ${duration}s |`,
+              '',
+              '### :books: Cobertura de Documentacion',
+              '',
+              '| Metrica | Cobertura PR | Cobertura Repositorio | Meta | Estado |',
+              '|---------|--------------|----------------------|------|--------|',
+              `| Docstrings en metodos | **${docstringCovChanged}%** | ${docstringCovFull}% | >=80% | ${icon(docstringCovFull, 80)} |`,
+              `| Campos con \`string\` | **${stringCovChanged}%** | ${stringCovFull}% | >=90% | ${icon(stringCovFull, 90)} |`,
+              `| Campos con \`help\` | **${helpCovChanged}%** | ${helpCovFull}% | >=50% | ${icon(helpCovFull, 50)} |`,
+              '',
+              '### :mag: Calidad de Codigo',
+              '',
+              '| Herramienta | Issues PR | Issues Repositorio | Meta | Estado |',
+              '|-------------|-----------|-------------------|------|--------|',
+              `| :wrench: Ruff | **${fmt(ruffChanged)}** | ${fmt(ruffFull)} | 0 | ${icon(ruffFull, 0, true)} |`,
+              `| :snake: Pylint-Odoo | **${fmt(pylintChanged)}** | ${fmt(pylintFull)} | 0 | ${icon(pylintFull, 0, true)} |`,
+              '',
+              '---',
+              ':robot: *Generado automaticamente por [solt-pre-commit](https://github.com/soltein-net/solt-pre-commit)*'
+            ].join('\n');
             
             // Find and update or create comment
             const { data: comments } = await github.rest.issues.listComments({
@@ -340,7 +378,7 @@ jobs:
             });
             
             const botComment = comments.find(c => 
-              c.user.type === 'Bot' && c.body.includes('Reporte de Validación Solt')
+              c.user.type === 'Bot' && c.body.includes('Reporte de Validación')
             );
             
             if (botComment) {
@@ -368,9 +406,9 @@ jobs:
             exit 1
           fi
 
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   # PRE-COMMIT HOOKS (Solo archivos cambiados - Bloqueante)
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   pre-commit:
     name: 🪝 Pre-commit Hooks
     runs-on: ubuntu-latest
@@ -441,14 +479,14 @@ jobs:
           if [ "$STATUS" == "passed" ]; then
             echo "✅ All hooks passed" >> $GITHUB_STEP_SUMMARY
           elif [ "$STATUS" == "skipped" ]; then
-            echo "⏭️ No files to check" >> $GITHUB_STEP_SUMMARY
+            echo "⭕ No files to check" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Some hooks failed" >> $GITHUB_STEP_SUMMARY
           fi
 
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   # COVERAGE ANALYSIS (Optional)
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
   coverage:
     name: 📊 Coverage Analysis
     runs-on: ubuntu-latest
