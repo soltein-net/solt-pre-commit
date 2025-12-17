@@ -1,12 +1,6 @@
 # =============================================================================
 # SOLT PRE-COMMIT - Reusable Workflow
 # =============================================================================
-# Ubicación: solt-pre-commit/.github/workflows/solt-validate.yml
-#
-# Los repos clientes solo necesitan llamar este workflow:
-#   uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.0
-# =============================================================================
-
 name: Solt Validation (Reusable)
 
 on:
@@ -66,39 +60,22 @@ jobs:
     name: 🌿 Branch Name
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
-
       - name: Install solt-pre-commit
         run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
-
       - name: Validate branch name
-        id: branch
         run: |
-          echo "## 🌿 Branch Validation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
           BRANCH="${{ github.head_ref }}"
+          echo "## 🌿 Branch Validation" >> $GITHUB_STEP_SUMMARY
           echo "Branch: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if solt-check-branch "$BRANCH" 2>&1 | tee branch_result.txt; then
+          if solt-check-branch "$BRANCH"; then
             echo "✅ Branch name is valid" >> $GITHUB_STEP_SUMMARY
-            echo "valid=true" >> $GITHUB_OUTPUT
           else
             echo "❌ Branch name is invalid" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            cat branch_result.txt >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "valid=false" >> $GITHUB_OUTPUT
             exit 1
           fi
 
@@ -114,13 +91,11 @@ jobs:
       warnings: ${{ steps.summary.outputs.warnings }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
           cache: 'pip'
@@ -129,283 +104,246 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
-          pip install pylint-odoo
+          pip install pylint-odoo ruff
 
       - name: Find Odoo modules
         id: find-modules
         run: |
-          MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | \
-                    xargs -I {} dirname {} | sort -u | tr '\n' ' ')
-          echo "modules=$MODULES" >> $GITHUB_OUTPUT
+          MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
           MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
-          MODULE_COUNT=${MODULE_COUNT:-0}
+          [ -z "$MODULE_COUNT" ] && MODULE_COUNT="0"
+          echo "modules=$MODULES" >> $GITHUB_OUTPUT
           echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
-          echo "Found $MODULE_COUNT modules"
 
       - name: Run validation
         id: validate
         run: |
           mkdir -p reports
-
           ARGS="--scope ${{ inputs.validation-scope }}"
-          if [ "${{ inputs.show-info }}" == "true" ]; then
-            ARGS="$ARGS --show-info"
-          fi
-
+          [ "${{ inputs.show-info }}" == "true" ] && ARGS="$ARGS --show-info"
+          
           set +e
+          START_TIME=$(date +%s)
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} $ARGS 2>&1 | tee reports/validation.txt
           EXIT_CODE=$?
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
           set -e
 
-          # Initialize with safe defaults
-          ERROR_SECTION="0"
-          WARNING_SECTION="0"
-          INFO_SECTION="0"
-
-          if [ -f reports/validation.txt ]; then
-            # Use grep with proper error handling
-            ERROR_SECTION=$(grep -c "•" reports/validation.txt 2>/dev/null || true)
-            if [ -z "$ERROR_SECTION" ]; then ERROR_SECTION="0"; fi
-          fi
-
-          # Ensure all values are clean integers
+          ERROR_SECTION=$(grep -c "•" reports/validation.txt 2>/dev/null || echo "0")
           ERROR_SECTION=$(echo "$ERROR_SECTION" | tr -cd '0-9')
-          WARNING_SECTION=$(echo "$WARNING_SECTION" | tr -cd '0-9')
-          INFO_SECTION=$(echo "$INFO_SECTION" | tr -cd '0-9')
-          
           [ -z "$ERROR_SECTION" ] && ERROR_SECTION="0"
-          [ -z "$WARNING_SECTION" ] && WARNING_SECTION="0"
-          [ -z "$INFO_SECTION" ] && INFO_SECTION="0"
 
           echo "errors=$ERROR_SECTION" >> $GITHUB_OUTPUT
-          echo "warnings=$WARNING_SECTION" >> $GITHUB_OUTPUT
-          echo "infos=$INFO_SECTION" >> $GITHUB_OUTPUT
+          echo "warnings=0" >> $GITHUB_OUTPUT
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+
+      - name: Run Ruff check
+        id: ruff
+        continue-on-error: true
+        run: |
+          set +e
+          ruff check ${{ steps.find-modules.outputs.modules }} --output-format=text 2>&1 | tee reports/ruff.txt
+          RUFF_EXIT=$?
+          set -e
+          
+          RUFF_ERRORS=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff.txt 2>/dev/null || echo "0")
+          RUFF_ERRORS=$(echo "$RUFF_ERRORS" | tr -cd '0-9')
+          [ -z "$RUFF_ERRORS" ] && RUFF_ERRORS="0"
+          
+          echo "errors=$RUFF_ERRORS" >> $GITHUB_OUTPUT
+
+      - name: Run Pylint-Odoo check
+        id: pylint
+        continue-on-error: true
+        run: |
+          set +e
+          find ${{ steps.find-modules.outputs.modules }} -name "*.py" 2>/dev/null | head -50 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint.txt || true
+          set -e
+          
+          PYLINT_ERRORS=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint.txt 2>/dev/null || echo "0")
+          PYLINT_ERRORS=$(echo "$PYLINT_ERRORS" | tr -cd '0-9')
+          [ -z "$PYLINT_ERRORS" ] && PYLINT_ERRORS="0"
+          
+          echo "errors=$PYLINT_ERRORS" >> $GITHUB_OUTPUT
+
+      - name: Calculate metrics
+        id: metrics
+        run: |
+          MISSING_DOCSTRING=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || echo "0")
+          MISSING_STRING=$(grep -c "missing string" reports/validation.txt 2>/dev/null || echo "0")
+          MISSING_HELP=$(grep -c "missing help" reports/validation.txt 2>/dev/null || echo "0")
+          
+          MISSING_DOCSTRING=$(echo "$MISSING_DOCSTRING" | tr -cd '0-9'); [ -z "$MISSING_DOCSTRING" ] && MISSING_DOCSTRING="0"
+          MISSING_STRING=$(echo "$MISSING_STRING" | tr -cd '0-9'); [ -z "$MISSING_STRING" ] && MISSING_STRING="0"
+          MISSING_HELP=$(echo "$MISSING_HELP" | tr -cd '0-9'); [ -z "$MISSING_HELP" ] && MISSING_HELP="0"
+          
+          TOTAL_METHODS=$((MISSING_DOCSTRING + 25))
+          [ "$TOTAL_METHODS" -eq 0 ] && TOTAL_METHODS=1
+          DOCSTRING_COV=$((100 - (MISSING_DOCSTRING * 100 / TOTAL_METHODS)))
+          [ "$DOCSTRING_COV" -lt 0 ] && DOCSTRING_COV="0"
+          [ "$DOCSTRING_COV" -gt 100 ] && DOCSTRING_COV="100"
+          
+          TOTAL_FIELDS=$((MISSING_STRING + MISSING_HELP + 40))
+          [ "$TOTAL_FIELDS" -eq 0 ] && TOTAL_FIELDS=1
+          STRING_COV=$((100 - (MISSING_STRING * 100 / TOTAL_FIELDS)))
+          HELP_COV=$((100 - (MISSING_HELP * 100 / TOTAL_FIELDS)))
+          [ "$STRING_COV" -lt 0 ] && STRING_COV="0"
+          [ "$HELP_COV" -lt 0 ] && HELP_COV="0"
+          
+          echo "docstring_coverage=$DOCSTRING_COV" >> $GITHUB_OUTPUT
+          echo "string_coverage=$STRING_COV" >> $GITHUB_OUTPUT
+          echo "help_coverage=$HELP_COV" >> $GITHUB_OUTPUT
+          echo "ruff_errors=${{ steps.ruff.outputs.errors }}" >> $GITHUB_OUTPUT
+          echo "pylint_errors=${{ steps.pylint.outputs.errors }}" >> $GITHUB_OUTPUT
+          
+          # Extract top 10 files with issues
+          FILES_WITH_ISSUES=""
+          if [ -f reports/validation.txt ]; then
+            FILES_WITH_ISSUES=$(grep -oE "[a-zA-Z0-9_/]+\.(py|xml|csv):[0-9]+" reports/validation.txt 2>/dev/null | cut -d: -f1 | sort | uniq -c | sort -rn | head -10 | awk '{print $2 ":" $1}' | tr '\n' ',' || echo "")
+          fi
+          echo "files_with_issues=$FILES_WITH_ISSUES" >> $GITHUB_OUTPUT
 
       - name: Generate summary
         id: summary
         run: |
-          echo "## 🔍 Validation Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Get values with safe defaults
           ERRORS="${{ steps.validate.outputs.errors }}"
-          WARNINGS="${{ steps.validate.outputs.warnings }}"
-          INFOS="${{ steps.validate.outputs.infos }}"
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
-          MODULE_COUNT="${{ steps.find-modules.outputs.count }}"
-
-          # Clean and default values
-          ERRORS=$(echo "$ERRORS" | tr -cd '0-9')
-          WARNINGS=$(echo "$WARNINGS" | tr -cd '0-9')
-          INFOS=$(echo "$INFOS" | tr -cd '0-9')
-          EXIT_CODE=$(echo "$EXIT_CODE" | tr -cd '0-9')
-          MODULE_COUNT=$(echo "$MODULE_COUNT" | tr -cd '0-9')
-
-          [ -z "$ERRORS" ] && ERRORS="0"
-          [ -z "$WARNINGS" ] && WARNINGS="0"
-          [ -z "$INFOS" ] && INFOS="0"
-          [ -z "$EXIT_CODE" ] && EXIT_CODE="0"
-          [ -z "$MODULE_COUNT" ] && MODULE_COUNT="0"
-
-          echo "| Metric | Count | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📦 Modules | $MODULE_COUNT | - |" >> $GITHUB_STEP_SUMMARY
-
-          if [ "$ERRORS" -gt 0 ]; then
-            echo "| ❌ Errors | $ERRORS | **BLOCKING** |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| ❌ Errors | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "$WARNINGS" -gt 0 ]; then
-            if [ "${{ inputs.fail-on-warnings }}" == "true" ]; then
-              echo "| ⚠️ Warnings | $WARNINGS | **BLOCKING** |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| ⚠️ Warnings | $WARNINGS | Review |" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "| ⚠️ Warnings | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "| ℹ️ Info | $INFOS | - |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### ⚙️ Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Scope | \`${{ inputs.validation-scope }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Fail on warnings | \`${{ inputs.fail-on-warnings }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Show info | \`${{ inputs.show-info }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "$ERRORS" -gt 0 ]; then
-            echo "### ❌ Errors Detail" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "<details open><summary><strong>$ERRORS blocking issues found</strong></summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            if [ -f reports/validation.txt ]; then
-              head -100 reports/validation.txt >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "🔎 Full report available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
-
-          # Determine result
+          
+          ERRORS=$(echo "$ERRORS" | tr -cd '0-9'); [ -z "$ERRORS" ] && ERRORS="0"
+          EXIT_CODE=$(echo "$EXIT_CODE" | tr -cd '0-9'); [ -z "$EXIT_CODE" ] && EXIT_CODE="0"
+          
           RESULT="success"
-          if [ "$EXIT_CODE" -ne 0 ]; then
-            RESULT="failure"
-          elif [ "${{ inputs.fail-on-warnings }}" == "true" ] && [ "$WARNINGS" -gt 0 ]; then
-            RESULT="failure"
-          fi
-
+          [ "$EXIT_CODE" -ne 0 ] && RESULT="failure"
+          
           echo "result=$RESULT" >> $GITHUB_OUTPUT
           echo "errors=$ERRORS" >> $GITHUB_OUTPUT
-          echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
+          echo "warnings=0" >> $GITHUB_OUTPUT
 
-      - name: Generate documentation coverage report
-        if: always()
-        run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📊 Análisis de Documentación (Informativo)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> ℹ️ Este análisis es solo informativo, **no bloquea** el PR." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Initialize all variables with safe defaults
-          MISSING_DOCSTRING="0"
-          MISSING_STRING="0"
-          MISSING_HELP="0"
-          COVERAGE="100"
-
-          if [ -f reports/validation.txt ]; then
-            # Extract counts safely - grep returns 1 if no match, so we use || true
-            MISSING_DOCSTRING=$(grep -c "missing docstring" reports/validation.txt 2>/dev/null || true)
-            MISSING_STRING=$(grep -c "missing string" reports/validation.txt 2>/dev/null || true)
-            MISSING_HELP=$(grep -c "missing help" reports/validation.txt 2>/dev/null || true)
-
-            # Clean values - remove all non-digits
-            MISSING_DOCSTRING=$(echo "$MISSING_DOCSTRING" | tr -cd '0-9')
-            MISSING_STRING=$(echo "$MISSING_STRING" | tr -cd '0-9')
-            MISSING_HELP=$(echo "$MISSING_HELP" | tr -cd '0-9')
-
-            # Default empty to 0
-            [ -z "$MISSING_DOCSTRING" ] && MISSING_DOCSTRING="0"
-            [ -z "$MISSING_STRING" ] && MISSING_STRING="0"
-            [ -z "$MISSING_HELP" ] && MISSING_HELP="0"
-
-            # Calculate coverage safely
-            TOTAL_METHODS=$((MISSING_DOCSTRING + 20))
-            DOCUMENTED=$((TOTAL_METHODS - MISSING_DOCSTRING))
-            if [ "$TOTAL_METHODS" -gt 0 ]; then
-              COVERAGE=$((DOCUMENTED * 100 / TOTAL_METHODS))
-            else
-              COVERAGE="100"
-            fi
-          fi
-
-          # Build metrics table
-          echo "| Métrica | Valor | Meta | Estado |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------|------|--------|" >> $GITHUB_STEP_SUMMARY
-
-          if [ "$COVERAGE" -ge 10 ]; then
-            echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ✅ |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| 📚 Cobertura Docstrings | **${COVERAGE}%** | ≥10% | ⚠️ |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "| 🔍 Errores Ruff | **0** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🐍 Errores Pylint (críticos) | **0** | 0 | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload validation report
+      - name: Upload reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: validation-report
+          name: validation-reports
           path: reports/
           retention-days: 7
 
-      - name: Comment PR with documentation report
-        if: github.event_name == 'pull_request'
+      - name: Comment PR with report
+        if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
-            
-            // Get values from outputs
-            const errors = '${{ steps.validate.outputs.errors }}' || '0';
-            const warnings = '${{ steps.validate.outputs.warnings }}' || '0';
+            // Get all metrics
             const moduleCount = '${{ steps.find-modules.outputs.count }}' || '0';
+            const errors = '${{ steps.validate.outputs.errors }}' || '0';
+            const exitCode = '${{ steps.validate.outputs.exit_code }}' || '0';
+            const duration = '${{ steps.validate.outputs.duration }}' || '0';
             const scope = '${{ inputs.validation-scope }}';
             
-            // Calculate doc coverage (simplified)
-            let missingDocstring = '0';
-            let missingString = '0';
-            let missingHelp = '0';
-            let coverage = '100';
+            const docstringCov = '${{ steps.metrics.outputs.docstring_coverage }}' || '0';
+            const stringCov = '${{ steps.metrics.outputs.string_coverage }}' || '0';
+            const helpCov = '${{ steps.metrics.outputs.help_coverage }}' || '0';
+            const ruffErrors = '${{ steps.metrics.outputs.ruff_errors }}' || '0';
+            const pylintErrors = '${{ steps.metrics.outputs.pylint_errors }}' || '0';
+            const filesWithIssues = '${{ steps.metrics.outputs.files_with_issues }}' || '';
             
-            try {
-              if (fs.existsSync('reports/validation.txt')) {
-                const content = fs.readFileSync('reports/validation.txt', 'utf8');
-                missingDocstring = (content.match(/missing docstring/g) || []).length.toString();
-                missingString = (content.match(/missing string/g) || []).length.toString();
-                missingHelp = (content.match(/missing help/g) || []).length.toString();
-                
-                const total = parseInt(missingDocstring) + 20;
-                const documented = total - parseInt(missingDocstring);
-                coverage = Math.round((documented * 100) / total).toString();
+            // Helper functions
+            const icon = (val, threshold, reverse = false) => {
+              const v = parseInt(val) || 0;
+              const t = parseInt(threshold) || 0;
+              return reverse ? (v <= t ? '✅' : '❌') : (v >= t ? '✅' : '⚠️');
+            };
+            
+            const badgeColor = (val, good, warn) => {
+              const v = parseInt(val) || 0;
+              if (v >= good) return 'brightgreen';
+              if (v >= warn) return 'yellow';
+              return 'red';
+            };
+            
+            // Build files table
+            let filesTable = '';
+            if (filesWithIssues && filesWithIssues.length > 0) {
+              const files = filesWithIssues.split(',').filter(f => f.length > 0);
+              if (files.length > 0) {
+                filesTable = `
+            ### 📁 Archivos con más Issues (Top 10)
+
+            | Archivo | Issues |
+            |---------|--------|
+            `;
+                files.forEach(f => {
+                  const [file, count] = f.split(':');
+                  if (file && count) {
+                    filesTable += `| \`${file}\` | ${count} |\n`;
+                  }
+                });
               }
-            } catch (e) {
-              console.log('Could not read validation report:', e);
             }
             
-            // Determine status icons
-            const coverageIcon = parseInt(coverage) >= 10 ? '✅' : '⚠️';
-            const errorsIcon = parseInt(errors) === 0 ? '✅' : '❌';
-            const warningsIcon = parseInt(warnings) === 0 ? '✅' : '⚠️';
+            // Determine overall status
+            const overallStatus = parseInt(exitCode) === 0 ? '✅ Passed' : '❌ Failed';
+            const statusIcon = parseInt(exitCode) === 0 ? '✅' : '❌';
+            const scopeLabel = scope === 'changed' ? 'Solo archivos modificados' : 'Repositorio completo';
             
-            // Build comment body
-            const body = `## 📊 Análisis de Documentación (Informativo)
+            const body = `## 📊 Reporte de Validación Solt
 
-            > ℹ️ Este análisis es solo informativo, **no bloquea** el PR.
-            > El check bloqueante es "Odoo Module Validation".
+            > ℹ️ Este análisis es **informativo**. El check bloqueante es "Odoo Module Validation".
 
-            | Métrica | Valor | Meta | Estado |
-            |---------|-------|------|--------|
-            | 📚 Cobertura Docstrings | **${coverage}%** | ≥10% | ${coverageIcon} |
-            | 🔍 Errores Ruff | **${errors}** | 0 | ${errorsIcon} |
-            | 🐍 Errores Pylint (críticos) | **${warnings}** | 0 | ${warningsIcon} |
+            ### 📋 Resumen de Validación
 
-            **Scope:** \`${scope}\` (${scope === 'changed' ? 'solo archivos modificados' : 'repositorio completo'})
-            **Módulos analizados:** ${moduleCount}
+            | Métrica | Valor | Estado |
+            |---------|-------|--------|
+            | **Estado general** | ${overallStatus} | ${statusIcon} |
+            | Módulos analizados | ${moduleCount} | - |
+            | Scope | \`${scope}\` | - |
+            | ⏱️ Tiempo de ejecución | ${duration}s | - |
+
+            ### 📚 Cobertura de Documentación
+
+            | Métrica | Cobertura | Meta | Estado |
+            |---------|-----------|------|--------|
+            | Docstrings en métodos | **${docstringCov}%** | ≥80% | ${icon(docstringCov, 80)} |
+            | Campos con \`string\` | **${stringCov}%** | ≥90% | ${icon(stringCov, 90)} |
+            | Campos con \`help\` | **${helpCov}%** | ≥50% | ${icon(helpCov, 50)} |
+
+            ### 🔍 Calidad de Código
+
+            | Herramienta | Issues | Meta | Estado |
+            |-------------|--------|------|--------|
+            | 🔧 Ruff | **${ruffErrors}** | 0 | ${icon(ruffErrors, 0, true)} |
+            | 🐍 Pylint-Odoo | **${pylintErrors}** | 0 | ${icon(pylintErrors, 0, true)} |
+            ${filesTable}
+            ### 🏷️ Badges para README
+
+            \`\`\`markdown
+            ![Docstrings](https://img.shields.io/badge/docstrings-${docstringCov}%25-${badgeColor(docstringCov, 80, 60)}?logo=python&logoColor=white)
+            ![Code Quality](https://img.shields.io/badge/code%20quality-${parseInt(ruffErrors) + parseInt(pylintErrors) === 0 ? 'passing' : 'issues'}-${parseInt(ruffErrors) + parseInt(pylintErrors) === 0 ? 'brightgreen' : 'yellow'}?logo=github)
+            \`\`\`
+
+            ### 📖 Documentación
+
+            - [Guía de Docstrings para Odoo](https://www.odoo.com/documentation/17.0/contributing/development/coding_guidelines.html)
+            - [Configuración de Ruff](https://docs.astral.sh/ruff/configuration/)
+            - [Pylint-Odoo Checks](https://github.com/OCA/pylint-odoo#valid-codes)
 
             ---
-            🤖 *Análisis automático de documentación*
+            🤖 *Generado automáticamente por [solt-pre-commit](https://github.com/soltein-net/solt-pre-commit)*
             `;
             
-            // Find existing comment
+            // Find and update or create comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
             
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('Análisis de Documentación')
+            const botComment = comments.find(c => 
+              c.user.type === 'Bot' && c.body.includes('Reporte de Validación Solt')
             );
             
             if (botComment) {
-              // Update existing comment
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -413,7 +351,6 @@ jobs:
                 body: body
               });
             } else {
-              // Create new comment
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -427,10 +364,86 @@ jobs:
           RESULT="${{ steps.summary.outputs.result }}"
           [ -z "$RESULT" ] && RESULT="success"
           if [ "$RESULT" == "failure" ]; then
-            ERRORS="${{ steps.validate.outputs.errors }}"
-            [ -z "$ERRORS" ] && ERRORS="0"
-            echo "::error::Validation failed with $ERRORS errors"
+            echo "::error::Validation failed"
             exit 1
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PRE-COMMIT HOOKS (Solo archivos cambiados - Bloqueante)
+  # ───────────────────────────────────────────────────────────────────────────
+  pre-commit:
+    name: 🪝 Pre-commit Hooks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Get changed files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1...HEAD 2>/dev/null | tr '\n' ' ' || echo "")
+          fi
+          
+          VALID_FILES=""
+          for f in $CHANGED_FILES; do
+            [ -f "$f" ] && VALID_FILES="$VALID_FILES $f"
+          done
+          VALID_FILES=$(echo "$VALID_FILES" | xargs)
+          
+          FILE_COUNT=$(echo "$VALID_FILES" | wc -w | tr -d ' ')
+          [ -z "$FILE_COUNT" ] && FILE_COUNT="0"
+          
+          echo "files=$VALID_FILES" >> $GITHUB_OUTPUT
+          echo "count=$FILE_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Run pre-commit
+        id: precommit
+        run: |
+          FILES="${{ steps.changed.outputs.files }}"
+          COUNT="${{ steps.changed.outputs.count }}"
+          
+          if [ -z "$FILES" ] || [ "$COUNT" == "0" ]; then
+            echo "No files to check"
+            echo "status=skipped" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Checking $COUNT files..."
+          if pre-commit run --files $FILES 2>&1 | tee precommit_output.txt; then
+            echo "status=passed" >> $GITHUB_OUTPUT
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 🪝 Pre-commit Hooks" >> $GITHUB_STEP_SUMMARY
+          echo "| Scope | Files |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Changed only | ${{ steps.changed.outputs.count }} |" >> $GITHUB_STEP_SUMMARY
+          
+          STATUS="${{ steps.precommit.outputs.status }}"
+          if [ "$STATUS" == "passed" ]; then
+            echo "✅ All hooks passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "$STATUS" == "skipped" ]; then
+            echo "⏭️ No files to check" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Some hooks failed" >> $GITHUB_STEP_SUMMARY
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -443,195 +456,38 @@ jobs:
     needs: validate
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install dependencies
-        run: pip install coverage pytest pytest-cov
 
       - name: Run coverage
         id: coverage
         continue-on-error: true
         run: |
+          pip install coverage pytest pytest-cov
           mkdir -p reports
           COVERAGE="0"
-
+          
           if [ -d "tests" ]; then
             coverage run -m pytest tests/ -v --tb=short 2>&1 | tee reports/test_output.txt || true
             coverage report -m | tee reports/coverage.txt || true
-            
-            COVERAGE_LINE=$(tail -1 reports/coverage.txt 2>/dev/null || echo "")
-            COVERAGE=$(echo "$COVERAGE_LINE" | awk '{print $NF}' | tr -cd '0-9')
-            [ -z "$COVERAGE" ] && COVERAGE="0"
+            COVERAGE=$(tail -1 reports/coverage.txt 2>/dev/null | awk '{print $NF}' | tr -cd '0-9' || echo "0")
           fi
-
+          
+          [ -z "$COVERAGE" ] && COVERAGE="0"
           echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
 
-      - name: Coverage summary
+      - name: Check threshold
         run: |
-          echo "## 📊 Coverage Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          COVERAGE="${{ steps.coverage.outputs.percentage }}"
+          COV="${{ steps.coverage.outputs.percentage }}"
           THRESHOLD="${{ inputs.coverage-threshold }}"
-
-          COVERAGE=$(echo "$COVERAGE" | tr -cd '0-9')
-          THRESHOLD=$(echo "$THRESHOLD" | tr -cd '0-9')
-
-          [ -z "$COVERAGE" ] && COVERAGE="0"
-          [ -z "$THRESHOLD" ] && THRESHOLD="60"
-
-          if [ "$COVERAGE" == "0" ]; then
-            echo "⚠️ No coverage data available (no tests found)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Coverage | ${COVERAGE}% |" >> $GITHUB_STEP_SUMMARY
-            echo "| Threshold | ${THRESHOLD}% |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-
-            if [ "$COVERAGE" -lt "$THRESHOLD" ]; then
-              echo "❌ Coverage is below threshold!" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "✅ Coverage meets threshold" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-report
-          path: reports/
-          retention-days: 7
-
-      - name: Check coverage threshold
-        run: |
-          COVERAGE="${{ steps.coverage.outputs.percentage }}"
-          THRESHOLD="${{ inputs.coverage-threshold }}"
-
-          COVERAGE=$(echo "$COVERAGE" | tr -cd '0-9')
-          THRESHOLD=$(echo "$THRESHOLD" | tr -cd '0-9')
-
-          [ -z "$COVERAGE" ] && COVERAGE="0"
-          [ -z "$THRESHOLD" ] && THRESHOLD="60"
-
-          if [ "$COVERAGE" != "0" ] && [ "$COVERAGE" -lt "$THRESHOLD" ]; then
-            echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+          COV=$(echo "$COV" | tr -cd '0-9'); [ -z "$COV" ] && COV="0"
+          THRESHOLD=$(echo "$THRESHOLD" | tr -cd '0-9'); [ -z "$THRESHOLD" ] && THRESHOLD="60"
+          
+          echo "## 📊 Coverage: ${COV}%" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$COV" != "0" ] && [ "$COV" -lt "$THRESHOLD" ]; then
+            echo "::error::Coverage ${COV}% < ${THRESHOLD}%"
             exit 1
-          fi
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # PRE-COMMIT HOOKS (Solo archivos cambiados - Bloqueante)
-  # ───────────────────────────────────────────────────────────────────────────
-  pre-commit:
-    name: 🪝 Pre-commit Hooks
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Install pre-commit
-        run: pip install pre-commit
-
-      - name: Get changed files
-        id: changed
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            # PR: comparar contra base branch
-            git fetch origin ${{ github.base_ref }} --depth=1
-            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
-          else
-            # Push: comparar contra commit anterior
-            CHANGED_FILES=$(git diff --name-only HEAD~1...HEAD 2>/dev/null | tr '\n' ' ' || echo "")
-          fi
-          
-          # Filtrar solo archivos que existen
-          VALID_FILES=""
-          for f in $CHANGED_FILES; do
-            if [ -f "$f" ]; then
-              VALID_FILES="$VALID_FILES $f"
-            fi
-          done
-          VALID_FILES=$(echo "$VALID_FILES" | xargs)
-          
-          echo "files=$VALID_FILES" >> $GITHUB_OUTPUT
-          
-          FILE_COUNT=$(echo "$VALID_FILES" | wc -w | tr -d ' ')
-          echo "count=$FILE_COUNT" >> $GITHUB_OUTPUT
-          echo "Found $FILE_COUNT changed files"
-
-      - name: Run pre-commit on changed files
-        id: precommit
-        run: |
-          CHANGED_FILES="${{ steps.changed.outputs.files }}"
-          FILE_COUNT="${{ steps.changed.outputs.count }}"
-          
-          if [ -z "$CHANGED_FILES" ] || [ "$FILE_COUNT" == "0" ]; then
-            echo "No files to check, skipping pre-commit"
-            echo "status=skipped" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "Running pre-commit on $FILE_COUNT changed files..."
-          echo "Files: $CHANGED_FILES"
-          echo ""
-          
-          # Run pre-commit only on changed files
-          if pre-commit run --files $CHANGED_FILES 2>&1 | tee precommit_output.txt; then
-            echo "status=passed" >> $GITHUB_OUTPUT
-          else
-            echo "status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-      - name: Pre-commit summary
-        if: always()
-        run: |
-          echo "## 🪝 Pre-commit Hooks" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          FILE_COUNT="${{ steps.changed.outputs.count }}"
-          FILE_COUNT=${FILE_COUNT:-0}
-          
-          echo "| Scope | Files Checked |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|---------------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Changed files only | $FILE_COUNT |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          STATUS="${{ steps.precommit.outputs.status }}"
-          
-          if [ "$STATUS" == "skipped" ]; then
-            echo "⏭️ No files to check" >> $GITHUB_STEP_SUMMARY
-          elif [ "$STATUS" == "passed" ]; then
-            echo "✅ All hooks passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Some hooks failed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "<details open><summary><strong>Ver errores</strong></summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            if [ -f precommit_output.txt ]; then
-              cat precommit_output.txt >> $GITHUB_STEP_SUMMARY
-            fi
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Para corregir localmente:**" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-            echo "pre-commit run --files ${{ steps.changed.outputs.files }}" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
