@@ -88,7 +88,7 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install solt-pre-commit
-        run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@main"
+        run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
       - name: Validate branch name
         run: |
           BRANCH="${{ github.head_ref }}"
@@ -127,7 +127,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@main"
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
           pip install pylint-odoo ruff
 
       - name: Find Odoo modules
