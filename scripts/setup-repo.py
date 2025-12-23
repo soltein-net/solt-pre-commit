@@ -56,7 +56,7 @@ PRECOMMIT_LOCAL = (
 
 # GitHub workflow
 WORKFLOW_FILE = (
-    TEMPLATES_DIR / "github-workflows" / "solt_validate_client.yml",
+    TEMPLATES_DIR / "github-workflows" / "solt_validate.yml",
     ".github/workflows/solt_validate.yml",
     "GitHub Actions workflow",
 )

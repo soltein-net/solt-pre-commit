@@ -81,13 +81,6 @@ jobs:
             python -c "from solt_pre_commit import ChecksOdooModule, SoltConfig; print('Import OK')"
           fi
 
-      - name: Upload coverage
-        if: matrix.python-version == '3.11'
-        uses: codecov/codecov-action@v4
-        with:
-          files: coverage.xml
-          fail_ci_if_error: false
-
   # ───────────────────────────────────────────────────────────────────────────
   # INTEGRATION TEST - Validate sample module
   # ───────────────────────────────────────────────────────────────────────────
