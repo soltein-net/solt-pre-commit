@@ -721,7 +721,7 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     skip_help = severity_config.skip_help_fields
     skip_docstring = severity_config.skip_docstring_methods
 
-    #S eparate counters for fields that actually need string/help
+    # S eparate counters for fields that actually need string/help
     fields_needing_string = 0
     fields_needing_help = 0
 
@@ -747,13 +747,13 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
 
                     total_fields += 1
 
-                    #Only count fields that NEED string (not in skip list)
+                    # Only count fields that NEED string (not in skip list)
                     if field_name not in skip_string:
                         fields_needing_string += 1
                         if fld.get("string"):
                             fields_with_string += 1
 
-                    #Only count fields that NEED help (not in skip list)
+                    # Only count fields that NEED help (not in skip list)
                     if field_name not in skip_help:
                         fields_needing_help += 1
                         if fld.get("help"):
