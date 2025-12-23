@@ -348,6 +348,7 @@ jobs:
           PYLINT_CHANGED: ${{ steps.metrics.outputs.pylint_changed }}
           PYLINT_FULL: ${{ steps.metrics.outputs.pylint_full }}
           DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         with:
           script: |
             function safeInt(val, def = 0) {
@@ -355,10 +356,16 @@ jobs:
               return isNaN(parsed) ? def : parsed;
             }
             
+            const prNumber = safeInt(process.env.PR_NUMBER);
+            if (!prNumber) {
+              console.log('No PR number found, skipping comment');
+              return;
+            }
+            
             const moduleCount = safeInt(process.env.MODULE_COUNT);
             const exitCode = safeInt(process.env.EXIT_CODE);
             const duration = safeInt(process.env.DURATION);
-            const scope = process.env.SCOPE;
+            const scope = process.env.SCOPE || 'changed';
             const threshold = safeInt(process.env.DOCSTRING_THRESHOLD, 80);
             
             const docstringCov = safeInt(process.env.DOCSTRING_COV);
@@ -430,10 +437,12 @@ jobs:
               ':robot: *solt-pre-commit*'
             ].join('\n');
             
+            console.log(`Posting comment to PR #${prNumber}`);
+            
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
+              issue_number: prNumber,
             });
             
             const botComment = comments.find(c => 
@@ -447,13 +456,15 @@ jobs:
                 comment_id: botComment.id,
                 body: body
               });
+              console.log('Updated existing comment');
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: context.issue.number,
+                issue_number: prNumber,
                 body: body
               });
+              console.log('Created new comment');
             }
 
       - name: Check result
