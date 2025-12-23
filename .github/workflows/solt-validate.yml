@@ -107,6 +107,9 @@ jobs:
   validate:
     name: Odoo Module Validation
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     outputs:
       result: ${{ steps.summary.outputs.result }}
       errors: ${{ steps.summary.outputs.errors }}
