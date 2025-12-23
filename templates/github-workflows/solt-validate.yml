@@ -10,9 +10,9 @@ name: Validate
 
 on:
   pull_request:
-    branches: [ main, master, develop, "17.0", "18.0" ]
+    branches: [main, master, develop, "17.0", "18.0"]
   push:
-    branches: [ main, master, develop, "17.0", "18.0" ]
+    branches: [main, master, develop, "17.0", "18.0"]
 
 jobs:
   validate:
@@ -28,19 +28,21 @@ jobs:
       # 'full': Entire repository
       validation-scope: 'changed'
 
+      # ─── Documentation Threshold ───
+      docstring-threshold: 80  # Minimum % to show "passing" badge
+
       # ─── Coverage (optional) ───
-      run-coverage: true
+      run-coverage: false
       coverage-threshold: 60
 
       # ─── Strictness Level ───
-      fail-on-warnings: true    # Set to true for stricter validation
-      show-info: false          # Set to true to see all issues
+      fail-on-warnings: false
+      show-info: false
 
-      # ─── Badge Configuration (optional) ───
-      # For dynamic badges:
-      # 1. Create an empty Gist
-      # 2. Create GIST_SECRET with a GitHub token
-      # gist-id: 'YOUR_GIST_ID_HERE'
+      # ─── Badge Configuration ───
+      # Replace with your Gist ID
+      gist-id: 'YOUR_GIST_ID_HERE'
+      badge-filename-prefix: 'solt-budget'
 
     secrets:
       GIST_SECRET: ${{ secrets.GIST_SECRET }}

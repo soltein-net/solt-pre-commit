@@ -46,6 +46,16 @@ on:
         required: false
         type: string
         default: ''
+      badge-filename-prefix:
+        description: 'Prefix for badge filenames in gist (e.g., solt-budget)'
+        required: false
+        type: string
+        default: ''
+      docstring-threshold:
+        description: 'Minimum docstring coverage to pass (default: 80)'
+        required: false
+        type: number
+        default: 80
     secrets:
       GIST_SECRET:
         description: 'GitHub token for updating gist badges'
@@ -78,16 +88,16 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
       - name: Install solt-pre-commit
-        run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
+        run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@main"
       - name: Validate branch name
         run: |
           BRANCH="${{ github.head_ref }}"
           echo "## Branch Validation" >> $GITHUB_STEP_SUMMARY
           echo "Branch: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
           if solt-check-branch "$BRANCH"; then
-            echo "✅ Branch name is valid" >> $GITHUB_STEP_SUMMARY
+            echo "Branch name is valid" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Branch name is invalid" >> $GITHUB_STEP_SUMMARY
+            echo "Branch name is invalid" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
@@ -102,6 +112,7 @@ jobs:
       errors: ${{ steps.summary.outputs.errors }}
       warnings: ${{ steps.summary.outputs.warnings }}
       docstring_cov: ${{ steps.metrics.outputs.docstring_cov }}
+      docs_status: ${{ steps.metrics.outputs.docs_status }}
 
     steps:
       - uses: actions/checkout@v4
@@ -116,7 +127,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@main"
           pip install pylint-odoo ruff
 
       - name: Find Odoo modules
@@ -131,9 +142,6 @@ jobs:
           echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
           echo "Found $MODULE_COUNT modules: $MODULES"
 
-      # ─────────────────────────────────────────────────────────────────────
-      # VALIDATION - Changed files (bloqueante)
-      # ─────────────────────────────────────────────────────────────────────
       - name: Run validation (changed files)
         id: validate
         run: |
@@ -154,9 +162,6 @@ jobs:
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
 
-      # ─────────────────────────────────────────────────────────────────────
-      # METRICS - Full repo (informativo)
-      # ─────────────────────────────────────────────────────────────────────
       - name: Run full validation for metrics
         run: |
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info 2>&1 | tee reports/validation-full.txt || true
@@ -166,8 +171,6 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          
-          # Get changed Python files
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
             CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
@@ -181,11 +184,9 @@ jobs:
             RUFF_CHANGED=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-changed.txt 2>/dev/null || echo 0)
           fi
           
-          # Full repo
           ruff check ${{ steps.find-modules.outputs.modules }} --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
           RUFF_FULL=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-full.txt 2>/dev/null || echo 0)
           
-          # Sanitize - ensure numeric
           RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           RUFF_FULL=$(echo "$RUFF_FULL" | grep -oE '^[0-9]+' || echo 0)
           
@@ -197,7 +198,6 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           else
@@ -210,78 +210,63 @@ jobs:
             PYLINT_CHANGED=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-changed.txt 2>/dev/null || echo 0)
           fi
           
-          # Full repo (limited to avoid timeout)
           find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-full.txt || true
           PYLINT_FULL=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-full.txt 2>/dev/null || echo 0)
           
-          # Sanitize
           PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           PYLINT_FULL=$(echo "$PYLINT_FULL" | grep -oE '^[0-9]+' || echo 0)
           
           echo "changed=${PYLINT_CHANGED:-0}" >> $GITHUB_OUTPUT
           echo "full=${PYLINT_FULL:-0}" >> $GITHUB_OUTPUT
 
-      # ─────────────────────────────────────────────────────────────────────
-      # CALCULATE REAL METRICS using Python for accuracy
-      # ─────────────────────────────────────────────────────────────────────
       - name: Calculate real metrics
         id: metrics
+        env:
+          DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
         run: |
-          python3 << 'METRICS_SCRIPT'
+          python3 << 'EOF'
           import os
           import re
           import json
 
-          # Read the validation output
           metrics_data = {
-              'docstring_cov': 0,
-              'docstring_documented': 0,
-              'docstring_total': 1,
-              'string_cov': 0,
-              'string_documented': 0,
-              'string_total': 1,
-              'help_cov': 0,
-              'help_documented': 0,
-              'help_total': 1,
+              'docstring_cov': 0, 'docstring_documented': 0, 'docstring_total': 1,
+              'string_cov': 0, 'string_documented': 0, 'string_total': 1,
+              'help_cov': 0, 'help_documented': 0, 'help_total': 1,
               'models': 0
           }
 
           try:
               with open('reports/validation-full.txt', 'r') as f:
                   content = f.read()
-          
-              # Parse METRICS line from Python output
               metrics_match = re.search(r'^METRICS:(.+)$', content, re.MULTILINE)
               if metrics_match:
-                  metrics_str = metrics_match.group(1)
-                  for pair in metrics_str.split(','):
+                  for pair in metrics_match.group(1).split(','):
                       if '=' in pair:
                           key, value = pair.split('=', 1)
-                          key = key.strip()
                           try:
-                              metrics_data[key] = float(value) if '.' in value else int(value)
+                              metrics_data[key.strip()] = float(value) if '.' in value else int(value)
                           except ValueError:
                               pass
           except FileNotFoundError:
               print("Warning: validation-full.txt not found")
 
-          # Count issues in PR validation
-          missing_docstring_pr = 0
-          missing_string_pr = 0
-          missing_help_pr = 0
-
+          missing_docstring_pr = missing_string_pr = missing_help_pr = 0
           try:
               with open('reports/validation.txt', 'r') as f:
-                  pr_content = f.read()
-              missing_docstring_pr = pr_content.lower().count('missing docstring')
-              missing_string_pr = pr_content.lower().count('missing string')
-              missing_help_pr = pr_content.lower().count('missing help')
+                  pr_content = f.read().lower()
+              missing_docstring_pr = pr_content.count('missing docstring')
+              missing_string_pr = pr_content.count('missing string')
+              missing_help_pr = pr_content.count('missing help')
           except FileNotFoundError:
               pass
 
-          # Write outputs
+          docstring_cov = metrics_data.get('docstring_cov', 0)
+          threshold = int(os.environ.get('DOCSTRING_THRESHOLD', 80))
+          docs_status = 'passing' if docstring_cov >= threshold else 'failing'
+
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"docstring_cov={int(metrics_data.get('docstring_cov', 0))}\n")
+              f.write(f"docstring_cov={int(docstring_cov)}\n")
               f.write(f"docstring_documented={int(metrics_data.get('docstring_documented', 0))}\n")
               f.write(f"docstring_total={int(metrics_data.get('docstring_total', 1))}\n")
               f.write(f"string_cov={int(metrics_data.get('string_cov', 0))}\n")
@@ -294,18 +279,14 @@ jobs:
               f.write(f"missing_docstring_pr={missing_docstring_pr}\n")
               f.write(f"missing_string_pr={missing_string_pr}\n")
               f.write(f"missing_help_pr={missing_help_pr}\n")
+              f.write(f"docs_status={docs_status}\n")
 
-          # Also save as JSON for badge updates
           with open('reports/metrics.json', 'w') as f:
               json.dump(metrics_data, f, indent=2)
 
-          print(f"Metrics calculated:")
-          print(f"  Docstrings: {metrics_data.get('docstring_cov', 0):.1f}% ({metrics_data.get('docstring_documented', 0)}/{metrics_data.get('docstring_total', 1)})")
-          print(f"  Strings: {metrics_data.get('string_cov', 0):.1f}% ({metrics_data.get('string_documented', 0)}/{metrics_data.get('string_total', 1)})")
-          print(f"  Help: {metrics_data.get('help_cov', 0):.1f}% ({metrics_data.get('help_documented', 0)}/{metrics_data.get('help_total', 1)})")
-          METRICS_SCRIPT
+          print(f"Docstrings: {docstring_cov:.1f}% | Status: {docs_status}")
+          EOF
 
-          # Add ruff/pylint outputs
           echo "ruff_changed=${{ steps.ruff.outputs.changed }}" >> $GITHUB_OUTPUT
           echo "ruff_full=${{ steps.ruff.outputs.full }}" >> $GITHUB_OUTPUT
           echo "pylint_changed=${{ steps.pylint.outputs.changed }}" >> $GITHUB_OUTPUT
@@ -324,9 +305,8 @@ jobs:
             RESULT="success"
           fi
           
-          # Count errors/warnings from validation output (ASCII only)
-          ERRORS=$(grep -ciE "error|ERROR" reports/validation.txt 2>/dev/null || echo 0)
-          WARNINGS=$(grep -ciE "warning|WARNING" reports/validation.txt 2>/dev/null || echo 0)
+          ERRORS=$(grep -ciE "error" reports/validation.txt 2>/dev/null || echo 0)
+          WARNINGS=$(grep -ciE "warning" reports/validation.txt 2>/dev/null || echo 0)
           
           echo "result=$RESULT" >> $GITHUB_OUTPUT
           echo "errors=$ERRORS" >> $GITHUB_OUTPUT
@@ -340,12 +320,31 @@ jobs:
           path: reports/
           retention-days: 7
 
-      # ─────────────────────────────────────────────────────────────────────
-      # PR COMMENT with report
-      # ─────────────────────────────────────────────────────────────────────
       - name: Comment PR with report
         if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
+        env:
+          MODULE_COUNT: ${{ steps.find-modules.outputs.count }}
+          EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
+          DURATION: ${{ steps.validate.outputs.duration }}
+          SCOPE: ${{ inputs.validation-scope }}
+          DOCSTRING_COV: ${{ steps.metrics.outputs.docstring_cov }}
+          DOCSTRING_DOCUMENTED: ${{ steps.metrics.outputs.docstring_documented }}
+          DOCSTRING_TOTAL: ${{ steps.metrics.outputs.docstring_total }}
+          STRING_COV: ${{ steps.metrics.outputs.string_cov }}
+          STRING_DOCUMENTED: ${{ steps.metrics.outputs.string_documented }}
+          STRING_TOTAL: ${{ steps.metrics.outputs.string_total }}
+          HELP_COV: ${{ steps.metrics.outputs.help_cov }}
+          HELP_DOCUMENTED: ${{ steps.metrics.outputs.help_documented }}
+          HELP_TOTAL: ${{ steps.metrics.outputs.help_total }}
+          MISSING_DOCSTRING_PR: ${{ steps.metrics.outputs.missing_docstring_pr }}
+          MISSING_STRING_PR: ${{ steps.metrics.outputs.missing_string_pr }}
+          MISSING_HELP_PR: ${{ steps.metrics.outputs.missing_help_pr }}
+          RUFF_CHANGED: ${{ steps.metrics.outputs.ruff_changed }}
+          RUFF_FULL: ${{ steps.metrics.outputs.ruff_full }}
+          PYLINT_CHANGED: ${{ steps.metrics.outputs.pylint_changed }}
+          PYLINT_FULL: ${{ steps.metrics.outputs.pylint_full }}
+          DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
         with:
           script: |
             function safeInt(val, def = 0) {
@@ -353,78 +352,80 @@ jobs:
               return isNaN(parsed) ? def : parsed;
             }
             
-            const moduleCount = safeInt('${{ steps.find-modules.outputs.count }}');
-            const exitCode = safeInt('${{ steps.validate.outputs.exit_code }}');
-            const duration = safeInt('${{ steps.validate.outputs.duration }}');
-            const scope = '${{ inputs.validation-scope }}';
+            const moduleCount = safeInt(process.env.MODULE_COUNT);
+            const exitCode = safeInt(process.env.EXIT_CODE);
+            const duration = safeInt(process.env.DURATION);
+            const scope = process.env.SCOPE;
+            const threshold = safeInt(process.env.DOCSTRING_THRESHOLD, 80);
             
-            const docstringCov = safeInt('${{ steps.metrics.outputs.docstring_cov }}');
-            const documentedMethods = safeInt('${{ steps.metrics.outputs.docstring_documented }}');
-            const totalMethods = safeInt('${{ steps.metrics.outputs.docstring_total }}', 1);
+            const docstringCov = safeInt(process.env.DOCSTRING_COV);
+            const documentedMethods = safeInt(process.env.DOCSTRING_DOCUMENTED);
+            const totalMethods = safeInt(process.env.DOCSTRING_TOTAL, 1);
             
-            const stringCov = safeInt('${{ steps.metrics.outputs.string_cov }}');
-            const fieldsWithString = safeInt('${{ steps.metrics.outputs.string_documented }}');
-            const totalFields = safeInt('${{ steps.metrics.outputs.string_total }}', 1);
+            const stringCov = safeInt(process.env.STRING_COV);
+            const fieldsWithString = safeInt(process.env.STRING_DOCUMENTED);
+            const totalFields = safeInt(process.env.STRING_TOTAL, 1);
             
-            const helpCov = safeInt('${{ steps.metrics.outputs.help_cov }}');
-            const fieldsWithHelp = safeInt('${{ steps.metrics.outputs.help_documented }}');
+            const helpCov = safeInt(process.env.HELP_COV);
+            const fieldsWithHelp = safeInt(process.env.HELP_DOCUMENTED);
+            const helpTotal = safeInt(process.env.HELP_TOTAL, 1);
             
-            const missingDocstringPr = safeInt('${{ steps.metrics.outputs.missing_docstring_pr }}');
-            const missingStringPr = safeInt('${{ steps.metrics.outputs.missing_string_pr }}');
-            const missingHelpPr = safeInt('${{ steps.metrics.outputs.missing_help_pr }}');
+            const missingDocstringPr = safeInt(process.env.MISSING_DOCSTRING_PR);
+            const missingStringPr = safeInt(process.env.MISSING_STRING_PR);
+            const missingHelpPr = safeInt(process.env.MISSING_HELP_PR);
             
-            const ruffChanged = safeInt('${{ steps.metrics.outputs.ruff_changed }}');
-            const ruffFull = safeInt('${{ steps.metrics.outputs.ruff_full }}');
-            const pylintChanged = safeInt('${{ steps.metrics.outputs.pylint_changed }}');
-            const pylintFull = safeInt('${{ steps.metrics.outputs.pylint_full }}');
+            const ruffChanged = safeInt(process.env.RUFF_CHANGED);
+            const ruffFull = safeInt(process.env.RUFF_FULL);
+            const pylintChanged = safeInt(process.env.PYLINT_CHANGED);
+            const pylintFull = safeInt(process.env.PYLINT_FULL);
             
-            function icon(val, threshold, reverse = false) {
-              if (reverse) {
-                return val <= threshold ? ':white_check_mark:' : ':x:';
-              }
-              return val >= threshold ? ':white_check_mark:' : ':warning:';
+            function icon(val, th, reverse = false) {
+              if (reverse) return val <= th ? ':white_check_mark:' : ':x:';
+              return val >= th ? ':white_check_mark:' : ':warning:';
             }
             
             const overallStatus = exitCode === 0 ? ':white_check_mark: Passed' : ':x: Failed';
             
-            const body = `## :bar_chart: Reporte de Validación
-
-            > :information_source: Este análisis es **informativo**. El check bloqueante es "Odoo Module Validation".
-
-            ### :clipboard: Resumen
-
-            | Métrica | Valor |
-            |---------|-------|
-            | **Estado general** | ${overallStatus} |
-            | Módulos analizados | ${moduleCount} |
-            | Scope | \`${scope}\` |
-            | Tiempo | ${duration}s |
-
-            ### :books: Cobertura de Documentación (Repositorio)
-
-            | Métrica | Cobertura | Detalle | Meta | Estado |
-            |---------|-----------|---------|------|--------|
-            | Docstrings | **${docstringCov}%** | ${documentedMethods}/${totalMethods} | >=80% | ${icon(docstringCov, 80)} |
-            | Campos con \`string\` | **${stringCov}%** | ${fieldsWithString}/${totalFields} | >=90% | ${icon(stringCov, 90)} |
-            | Campos con \`help\` | **${helpCov}%** | ${fieldsWithHelp}/${totalFields} | >=50% | ${icon(helpCov, 50)} |
-
-            ### :warning: Issues en este PR
-
-            | Tipo | Cantidad |
-            |------|----------|
-            | Docstrings faltantes | ${missingDocstringPr} |
-            | Campos sin \`string\` | ${missingStringPr} |
-            | Campos sin \`help\` | ${missingHelpPr} |
-
-            ### :mag: Calidad de Código
-
-            | Herramienta | Issues PR | Issues Repo | Meta | Estado |
-            |-------------|-----------|-------------|------|--------|
-            | :wrench: Ruff | ${ruffChanged} | ${ruffFull} | 0 | ${icon(ruffFull, 0, true)} |
-            | :snake: Pylint-Odoo | ${pylintChanged} | ${pylintFull} | 0 | ${icon(pylintFull, 0, true)} |
-
-            ---
-            :robot: *Generado por [solt-pre-commit](https://github.com/soltein-net/solt-pre-commit)*`;
+            const body = [
+              '## :bar_chart: Reporte de Validacion',
+              '',
+              '> :information_source: Este analisis es **informativo**.',
+              '',
+              '### :clipboard: Resumen',
+              '',
+              '| Metrica | Valor |',
+              '|---------|-------|',
+              `| **Estado** | ${overallStatus} |`,
+              `| Modulos | ${moduleCount} |`,
+              `| Scope | \`${scope}\` |`,
+              `| Tiempo | ${duration}s |`,
+              '',
+              '### :books: Cobertura de Documentacion',
+              '',
+              '| Metrica | Cobertura | Detalle | Meta | Estado |',
+              '|---------|-----------|---------|------|--------|',
+              `| Docstrings | **${docstringCov}%** | ${documentedMethods}/${totalMethods} | >=${threshold}% | ${icon(docstringCov, threshold)} |`,
+              `| Campos string | **${stringCov}%** | ${fieldsWithString}/${totalFields} | >=90% | ${icon(stringCov, 90)} |`,
+              `| Campos help | **${helpCov}%** | ${fieldsWithHelp}/${helpTotal} | >=50% | ${icon(helpCov, 50)} |`,
+              '',
+              '### :warning: Issues en este PR',
+              '',
+              '| Tipo | Cantidad |',
+              '|------|----------|',
+              `| Docstrings faltantes | ${missingDocstringPr} |`,
+              `| Campos sin string | ${missingStringPr} |`,
+              `| Campos sin help | ${missingHelpPr} |`,
+              '',
+              '### :mag: Calidad de Codigo',
+              '',
+              '| Herramienta | PR | Repo | Estado |',
+              '|-------------|----|------|--------|',
+              `| Ruff | ${ruffChanged} | ${ruffFull} | ${icon(ruffFull, 0, true)} |`,
+              `| Pylint | ${pylintChanged} | ${pylintFull} | ${icon(pylintFull, 0, true)} |`,
+              '',
+              '---',
+              ':robot: *solt-pre-commit*'
+            ].join('\n');
             
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -433,7 +434,7 @@ jobs:
             });
             
             const botComment = comments.find(c => 
-              c.user.type === 'Bot' && c.body.includes('Reporte de Validación')
+              c.user.type === 'Bot' && c.body.includes('Reporte de Validacion')
             );
             
             if (botComment) {
@@ -462,29 +463,50 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # UPDATE BADGE (on push to protected branches)
+  # UPDATE BADGES (on push to protected branches)
   # ---------------------------------------------------------------------------
-  update-badge:
-    name: Update Documentation Badge
+  update-badges:
+    name: Update Documentation Badges
     runs-on: ubuntu-latest
     needs: validate
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/17.0') || startsWith(github.ref, 'refs/heads/18.0'))
+    if: |
+      github.event_name == 'push' && 
+      (github.ref == 'refs/heads/main' || 
+       github.ref == 'refs/heads/master' || 
+       github.ref == 'refs/heads/develop' || 
+       startsWith(github.ref, 'refs/heads/17.0') || 
+       startsWith(github.ref, 'refs/heads/18.0'))
 
     steps:
-      - name: Update badge via gist
+      - name: Update docstrings badge
         if: inputs.gist-id != ''
         uses: schneegans/dynamic-badges-action@v1.7.0
         continue-on-error: true
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ inputs.gist-id }}
-          filename: docstrings.json
+          filename: ${{ inputs.badge-filename-prefix }}-docstrings.json
           label: docstrings
           message: "${{ needs.validate.outputs.docstring_cov }}%"
           valColorRange: ${{ needs.validate.outputs.docstring_cov }}
           minColorRange: 0
           maxColorRange: 100
           namedLogo: python
+          logoColor: white
+
+      - name: Update docs status badge
+        if: inputs.gist-id != ''
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        continue-on-error: true
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ inputs.gist-id }}
+          filename: ${{ inputs.badge-filename-prefix }}-docs-status.json
+          label: Documentation Standards
+          message: ${{ needs.validate.outputs.docs_status }}
+          color: ${{ needs.validate.outputs.docs_status == 'passing' && 'brightgreen' || 'red' }}
+          namedLogo: github
+          logoColor: white
 
   # ---------------------------------------------------------------------------
   # PRE-COMMIT HOOKS
@@ -492,7 +514,6 @@ jobs:
   pre-commit:
     name: Pre-commit Hooks
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -554,18 +575,14 @@ jobs:
         if: always()
         run: |
           echo "## Pre-commit Hooks" >> $GITHUB_STEP_SUMMARY
-          echo "| Scope | Files |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Changed only | ${{ steps.changed.outputs.count }} |" >> $GITHUB_STEP_SUMMARY
-          
+          echo "Files checked: ${{ steps.changed.outputs.count }}" >> $GITHUB_STEP_SUMMARY
           STATUS="${{ steps.precommit.outputs.status }}"
-          if [ -z "$STATUS" ]; then STATUS="unknown"; fi
           if [ "$STATUS" = "passed" ]; then
-            echo "✅ All hooks passed" >> $GITHUB_STEP_SUMMARY
+            echo "All hooks passed" >> $GITHUB_STEP_SUMMARY
           elif [ "$STATUS" = "skipped" ]; then
-            echo "ℹ️ No files to check" >> $GITHUB_STEP_SUMMARY
+            echo "No files to check" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Some hooks failed" >> $GITHUB_STEP_SUMMARY
+            echo "Some hooks failed" >> $GITHUB_STEP_SUMMARY
           fi
 
   # ---------------------------------------------------------------------------
@@ -576,7 +593,6 @@ jobs:
     runs-on: ubuntu-latest
     if: inputs.run-coverage
     needs: validate
-
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -590,13 +606,11 @@ jobs:
           pip install coverage pytest pytest-cov
           mkdir -p reports
           COVERAGE=0
-          
           if [ -d "tests" ]; then
             coverage run -m pytest tests/ -v --tb=short 2>&1 | tee reports/test_output.txt || true
             coverage report -m | tee reports/coverage.txt || true
             COVERAGE=$(tail -1 reports/coverage.txt 2>/dev/null | awk '{print $NF}' | grep -oE '[0-9]+' | head -1 || echo 0)
           fi
-          
           if [ -z "$COVERAGE" ]; then COVERAGE=0; fi
           echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
 
@@ -604,14 +618,11 @@ jobs:
         run: |
           COV="${{ steps.coverage.outputs.percentage }}"
           THRESHOLD="${{ inputs.coverage-threshold }}"
-          
           COV=$(echo "$COV" | grep -oE '[0-9]+' | head -1 || echo 0)
           THRESHOLD=$(echo "$THRESHOLD" | grep -oE '[0-9]+' | head -1 || echo 60)
           if [ -z "$COV" ]; then COV=0; fi
           if [ -z "$THRESHOLD" ]; then THRESHOLD=60; fi
-          
           echo "## Coverage: ${COV}%" >> $GITHUB_STEP_SUMMARY
-          
           if [ "$COV" -ne 0 ] && [ "$COV" -lt "$THRESHOLD" ]; then
             echo "::error::Coverage ${COV}% < ${THRESHOLD}%"
             exit 1
