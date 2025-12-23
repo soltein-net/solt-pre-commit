@@ -249,7 +249,7 @@ jobs:
           try:
               with open('reports/validation-full.txt', 'r') as f:
                   content = f.read()
-              
+          
               # Parse METRICS line from Python output
               metrics_match = re.search(r'^METRICS:(.+)$', content, re.MULTILINE)
               if metrics_match:

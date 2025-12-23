@@ -15,7 +15,7 @@ validation_scope: changed
 # =============================================================================
 # DISABLED CHECKS
 # =============================================================================
-disabled_checks: []
+disabled_checks: [ ]
 
 # =============================================================================
 # SEVERITY LEVELS
@@ -109,7 +109,7 @@ skip_help_fields:
   - company_id
   - currency_id
 
-skip_docstring_methods: []
+skip_docstring_methods: [ ]
 
 min_docstring_length: 10
 
@@ -141,5 +141,5 @@ branch_naming:
     - docs
     - test
     - chore
-  protected_branches: []
-  protected_patterns: []
+  protected_branches: [ ]
+  protected_patterns: [ ]

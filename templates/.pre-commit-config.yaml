@@ -13,7 +13,7 @@ repos:
     rev: v1.0.0
     hooks:
       - id: solt-check-branch
-        stages: [pre-commit, pre-push]
+        stages: [ pre-commit, pre-push ]
       - id: solt-check-odoo
         # args: [--show-info]  # Uncomment to see info-level issues
         # args: [--scope, full]  # Uncomment to validate entire repo
@@ -26,7 +26,7 @@ repos:
     rev: v0.8.4
     hooks:
       - id: ruff
-        args: [--fix]
+        args: [ --fix ]
       - id: ruff-format
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ repos:
     rev: v9.1.2
     hooks:
       - id: pylint_odoo
-        args: [--rcfile=.pylintrc]
+        args: [ --rcfile=.pylintrc ]
 
   # ─────────────────────────────────────────────────────────────────────────
   # GENERAL CODE QUALITY
@@ -50,7 +50,7 @@ repos:
       - id: check-xml
       - id: check-merge-conflict
       - id: check-added-large-files
-        args: [--maxkb=500]
+        args: [ --maxkb=500 ]
       - id: debug-statements
 
 # =============================================================================

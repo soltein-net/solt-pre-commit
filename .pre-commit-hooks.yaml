@@ -17,7 +17,7 @@
   language: python
   always_run: true
   pass_filenames: false
-  stages: [pre-commit, pre-push]
+  stages: [ pre-commit, pre-push ]
 
 # -----------------------------------------------------------------------------
 # FULL VALIDATION - All checks (XML, CSV, PO, Python, Manifest)
@@ -33,7 +33,7 @@
   language: python
   files: (__manifest__|__openerp__)\.py$
   pass_filenames: true
-  types: [python]
+  types: [ python ]
 
 # -----------------------------------------------------------------------------
 # XML ONLY - Basic and advanced XML validations
@@ -45,7 +45,7 @@
   language: python
   files: \.xml$
   pass_filenames: false
-  args: [--check-xml-only]
+  args: [ --check-xml-only ]
 
 # -----------------------------------------------------------------------------
 # CSV ONLY - CSV data file validations
@@ -57,7 +57,7 @@
   language: python
   files: \.csv$
   pass_filenames: false
-  args: [--check-csv-only]
+  args: [ --check-csv-only ]
 
 # -----------------------------------------------------------------------------
 # PO/POT ONLY - Translation file validations
@@ -69,7 +69,7 @@
   language: python
   files: \.(po|pot)$
   pass_filenames: false
-  args: [--check-po-only]
+  args: [ --check-po-only ]
 
 # -----------------------------------------------------------------------------
 # PYTHON ONLY - Python code validations
@@ -85,4 +85,4 @@
   language: python
   files: \.py$
   pass_filenames: false
-  args: [--check-python-only]
+  args: [ --check-python-only ]

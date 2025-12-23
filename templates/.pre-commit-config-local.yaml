@@ -17,8 +17,8 @@ repos:
         language: python
         always_run: true
         pass_filenames: false
-        stages: [pre-commit, pre-push]
-        additional_dependencies: [pyyaml]
+        stages: [ pre-commit, pre-push ]
+        additional_dependencies: [ pyyaml ]
 
       - id: solt-check-odoo
         name: Solt - Validate Odoo Module
@@ -26,8 +26,8 @@ repos:
         language: python
         files: (__manifest__|__openerp__)\.py$
         pass_filenames: true
-        types: [python]
-        additional_dependencies: [lxml, polib, pyyaml]
+        types: [ python ]
+        additional_dependencies: [ lxml, polib, pyyaml ]
 
   # ─────────────────────────────────────────────────────────────────────────
   # PYTHON CODE QUALITY - Ruff (fast linter and formatter)
@@ -37,7 +37,7 @@ repos:
     rev: v0.8.4
     hooks:
       - id: ruff
-        args: [--fix]
+        args: [ --fix ]
       - id: ruff-format
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ repos:
     rev: v9.1.2
     hooks:
       - id: pylint_odoo
-        args: [--rcfile=.pylintrc]
+        args: [ --rcfile=.pylintrc ]
 
   # ─────────────────────────────────────────────────────────────────────────
   # GENERAL CODE QUALITY
@@ -61,7 +61,7 @@ repos:
       - id: check-xml
       - id: check-merge-conflict
       - id: check-added-large-files
-        args: [--maxkb=500]
+        args: [ --maxkb=500 ]
       - id: debug-statements
 
 # =============================================================================

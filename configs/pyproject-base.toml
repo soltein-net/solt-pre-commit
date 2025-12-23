@@ -84,31 +84,31 @@ exclude = [
 
 [tool.ruff.lint]
 select = [
-    "E",      # pycodestyle errors
-    "W",      # pycodestyle warnings
-    "F",      # Pyflakes
-    "I",      # isort
-    "N",      # pep8-naming
-    "B",      # flake8-bugbear
-    "C4",     # flake8-comprehensions
-    "UP",     # pyupgrade
-    "SIM",    # flake8-simplify
-    "RUF",    # Ruff-specific rules
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "F", # Pyflakes
+    "I", # isort
+    "N", # pep8-naming
+    "B", # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "SIM", # flake8-simplify
+    "RUF", # Ruff-specific rules
 ]
 
 ignore = [
-    "E501",   # line too long (handled by formatter)
-    "E731",   # lambda assignment
-    "B008",   # function call in default argument (common in Odoo)
-    "B904",   # raise without from (common pattern)
-    "N802",   # function name lowercase (Odoo uses specific conventions)
-    "N803",   # argument name lowercase
-    "N806",   # variable in function should be lowercase
-    "N815",   # mixedCase variable (Odoo compatibility)
-    "N999",   # invalid module name
+    "E501", # line too long (handled by formatter)
+    "E731", # lambda assignment
+    "B008", # function call in default argument (common in Odoo)
+    "B904", # raise without from (common pattern)
+    "N802", # function name lowercase (Odoo uses specific conventions)
+    "N803", # argument name lowercase
+    "N806", # variable in function should be lowercase
+    "N815", # mixedCase variable (Odoo compatibility)
+    "N999", # invalid module name
     "SIM102", # nested if (sometimes clearer)
     "SIM108", # ternary operator (sometimes less readable)
-    "UP007",  # Use X | Y for type union (Python 3.10+)
+    "UP007", # Use X | Y for type union (Python 3.10+)
     "RUF012", # mutable class attributes (Odoo fields)
 ]
 
@@ -122,8 +122,8 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 "__manifest__.py" = ["ALL"]
 "__openerp__.py" = ["ALL"]
 "tests/**/*.py" = [
-    "B011",  # assert False
-    "S101",  # assert used
+    "B011", # assert False
+    "S101", # assert used
 ]
 
 [tool.ruff.lint.isort]
