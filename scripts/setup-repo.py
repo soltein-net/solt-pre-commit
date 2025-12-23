@@ -56,8 +56,8 @@ PRECOMMIT_LOCAL = (
 
 # GitHub workflow
 WORKFLOW_FILE = (
-    TEMPLATES_DIR / "github-workflows" / "solt_validate.yml",
-    ".github/workflows/solt_validate.yml",
+    TEMPLATES_DIR / "github-workflows" / "solt-validate.yml",
+    ".github/workflows/solt-validate.yml",
     "GitHub Actions workflow",
 )
 
@@ -276,7 +276,7 @@ def setup_repo(
     print("   .pylintrc                  → Pylint-odoo configuration")
     print("   .solt-hooks.yaml           → Solt validation settings")
     print("   .pre-commit-config.yaml    → Pre-commit hook configuration")
-    print("   .github/workflows/solt_validate.yml → CI workflow")
+    print("   .github/workflows/solt-validate.yml → CI workflow")
 
     print("\n📋 Next steps:")
     print("   1. Review .solt-hooks.yaml and adjust settings if needed")

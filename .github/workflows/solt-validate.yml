@@ -324,9 +324,9 @@ jobs:
             RESULT="success"
           fi
           
-          # Count errors/warnings from validation output
-          ERRORS=$(grep -c "❌\|ERROR" reports/validation.txt 2>/dev/null || echo 0)
-          WARNINGS=$(grep -c "⚠️\|WARNING" reports/validation.txt 2>/dev/null || echo 0)
+          # Count errors/warnings from validation output (ASCII only)
+          ERRORS=$(grep -ciE "error|ERROR" reports/validation.txt 2>/dev/null || echo 0)
+          WARNINGS=$(grep -ciE "warning|WARNING" reports/validation.txt 2>/dev/null || echo 0)
           
           echo "result=$RESULT" >> $GITHUB_OUTPUT
           echo "errors=$ERRORS" >> $GITHUB_OUTPUT
