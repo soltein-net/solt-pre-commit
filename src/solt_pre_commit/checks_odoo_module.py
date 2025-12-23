@@ -30,9 +30,9 @@ DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "upda
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # SEVERITY SYSTEM
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
 class Severity:
@@ -46,7 +46,7 @@ class Severity:
     COLORS = {ERROR: "\033[91m", WARNING: "\033[93m", INFO: "\033[94m"}
     RESET = "\033[0m"
     BOLD = "\033[1m"
-    ICONS = {ERROR: "❌", WARNING: "⚠️ ", INFO: "ℹ️ "}
+    ICONS = {ERROR: "âŒ", WARNING: "âš ï¸ ", INFO: "â„¹ï¸ "}
 
 
 # Default severity for each check
@@ -99,9 +99,9 @@ DEFAULT_SEVERITY = {
 }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CHANGED FILES DETECTION
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
 class ChangedFilesDetector:
@@ -155,9 +155,9 @@ class ChangedFilesDetector:
         return [f for f in all_module_files if os.path.realpath(f["filename"]) in changed]
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
 class SeverityConfig:
@@ -721,6 +721,10 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     skip_help = severity_config.skip_help_fields
     skip_docstring = severity_config.skip_docstring_methods
 
+    #S eparate counters for fields that actually need string/help
+    fields_needing_string = 0
+    fields_needing_help = 0
+
     for _module_name, checks_obj in checks_objects:
         for file_data in checks_obj.manifest_referenced_files.get(".py", []):
             models = file_data.get("models", {})
@@ -733,26 +737,27 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
 
             for _class_name, field_list in fields.items():
                 for fld in field_list:
-                    if fld.get("name", "").startswith("_"):
+                    field_name = fld.get("name", "")
+                    # Skip private fields
+                    if field_name.startswith("_"):
                         continue
+                    # Skip related fields (they inherit attributes from source)
                     if fld.get("related"):
                         continue
 
                     total_fields += 1
 
-                    # Check string
-                    if fld.get("name") not in skip_string:
+                    #Only count fields that NEED string (not in skip list)
+                    if field_name not in skip_string:
+                        fields_needing_string += 1
                         if fld.get("string"):
                             fields_with_string += 1
-                    else:
-                        fields_with_string += 1  # Skip counts as covered
 
-                    # Check help
-                    if fld.get("name") not in skip_help:
+                    #Only count fields that NEED help (not in skip list)
+                    if field_name not in skip_help:
+                        fields_needing_help += 1
                         if fld.get("help"):
                             fields_with_help += 1
-                    else:
-                        fields_with_help += 1  # Skip counts as covered
 
             for _class_name, method_list in methods.items():
                 for meth in method_list:
@@ -768,12 +773,12 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
                     if meth.get("has_docstring"):
                         methods_with_docstring += 1
 
-    if total_fields == 0 and total_methods == 0:
+    if fields_needing_string == 0 and fields_needing_help == 0 and public_methods == 0:
         return  # No data to show
 
-    # Calculate percentages
-    string_pct = (fields_with_string / total_fields * 100) if total_fields > 0 else 100
-    help_pct = (fields_with_help / total_fields * 100) if total_fields > 0 else 100
+    # Calculate percentages using fields_needing_* instead of total_fields
+    string_pct = (fields_with_string / fields_needing_string * 100) if fields_needing_string > 0 else 100
+    help_pct = (fields_with_help / fields_needing_help * 100) if fields_needing_help > 0 else 100
     docstring_pct = (methods_with_docstring / public_methods * 100) if public_methods > 0 else 100
 
     # Get thresholds from config (or defaults)
@@ -786,22 +791,37 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     print("REPOSITORY COVERAGE (Informational)")
     print("-" * 60)
     print(f"  Modules analyzed: {len(checks_objects)}")
-    print(f"  Models: {total_models} | Fields: {total_fields} | Methods: {public_methods}")
+    print(f"  Models: {total_models} | Total Fields: {total_fields} | Public Methods: {public_methods}")
+    print(f"  Fields needing string: {fields_needing_string} | Fields needing help: {fields_needing_help}")
     print("")
     print(
         f"  Docstrings:          {docstring_pct:5.1f}%  ({methods_with_docstring}/{public_methods})  "
         f"{'PASS' if docstring_pct >= docstring_threshold else 'WARN'} (goal: >={docstring_threshold}%)"
     )
     print(
-        f"  Fields with string:  {string_pct:5.1f}%  ({fields_with_string}/{total_fields})  "
+        f"  Fields with string:  {string_pct:5.1f}%  ({fields_with_string}/{fields_needing_string})  "
         f"{'PASS' if string_pct >= string_threshold else 'WARN'} (goal: >={string_threshold}%)"
     )
     print(
-        f"  Fields with help:    {help_pct:5.1f}%  ({fields_with_help}/{total_fields})  "
+        f"  Fields with help:    {help_pct:5.1f}%  ({fields_with_help}/{fields_needing_help})  "
         f"{'PASS' if help_pct >= help_threshold else 'WARN'} (goal: >={help_threshold}%)"
     )
     print("-" * 60)
     print("These metrics are informational and do NOT block validation.")
+    # Machine-readable output for CI parsing (do not modify format)
+    # Output fields_needing_* as totals instead of total_fields
+    print(
+        f"METRICS:docstring_cov={docstring_pct:.1f},"
+        f"docstring_documented={methods_with_docstring},"
+        f"docstring_total={public_methods},"
+        f"string_cov={string_pct:.1f},"
+        f"string_documented={fields_with_string},"
+        f"string_total={fields_needing_string},"
+        f"help_cov={help_pct:.1f},"
+        f"help_documented={fields_with_help},"
+        f"help_total={fields_needing_help},"
+        f"models={total_models}"
+    )
     print("")
 
 
@@ -817,6 +837,10 @@ def run(
     show_coverage=True,
 ):
     """Main entry point."""
+    import time
+
+    start_time = time.time()
+
     if manifest_paths is None:
         manifest_paths = []
 
@@ -864,6 +888,8 @@ def run(
     # Show global coverage metrics
     if verbose and show_coverage:
         _print_global_coverage_metrics(checks_objects, severity_config)
+    # Calculate elapsed time
+    elapsed_time = time.time() - start_time
 
     if len(manifest_paths) > 1 and verbose:
         print("")
@@ -884,6 +910,7 @@ def run(
         print(f"  Errors: {total_counts[Severity.ERROR]}")
         print(f"  Warnings: {total_counts[Severity.WARNING]}")
         print(f"  Info: {total_counts[Severity.INFO]}")
+        print(f"  Elapsed time: {elapsed_time:.2f}s")
 
     if has_blocking and verbose:
         if all_results:
