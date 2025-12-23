@@ -32,7 +32,7 @@ jobs:
       docstring-threshold: 80  # Minimum % to show "passing" badge
 
       # ─── Coverage (optional) ───
-      run-coverage: false
+      run-coverage: true
       coverage-threshold: 60
 
       # ─── Strictness Level ───
