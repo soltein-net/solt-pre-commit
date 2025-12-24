@@ -10,9 +10,9 @@ name: Validate
 
 on:
   pull_request:
-    branches: [main, master, develop, "17.0", "18.0"]
+    branches: [ main, master, develop, "17.0", "18.0" ]
   push:
-    branches: [main, master, develop, "17.0", "18.0"]
+    branches: [ main, master, develop, "17.0", "18.0" ]
 
 jobs:
   validate:
@@ -36,7 +36,7 @@ jobs:
       coverage-threshold: 60
 
       # ─── Strictness Level ───
-      fail-on-warnings: false
+      fail-on-warnings: true
       show-info: false
 
       # ─── Badge Configuration ───

@@ -175,11 +175,13 @@ jobs:
           echo "::notice::Validation exit code: $VALIDATION_EXIT_CODE"
 
       - name: Run full validation for metrics
+        continue-on-error: true
         run: |
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info 2>&1 | tee reports/validation-full.txt || true
 
       - name: Run Ruff check
         id: ruff
+        continue-on-error: true
         run: |
           set +e
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -206,6 +208,7 @@ jobs:
 
       - name: Run Pylint-Odoo check
         id: pylint
+        continue-on-error: true
         run: |
           set +e
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -231,13 +234,29 @@ jobs:
 
       - name: Calculate real metrics
         id: metrics
+        if: always()
         env:
           DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
         run: |
+          # Debug: Show if validation files exist
+          echo "=== Debug: Checking report files ==="
+          ls -la reports/ 2>/dev/null || echo "reports/ directory not found"
+          
+          if [ -f "reports/validation-full.txt" ]; then
+            echo "=== Last 30 lines of validation-full.txt ==="
+            tail -30 reports/validation-full.txt
+            echo "=== Searching for METRICS: line ==="
+            grep "METRICS:" reports/validation-full.txt || echo "METRICS: line not found"
+          else
+            echo "validation-full.txt not found"
+          fi
+          
           python3 << 'EOF'
           import os
           import re
           import json
+
+          print("=== Python metrics script starting ===")
 
           metrics_data = {
               'docstring_cov': 0, 'docstring_documented': 0, 'docstring_total': 1,
@@ -249,17 +268,28 @@ jobs:
           try:
               with open('reports/validation-full.txt', 'r') as f:
                   content = f.read()
+              print(f"Read {len(content)} bytes from validation-full.txt")
+          
               metrics_match = re.search(r'^METRICS:(.+)$', content, re.MULTILINE)
               if metrics_match:
+                  print(f"Found METRICS line: {metrics_match.group(1)[:100]}...")
                   for pair in metrics_match.group(1).split(','):
                       if '=' in pair:
                           key, value = pair.split('=', 1)
                           try:
                               metrics_data[key.strip()] = float(value) if '.' in value else int(value)
                           except ValueError:
-                              pass
+                              print(f"  Failed to parse: {pair}")
+              else:
+                  print("METRICS: line NOT found in file")
+                  # Try to find any line containing METRICS
+                  for line in content.split('\n'):
+                      if 'METRICS' in line or 'metrics' in line.lower():
+                          print(f"  Found similar line: {line[:100]}")
           except FileNotFoundError:
-              print("Warning: validation-full.txt not found")
+              print("ERROR: validation-full.txt not found")
+          except Exception as e:
+              print(f"ERROR reading validation-full.txt: {e}")
 
           missing_docstring_pr = missing_string_pr = missing_help_pr = 0
           try:
@@ -294,7 +324,11 @@ jobs:
           with open('reports/metrics.json', 'w') as f:
               json.dump(metrics_data, f, indent=2)
 
-          print(f"Docstrings: {docstring_cov:.1f}% | Status: {docs_status}")
+          print(f"=== Final metrics ===")
+          print(f"Docstrings: {docstring_cov:.1f}% ({metrics_data.get('docstring_documented', 0)}/{metrics_data.get('docstring_total', 1)})")
+          print(f"Field strings: {metrics_data.get('string_cov', 0):.1f}%")
+          print(f"Field help: {metrics_data.get('help_cov', 0):.1f}%")
+          print(f"Status: {docs_status}")
           EOF
 
           echo "ruff_changed=${{ steps.ruff.outputs.changed }}" >> $GITHUB_OUTPUT
@@ -304,6 +338,7 @@ jobs:
 
       - name: Generate summary and extract errors
         id: summary
+        if: always()
         run: |
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
           EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' || echo 0)
@@ -451,6 +486,60 @@ jobs:
               print("Sample errors:")
               for e in errors_list[:3]:
                   print(f"  - {e.get('file')}:{e.get('line')} {e.get('message')}")
+          
+          # Also parse Pylint errors if they exist
+          pylint_errors = []
+          try:
+              for pylint_file in ['reports/pylint-changed.txt', 'reports/pylint-full.txt']:
+                  try:
+                      with open(pylint_file, 'r', encoding='utf-8', errors='replace') as f:
+                          for line in f:
+                              # Pylint format: path/to/file.py:123:0: C0123(code-name) Message
+                              match = re.match(r'^(.+?):(\d+):\d+:\s*([CRWEF]\d+)\(([^)]+)\)\s*(.+)$', line.strip())
+                              if match:
+                                  filepath = match.group(1)
+                                  lineno = match.group(2)
+                                  code = match.group(3)
+                                  code_name = match.group(4)
+                                  message = match.group(5)
+          
+                                  # Shorten filepath
+                                  parts = filepath.replace('\\', '/').split('/')
+                                  if len(parts) > 2:
+                                      filepath = '/'.join(parts[-2:])
+          
+                                  # Truncate message
+                                  if len(message) > 60:
+                                      message = message[:57] + '...'
+          
+                                  pylint_errors.append({
+                                      'file': filepath,
+                                      'line': lineno,
+                                      'message': f"[{code}] {message}",
+                                      'check': f"Pylint: {code_name}"
+                                  })
+                  except FileNotFoundError:
+                      pass
+          except Exception as e:
+              print(f"Error parsing pylint output: {e}")
+          
+          # Add pylint errors to the main list (up to 5)
+          if pylint_errors and len(errors_list) < 10:
+              remaining_slots = 10 - len(errors_list)
+              errors_list.extend(pylint_errors[:remaining_slots])
+              total_errors += len(pylint_errors)
+          
+          # Update result with pylint errors
+          result['errors'] = errors_list[:10]
+          result['total_errors'] = total_errors
+          result['pylint_errors_count'] = len(pylint_errors)
+          
+          # Re-save with updated data
+          with open('reports/extracted_issues.json', 'w') as f:
+              json.dump(result, f, indent=2)
+          
+          if pylint_errors:
+              print(f"Also found {len(pylint_errors)} Pylint errors")
           PYEOF
 
       - name: Upload reports
@@ -668,6 +757,7 @@ jobs:
       # CRITICAL: This step determines the final job status
       - name: Final validation check
         id: final-check
+        if: always()
         run: |
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
           EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' || echo 0)
