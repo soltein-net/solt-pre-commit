@@ -723,7 +723,7 @@ jobs:
               }
             }
 
-            // Summary section (like original image)
+            // Summary section
             bodyParts.push('### :clipboard: Summary');
             bodyParts.push('');
             bodyParts.push('| Metric | Value |');
@@ -734,7 +734,7 @@ jobs:
             bodyParts.push(`| Time | ${duration}s |`);
             bodyParts.push('');
 
-            // Documentation Coverage (like original image)
+            // Documentation Coverage
             bodyParts.push('### :books: Documentation Coverage');
             bodyParts.push('');
             bodyParts.push('| Metric | Coverage | Detail | Goal | Status |');
@@ -744,8 +744,8 @@ jobs:
             bodyParts.push(`| Field help | **${helpCov}%** | ${fieldsWithHelp}/${helpTotal} | >=50% | ${icon(helpCov, 50)} |`);
             bodyParts.push('');
 
-            // Issues in this PR (like original image)
-            bodyParts.push('### :warning: Issues in this PR');
+            // Issues in this PR
+            bodyParts.push('### :warning: Documentation Issues in this PR');
             bodyParts.push('');
             bodyParts.push('| Type | Count |');
             bodyParts.push('|------|-------|');
@@ -754,7 +754,7 @@ jobs:
             bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
             bodyParts.push('');
 
-            // Code Quality (like original image)
+            // Code Quality
             bodyParts.push('### :mag: Code Quality');
             bodyParts.push('');
             bodyParts.push('| Tool | PR | Repo | Status |');
