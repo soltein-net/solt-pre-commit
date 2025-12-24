@@ -530,6 +530,56 @@ jobs:
           
           if pylint_errors:
               print(f"Also found {len(pylint_errors)} Pylint errors")
+          
+          # Also parse Ruff errors if they exist
+          ruff_errors = []
+          try:
+              for ruff_file in ['reports/ruff-changed.txt']:
+                  try:
+                      with open(ruff_file, 'r', encoding='utf-8', errors='replace') as f:
+                          for line in f:
+                              # Ruff concise format: path/to/file.py:123:45: E501 Message
+                              match = re.match(r'^(.+?):(\d+):(\d+):\s*([A-Z]+\d+)\s+(.+)$', line.strip())
+                              if match:
+                                  filepath = match.group(1)
+                                  lineno = match.group(2)
+                                  code = match.group(4)
+                                  message = match.group(5)
+          
+                                  # Shorten filepath - remove /home/runner/work/REPO/ prefix
+                                  filepath = re.sub(r'/home/runner/work/[^/]+/', '', filepath)
+                                  # Keep last 2 parts for readability
+                                  parts = filepath.replace('\\', '/').split('/')
+                                  if len(parts) > 2:
+                                      filepath = '/'.join(parts[-2:])
+          
+                                  # Truncate message
+                                  if len(message) > 60:
+                                      message = message[:57] + '...'
+          
+                                  ruff_errors.append({
+                                      'file': filepath,
+                                      'line': lineno,
+                                      'message': f"[{code}] {message}",
+                                      'check': f"Ruff: {code}"
+                                  })
+                  except FileNotFoundError:
+                      pass
+          except Exception as e:
+              print(f"Error parsing ruff output: {e}")
+          
+          # Store ruff errors separately for the comment
+          result['ruff_errors'] = ruff_errors[:10]
+          result['ruff_errors_count'] = len(ruff_errors)
+          
+          # Re-save with ruff data
+          with open('reports/extracted_issues.json', 'w') as f:
+              json.dump(result, f, indent=2)
+          
+          if ruff_errors:
+              print(f"Also found {len(ruff_errors)} Ruff errors:")
+              for e in ruff_errors[:5]:
+                  print(f"  - {e.get('file')}:{e.get('line')} {e.get('message')}")
           PYEOF
 
       - name: Upload reports
@@ -711,9 +761,29 @@ jobs:
                 bodyParts.push('');
                 bodyParts.push('> **Note:** `fail-on-warnings` is enabled. The following tool issues are blocking this PR:');
                 bodyParts.push('');
-                if (hasRuffIssues) {
+                
+                // Show Ruff errors in detail if available
+                const ruffErrors = extractedIssues.ruff_errors || [];
+                if (hasRuffIssues && ruffErrors.length > 0) {
+                  bodyParts.push(`#### Ruff Errors (${ruffChanged} in PR)`);
+                  bodyParts.push('');
+                  bodyParts.push('| File | Line | Error |');
+                  bodyParts.push('|------|------|-------|');
+                  for (const err of ruffErrors.slice(0, 10)) {
+                    const file = err.file ? `\`${err.file}\`` : '-';
+                    const line = err.line || '-';
+                    const msg = err.message || 'Unknown error';
+                    bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+                  }
+                  if (ruffChanged > 10) {
+                    bodyParts.push('');
+                    bodyParts.push(`> Showing 10 of ${ruffChanged} Ruff issues.`);
+                  }
+                  bodyParts.push('');
+                } else if (hasRuffIssues) {
                   bodyParts.push(`- **Ruff:** ${ruffChanged} issues in changed files (${ruffFull} total in repo)`);
                 }
+                
                 if (hasPylintIssues) {
                   bodyParts.push(`- **Pylint:** ${pylintChanged} issues in changed files (${pylintFull} total in repo)`);
                 }
@@ -723,7 +793,7 @@ jobs:
               }
             }
 
-            // Summary section
+            // Summary section (like original image)
             bodyParts.push('### :clipboard: Summary');
             bodyParts.push('');
             bodyParts.push('| Metric | Value |');
@@ -734,7 +804,7 @@ jobs:
             bodyParts.push(`| Time | ${duration}s |`);
             bodyParts.push('');
 
-            // Documentation Coverage
+            // Documentation Coverage (like original image)
             bodyParts.push('### :books: Documentation Coverage');
             bodyParts.push('');
             bodyParts.push('| Metric | Coverage | Detail | Goal | Status |');
@@ -744,8 +814,8 @@ jobs:
             bodyParts.push(`| Field help | **${helpCov}%** | ${fieldsWithHelp}/${helpTotal} | >=50% | ${icon(helpCov, 50)} |`);
             bodyParts.push('');
 
-            // Issues in this PR
-            bodyParts.push('### :warning: Documentation Issues in this PR');
+            // Issues in this PR (like original image)
+            bodyParts.push('### :warning: Issues in this PR');
             bodyParts.push('');
             bodyParts.push('| Type | Count |');
             bodyParts.push('|------|-------|');
@@ -754,7 +824,7 @@ jobs:
             bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
             bodyParts.push('');
 
-            // Code Quality
+            // Code Quality (like original image)
             bodyParts.push('### :mag: Code Quality');
             bodyParts.push('');
             bodyParts.push('| Tool | PR | Repo | Status |');
@@ -819,8 +889,13 @@ jobs:
           FAIL_ON_WARNINGS="${{ inputs.fail-on-warnings }}"
           WARNINGS="${{ steps.summary.outputs.warnings }}"
           WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' || echo 0)
+          
+          # Ruff issues in CHANGED files only (not full repo)
+          RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
+          RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
+          if [ -z "$RUFF_CHANGED" ]; then RUFF_CHANGED=0; fi
 
-          echo "::notice::Final check - Exit code: $EXIT_CODE, Warnings: $WARNINGS, Fail on warnings: $FAIL_ON_WARNINGS"
+          echo "::notice::Final check - Exit code: $EXIT_CODE, Warnings: $WARNINGS, Ruff (changed): $RUFF_CHANGED, Fail on warnings: $FAIL_ON_WARNINGS"
 
           # Determine final result
           if [ "$EXIT_CODE" -ne 0 ]; then
@@ -830,6 +905,10 @@ jobs:
           elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$WARNINGS" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
             echo "::error::Validation FAILED due to warnings (fail-on-warnings enabled)"
+            exit 1
+          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
+            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "::error::Validation FAILED due to Ruff issues in changed files ($RUFF_CHANGED issues, fail-on-warnings enabled)"
             exit 1
           else
             echo "result=success" >> $GITHUB_OUTPUT
