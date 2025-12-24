@@ -578,6 +578,7 @@ jobs:
           PYLINT_FULL: ${{ steps.metrics.outputs.pylint_full }}
           DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
         with:
           script: |
             const fs = require('fs');
@@ -600,6 +601,7 @@ jobs:
             const threshold = safeInt(process.env.DOCSTRING_THRESHOLD, 80);
             const errorsCount = safeInt(process.env.ERRORS_COUNT);
             const warningsCount = safeInt(process.env.WARNINGS_COUNT);
+            const failOnWarnings = process.env.FAIL_ON_WARNINGS === 'true';
 
             const docstringCov = safeInt(process.env.DOCSTRING_COV);
             const documentedMethods = safeInt(process.env.DOCSTRING_DOCUMENTED);
@@ -640,8 +642,31 @@ jobs:
               return val >= th ? ':white_check_mark:' : ':warning:';
             }
 
-            const hasFailed = exitCode !== 0;
+            // Determine REAL final status considering all factors
+            // 1. solt-check-odoo exit code (blocking errors)
+            // 2. fail-on-warnings setting + warning counts
+            // 3. Ruff issues in changed files
+            const hasBlockingErrors = exitCode !== 0;
+            const hasRuffIssues = ruffChanged > 0;
+            const hasPylintIssues = pylintChanged > 0;
+            const hasWarnings = warningsCount > 0 || hasRuffIssues || hasPylintIssues;
+            
+            // Final decision: fail if blocking errors OR (fail-on-warnings AND has warnings)
+            const hasFailed = hasBlockingErrors || (failOnWarnings && hasWarnings);
+            
             const overallStatus = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
+            
+            // Determine failure reason for display
+            let failureReason = '';
+            if (hasBlockingErrors) {
+              failureReason = 'blocking errors from solt-check-odoo';
+            } else if (failOnWarnings && hasRuffIssues) {
+              failureReason = `Ruff issues (${ruffChanged}) with fail-on-warnings enabled`;
+            } else if (failOnWarnings && hasPylintIssues) {
+              failureReason = `Pylint issues (${pylintChanged}) with fail-on-warnings enabled`;
+            } else if (failOnWarnings && warningsCount > 0) {
+              failureReason = `warnings (${warningsCount}) with fail-on-warnings enabled`;
+            }
 
             // Build the comment body - EXACT format from original image but in English
             const bodyParts = [];
@@ -653,24 +678,46 @@ jobs:
             bodyParts.push('');
 
             // If failed, show blocking errors FIRST
-            if (hasFailed && extractedIssues.errors && extractedIssues.errors.length > 0) {
-              bodyParts.push(`### :no_entry: Blocking Errors (${totalErrors})`);
-              bodyParts.push('');
-              bodyParts.push('| File | Line | Error |');
-              bodyParts.push('|------|------|-------|');
-
-              for (const err of extractedIssues.errors.slice(0, 10)) {
-                const file = err.file ? `\`${err.file}\`` : '-';
-                const line = err.line || '-';
-                const msg = err.message || 'Unknown error';
-                bodyParts.push(`| ${file} | ${line} | ${msg} |`);
-              }
-
-              if (totalErrors > 10) {
+            const hasExtractedErrors = extractedIssues.errors && extractedIssues.errors.length > 0;
+            
+            if (hasFailed) {
+              // Show blocking errors section if we have any
+              if (hasExtractedErrors) {
+                bodyParts.push(`### :no_entry: Blocking Errors (${totalErrors})`);
                 bodyParts.push('');
-                bodyParts.push(`> :mag: Showing 10 of ${totalErrors} errors. See workflow logs for complete list.`);
+                bodyParts.push('| File | Line | Error |');
+                bodyParts.push('|------|------|-------|');
+
+                for (const err of extractedIssues.errors.slice(0, 10)) {
+                  const file = err.file ? `\`${err.file}\`` : '-';
+                  const line = err.line || '-';
+                  const msg = err.message || 'Unknown error';
+                  bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+                }
+
+                if (totalErrors > 10) {
+                  bodyParts.push('');
+                  bodyParts.push(`> :mag: Showing 10 of ${totalErrors} errors. See workflow logs for complete list.`);
+                }
+                bodyParts.push('');
               }
-              bodyParts.push('');
+            
+              // If failed due to Ruff/warnings but no extracted errors, show warning
+              if (!hasExtractedErrors && failOnWarnings && (hasRuffIssues || hasPylintIssues)) {
+                bodyParts.push('### :no_entry: Blocking Issues');
+                bodyParts.push('');
+                bodyParts.push('> **Note:** `fail-on-warnings` is enabled. The following tool issues are blocking this PR:');
+                bodyParts.push('');
+                if (hasRuffIssues) {
+                  bodyParts.push(`- **Ruff:** ${ruffChanged} issues in changed files (${ruffFull} total in repo)`);
+                }
+                if (hasPylintIssues) {
+                  bodyParts.push(`- **Pylint:** ${pylintChanged} issues in changed files (${pylintFull} total in repo)`);
+                }
+                bodyParts.push('');
+                bodyParts.push('> :mag: See workflow logs or run `ruff check .` locally for details.');
+                bodyParts.push('');
+              }
             }
 
             // Summary section (like original image)
@@ -716,7 +763,11 @@ jobs:
             // Footer
             bodyParts.push('---');
             if (hasFailed) {
-              bodyParts.push(':bulb: **Tip:** Fix the blocking errors above and push again.');
+              if (failureReason) {
+                bodyParts.push(`:no_entry: **Validation failed due to:** ${failureReason}`);
+                bodyParts.push('');
+              }
+              bodyParts.push(':bulb: **Tip:** Fix the issues above and push again.');
               bodyParts.push('');
             }
             bodyParts.push(':robot: *solt-pre-commit*');

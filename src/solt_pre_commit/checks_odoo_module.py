@@ -285,11 +285,27 @@ class CheckResult:
         self.severity_config = severity_config
         self.results = defaultdict(list)
 
+    def _shorten_path(self, message):
+        """Remove CI runner path prefix from error messages.
+
+        Converts:
+          /home/runner/work/solt-budget/solt-budget/module/file.py:25 Error
+        To:
+          solt-budget/module/file.py:25 Error
+        """
+        import re
+
+        # Pattern matches: /home/runner/work/REPO_NAME/
+        # This removes the CI runner prefix but keeps REPO_NAME/rest/of/path
+        return re.sub(r"/home/runner/work/[^/]+/", "", message)
+
     def add(self, check_name, messages):
         if not messages:
             return
         if self.severity_config.should_report(check_name):
-            self.results[check_name].extend(messages)
+            # Shorten paths in all messages
+            shortened_messages = [self._shorten_path(msg) for msg in messages]
+            self.results[check_name].extend(shortened_messages)
 
     def add_from_dict(self, checks_errors):
         for check_name, messages in checks_errors.items():
