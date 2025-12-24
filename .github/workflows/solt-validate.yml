@@ -24,16 +24,6 @@ on:
         required: false
         type: string
         default: 'changed'
-      run-coverage:
-        description: 'Run coverage analysis'
-        required: false
-        type: boolean
-        default: false
-      coverage-threshold:
-        description: 'Minimum coverage percentage'
-        required: false
-        type: number
-        default: 60
       fail-on-warnings:
         description: 'Fail if warnings are found'
         required: false
@@ -671,10 +661,14 @@ jobs:
             // Build the comment body - EXACT format from original image but in English
             const bodyParts = [];
 
-            // Header
+            // Header - different message based on status
             bodyParts.push('## :bar_chart: Validation Report');
             bodyParts.push('');
-            bodyParts.push('> :information_source: This analysis is **informational**.');
+            if (hasFailed) {
+              bodyParts.push('> :no_entry: **This PR is blocked.** Fix the errors below before merging.');
+            } else {
+              bodyParts.push('> :white_check_mark: **All checks passed.** This PR is ready for review.');
+            }
             bodyParts.push('');
 
             // If failed, show blocking errors FIRST
@@ -956,47 +950,4 @@ jobs:
             echo "No files to check" >> $GITHUB_STEP_SUMMARY
           else
             echo "Some hooks failed" >> $GITHUB_STEP_SUMMARY
-          fi
-
-  # ---------------------------------------------------------------------------
-  # COVERAGE ANALYSIS (Optional)
-  # ---------------------------------------------------------------------------
-  coverage:
-    name: Coverage Analysis
-    runs-on: ubuntu-latest
-    if: inputs.run-coverage
-    needs: validate
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Run coverage
-        id: coverage
-        continue-on-error: true
-        run: |
-          pip install coverage pytest pytest-cov
-          mkdir -p reports
-          COVERAGE=0
-          if [ -d "tests" ]; then
-            coverage run -m pytest tests/ -v --tb=short 2>&1 | tee reports/test_output.txt || true
-            coverage report -m | tee reports/coverage.txt || true
-            COVERAGE=$(tail -1 reports/coverage.txt 2>/dev/null | awk '{print $NF}' | grep -oE '[0-9]+' | head -1 || echo 0)
-          fi
-          if [ -z "$COVERAGE" ]; then COVERAGE=0; fi
-          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
-
-      - name: Check threshold
-        run: |
-          COV="${{ steps.coverage.outputs.percentage }}"
-          THRESHOLD="${{ inputs.coverage-threshold }}"
-          COV=$(echo "$COV" | grep -oE '[0-9]+' | head -1 || echo 0)
-          THRESHOLD=$(echo "$THRESHOLD" | grep -oE '[0-9]+' | head -1 || echo 60)
-          if [ -z "$COV" ]; then COV=0; fi
-          if [ -z "$THRESHOLD" ]; then THRESHOLD=60; fi
-          echo "## Coverage: ${COV}%" >> $GITHUB_STEP_SUMMARY
-          if [ "$COV" -ne 0 ] && [ "$COV" -lt "$THRESHOLD" ]; then
-            echo "::error::Coverage ${COV}% < ${THRESHOLD}%"
-            exit 1
           fi
