@@ -569,6 +569,9 @@ jobs:
           DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         with:
           script: |
             const fs = require('fs');
@@ -583,6 +586,12 @@ jobs:
               console.log('No PR number found, skipping comment');
               return;
             }
+
+            // Build workflow URL
+            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+            const repository = process.env.GITHUB_REPOSITORY || '';
+            const runId = process.env.GITHUB_RUN_ID || '';
+            const workflowUrl = `${serverUrl}/${repository}/actions/runs/${runId}`;
 
             const moduleCount = safeInt(process.env.MODULE_COUNT);
             const exitCode = safeInt(process.env.EXIT_CODE);
@@ -691,11 +700,11 @@ jobs:
 
                 if (totalErrors > 10) {
                   bodyParts.push('');
-                  bodyParts.push(`> :mag: Showing 10 of ${totalErrors} errors. See workflow logs for complete list.`);
+                  bodyParts.push(`> :mag: Showing 10 of ${totalErrors} errors. [See workflow logs for complete list.](${workflowUrl})`);
                 }
                 bodyParts.push('');
               }
-            
+              
               // If failed due to Ruff/warnings but no extracted errors, show warning
               if (!hasExtractedErrors && failOnWarnings && (hasRuffIssues || hasPylintIssues)) {
                 bodyParts.push('### :no_entry: Blocking Issues');
@@ -709,7 +718,7 @@ jobs:
                   bodyParts.push(`- **Pylint:** ${pylintChanged} issues in changed files (${pylintFull} total in repo)`);
                 }
                 bodyParts.push('');
-                bodyParts.push('> :mag: See workflow logs or run `ruff check .` locally for details.');
+                bodyParts.push(`> :mag: [See workflow logs](${workflowUrl}) or run \`ruff check .\` locally for details.`);
                 bodyParts.push('');
               }
             }
@@ -751,7 +760,6 @@ jobs:
             bodyParts.push('| Tool | PR | Repo | Status |');
             bodyParts.push('|------|-----|------|--------|');
             bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${icon(ruffFull, 0, true)} |`);
-            bodyParts.push(`| Pylint | ${pylintChanged} | ${pylintFull} | ${icon(pylintFull, 0, true)} |`);
             bodyParts.push('');
 
             // Footer
