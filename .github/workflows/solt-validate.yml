@@ -174,17 +174,29 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+          # Get changed Python files, EXCLUDING deleted files (--diff-filter=ACMR)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
-            CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           else
-            CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
 
           RUFF_CHANGED=0
           if [ -n "$CHANGED_PY" ]; then
-            ruff check $CHANGED_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
-            RUFF_CHANGED=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-changed.txt 2>/dev/null || echo 0)
+            # Filter out files that don't exist (extra safety)
+            EXISTING_PY=""
+            for f in $CHANGED_PY; do
+              if [ -f "$f" ]; then
+                EXISTING_PY="$EXISTING_PY $f"
+              fi
+            done
+            EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
+            
+            if [ -n "$EXISTING_PY" ]; then
+              ruff check $EXISTING_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
+              RUFF_CHANGED=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-changed.txt 2>/dev/null || echo 0)
+            fi
           fi
 
           ruff check ${{ steps.find-modules.outputs.modules }} --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
@@ -201,16 +213,28 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+          # Get changed Python files, EXCLUDING deleted files (--diff-filter=ACMR)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CHANGED_PY=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           else
-            CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
 
           PYLINT_CHANGED=0
           if [ -n "$CHANGED_PY" ]; then
-            echo "$CHANGED_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-changed.txt || true
-            PYLINT_CHANGED=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-changed.txt 2>/dev/null || echo 0)
+            # Filter out files that don't exist (extra safety)
+            EXISTING_PY=""
+            for f in $CHANGED_PY; do
+              if [ -f "$f" ]; then
+                EXISTING_PY="$EXISTING_PY $f"
+              fi
+            done
+            EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
+            
+            if [ -n "$EXISTING_PY" ]; then
+              echo "$EXISTING_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-changed.txt || true
+              PYLINT_CHANGED=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-changed.txt 2>/dev/null || echo 0)
+            fi
           fi
 
           find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-full.txt || true
