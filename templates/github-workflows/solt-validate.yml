@@ -38,7 +38,7 @@ jobs:
       # ─── Badge Configuration ───
       # Replace with your Gist ID
       gist-id: 'YOUR_GIST_ID_HERE'
-      badge-filename-prefix: 'solt-budget'
+      badge-filename-prefix: 'YOUR_BADGE_FILENAME_PREFIX_HERE'
 
     secrets:
       GIST_SECRET: ${{ secrets.GIST_SECRET }}
