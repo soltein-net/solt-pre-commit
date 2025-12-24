@@ -354,16 +354,35 @@ jobs:
         id: summary
         if: always()
         run: |
+          # Create reports directory if it doesn't exist
+          mkdir -p reports
+          touch reports/validation.txt
+          
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
-          EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' || echo 0)
-          if [ -z "$EXIT_CODE" ]; then EXIT_CODE=0; fi
+          EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' | head -1 || echo "0")
+          if [ -z "$EXIT_CODE" ]; then EXIT_CODE="0"; fi
 
-          ERRORS=$(grep -ciE "^\[ERROR\]" reports/validation.txt 2>/dev/null || echo 0)
-          WARNINGS=$(grep -ciE "^\[WARN\]" reports/validation.txt 2>/dev/null || echo 0)
-
-          echo "errors=$ERRORS" >> $GITHUB_OUTPUT
-          echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
-          echo "validation_exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          # Count errors/warnings - ensure single numeric value
+          ERRORS="0"
+          WARNINGS="0"
+          if [ -f "reports/validation.txt" ]; then
+            ERRORS=$(grep -c "^\[ERROR\]" reports/validation.txt 2>/dev/null || echo "0")
+            WARNINGS=$(grep -c "^\[WARN\]" reports/validation.txt 2>/dev/null || echo "0")
+          fi
+          # Ensure they are single numbers
+          ERRORS=$(echo "$ERRORS" | grep -oE '^[0-9]+' | head -1 || echo "0")
+          WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' | head -1 || echo "0")
+          if [ -z "$ERRORS" ]; then ERRORS="0"; fi
+          if [ -z "$WARNINGS" ]; then WARNINGS="0"; fi
+          
+          # Write outputs safely
+          {
+            echo "errors=$ERRORS"
+            echo "warnings=$WARNINGS"
+            echo "validation_exit_code=$EXIT_CODE"
+          } >> "$GITHUB_OUTPUT"
+          
+          echo "Summary: exit_code=$EXIT_CODE, errors=$ERRORS, warnings=$WARNINGS"
 
           # Extract top errors for PR comment
           python3 << 'PYEOF'
