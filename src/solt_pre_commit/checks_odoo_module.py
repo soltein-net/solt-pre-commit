@@ -30,9 +30,9 @@ DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "upda
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================
 # SEVERITY SYSTEM
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================
 
 
 class Severity:
@@ -46,7 +46,10 @@ class Severity:
     COLORS = {ERROR: "\033[91m", WARNING: "\033[93m", INFO: "\033[94m"}
     RESET = "\033[0m"
     BOLD = "\033[1m"
-    ICONS = {ERROR: "âŒ", WARNING: "âš ï¸ ", INFO: "â„¹ï¸ "}
+    # ASCII-safe icons for CI environments
+    ICONS = {ERROR: "[ERROR]", WARNING: "[WARN]", INFO: "[INFO]"}
+    # Unicode icons for terminal
+    ICONS_UNICODE = {ERROR: "\u274c", WARNING: "\u26a0\ufe0f", INFO: "\u2139\ufe0f"}
 
 
 # Default severity for each check
@@ -99,9 +102,9 @@ DEFAULT_SEVERITY = {
 }
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================
 # CHANGED FILES DETECTION
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================
 
 
 class ChangedFilesDetector:
@@ -155,9 +158,9 @@ class ChangedFilesDetector:
         return [f for f in all_module_files if os.path.realpath(f["filename"]) in changed]
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================
 # CONFIGURATION
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# =============================================================================
 
 
 class SeverityConfig:
@@ -322,9 +325,23 @@ class CheckResult:
 class ResultPrinter:
     """Pretty printer for check results."""
 
-    def __init__(self, use_colors=True, verbose=False):
+    # Maximum message length before truncation (increased from 120)
+    MAX_MESSAGE_LENGTH = 200
+
+    def __init__(self, use_colors=True, verbose=False, use_unicode=None):
         self.use_colors = use_colors and sys.stdout.isatty()
         self.verbose = verbose
+        # Auto-detect unicode support: use ASCII in CI, unicode in terminal
+        if use_unicode is None:
+            self.use_unicode = sys.stdout.isatty() and os.environ.get("CI") is None
+        else:
+            self.use_unicode = use_unicode
+
+    def _get_icon(self, severity):
+        """Get the appropriate icon based on environment."""
+        if self.use_unicode:
+            return Severity.ICONS_UNICODE.get(severity, "")
+        return Severity.ICONS.get(severity, "")
 
     def _color(self, text, color):
         if self.use_colors:
@@ -337,7 +354,7 @@ class ResultPrinter:
         return text
 
     def _severity_header(self, severity, count):
-        icon = Severity.ICONS[severity]
+        icon = self._get_icon(severity)
         color = Severity.COLORS[severity]
         name = severity.upper()
         header = f"{icon} {name}S ({count})"
@@ -384,8 +401,9 @@ class ResultPrinter:
                 print(f"\n  {self._bold(check_display)} ({len(messages)})")
 
                 for msg in messages[:10]:
-                    if len(msg) > 120:
-                        msg = msg[:117] + "..."
+                    # Truncate long messages but preserve readability
+                    if len(msg) > self.MAX_MESSAGE_LENGTH:
+                        msg = msg[: self.MAX_MESSAGE_LENGTH - 3] + "..."
                     print(f"    - {msg}")
 
                 if len(messages) > 10:
@@ -402,7 +420,7 @@ class ResultPrinter:
             count = counts[severity]
             if count == 0 and severity == Severity.INFO:
                 continue
-            icon = Severity.ICONS[severity]
+            icon = self._get_icon(severity)
             color = Severity.COLORS[severity]
             text = f"{icon} {count} {severity}{'s' if count != 1 else ''}"
             if severity in blocking and count > 0:
@@ -721,7 +739,7 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     skip_help = severity_config.skip_help_fields
     skip_docstring = severity_config.skip_docstring_methods
 
-    # S eparate counters for fields that actually need string/help
+    # Separate counters for fields that actually need string/help
     fields_needing_string = 0
     fields_needing_help = 0
 

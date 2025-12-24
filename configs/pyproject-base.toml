@@ -3,11 +3,33 @@
 # =============================================================================
 # This file is copied to client repositories by solt-pre-commit
 # Contains unified configuration for: ruff, black, isort, pytest, mypy, coverage
+#
+# RUFF CONFIGURATION LEVELS:
+# --------------------------
+# Level 1 (ESSENTIAL): Syntax errors and critical bugs only
+#   - E (pycodestyle errors): E9xx (syntax), E7xx (indentation)
+#   - F (Pyflakes): undefined names, unused imports
+#   - W (pycodestyle warnings): W6xx (deprecated)
+#
+# Level 2 (STANDARD - DEFAULT): Add code quality rules
+#   - All Level 1 plus:
+#   - I (isort): import sorting
+#   - B (bugbear): likely bugs and design problems
+#   - C4 (comprehensions): list/dict comprehension issues
+#
+# Level 3 (STRICT): Add style and modernization
+#   - All Level 2 plus:
+#   - N (pep8-naming): naming conventions
+#   - UP (pyupgrade): Python version upgrades
+#   - SIM (simplify): code simplification
+#   - RUF (ruff): ruff-specific rules
+#
+# To change level, modify the 'select' list in [tool.ruff.lint]
 # =============================================================================
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # BLACK - Code Formatter
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 [tool.black]
 line-length = 120
 target-version = ['py310', 'py311', 'py312']
@@ -31,9 +53,9 @@ extend-exclude = '''
 )/
 '''
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # ISORT - Import Sorting
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 [tool.isort]
 profile = "black"
 line_length = 120
@@ -58,9 +80,11 @@ skip = [
 ]
 skip_glob = ["**/static/**", "**/lib/**"]
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # RUFF - Fast Python Linter
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Using LEVEL 2 (STANDARD) by default - safe for most Odoo projects
+# -----------------------------------------------------------------------------
 [tool.ruff]
 line-length = 120
 target-version = "py310"
@@ -83,47 +107,70 @@ exclude = [
 ]
 
 [tool.ruff.lint]
+# =============================================================================
+# LEVEL 2 (STANDARD) - Safe for most Odoo projects
+# =============================================================================
+# For LEVEL 1 (ESSENTIAL only), use:
+#   select = ["E9", "F", "W6"]
+#
+# For LEVEL 3 (STRICT), add:
+#   "N", "UP", "SIM", "RUF"
+# =============================================================================
 select = [
-    "E", # pycodestyle errors
-    "W", # pycodestyle warnings
-    "F", # Pyflakes
-    "I", # isort
-    "N", # pep8-naming
-    "B", # flake8-bugbear
-    "C4", # flake8-comprehensions
-    "UP", # pyupgrade
-    "SIM", # flake8-simplify
-    "RUF", # Ruff-specific rules
+    # Level 1 - Essential (always enabled)
+    "E",      # pycodestyle errors
+    "F",      # Pyflakes (undefined names, unused imports, etc.)
+    "W",      # pycodestyle warnings
+
+    # Level 2 - Standard (recommended)
+    "I",      # isort - import sorting
+    "B",      # flake8-bugbear - likely bugs and design problems
+    "C4",     # flake8-comprehensions - unnecessary list/dict calls
 ]
 
+# =============================================================================
+# IGNORED RULES - Safe to ignore for Odoo development
+# =============================================================================
 ignore = [
-    "E501", # line too long (handled by formatter)
-    "E731", # lambda assignment
-    "B008", # function call in default argument (common in Odoo)
-    "B904", # raise without from (common pattern)
-    "N802", # function name lowercase (Odoo uses specific conventions)
-    "N803", # argument name lowercase
-    "N806", # variable in function should be lowercase
-    "N815", # mixedCase variable (Odoo compatibility)
-    "N999", # invalid module name
-    "SIM102", # nested if (sometimes clearer)
-    "SIM108", # ternary operator (sometimes less readable)
-    "UP007", # Use X | Y for type union (Python 3.10+)
-    "RUF012", # mutable class attributes (Odoo fields)
+    # ----- Handled by formatters (black/ruff format) -----
+    "E501",   # line too long
+
+    # ----- Common Odoo patterns -----
+    "E731",   # lambda assignment (common in Odoo for default values)
+    "B008",   # function call in default argument (Odoo fields pattern)
+    "B904",   # raise without from (common pattern in Odoo)
+
+    # ----- If using Level 3 (STRICT), also ignore these: -----
+    # "N802",   # function name should be lowercase (Odoo conventions)
+    # "N803",   # argument name should be lowercase
+    # "N806",   # variable in function should be lowercase
+    # "N815",   # mixedCase variable in class scope
+    # "N999",   # invalid module name
+    # "SIM102", # nested if statements (sometimes clearer)
+    # "SIM108", # ternary operator (sometimes less readable)
+    # "UP007",  # Use X | Y for type union (Python 3.10+)
+    # "RUF012", # mutable class attributes (Odoo fields)
 ]
 
+# Allow autofix for all enabled rules
 fixable = ["ALL"]
 unfixable = []
 
+# Allow unused variables when underscore-prefixed
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]
+# Ignore unused imports in __init__.py
+"__init__.py" = ["F401", "F403"]
+
+# Ignore all rules in manifest files
 "__manifest__.py" = ["ALL"]
 "__openerp__.py" = ["ALL"]
+
+# Relaxed rules for tests
 "tests/**/*.py" = [
-    "B011", # assert False
-    "S101", # assert used
+    "B011",   # assert False
+    "S101",   # assert used
 ]
 
 [tool.ruff.lint.isort]
@@ -141,6 +188,7 @@ section-order = [
 max-complexity = 15
 
 [tool.ruff.lint.flake8-bugbear]
+# Extend immutable calls for Odoo field definitions
 extend-immutable-calls = [
     "odoo.fields.Binary",
     "odoo.fields.Boolean",
@@ -150,10 +198,16 @@ extend-immutable-calls = [
     "odoo.fields.Float",
     "odoo.fields.Html",
     "odoo.fields.Integer",
+    "odoo.fields.Image",
+    "odoo.fields.Json",
     "odoo.fields.Many2many",
     "odoo.fields.Many2one",
+    "odoo.fields.Many2oneReference",
     "odoo.fields.Monetary",
     "odoo.fields.One2many",
+    "odoo.fields.Properties",
+    "odoo.fields.PropertiesDefinition",
+    "odoo.fields.Reference",
     "odoo.fields.Selection",
     "odoo.fields.Text",
     "fields.Binary",
@@ -164,17 +218,23 @@ extend-immutable-calls = [
     "fields.Float",
     "fields.Html",
     "fields.Integer",
+    "fields.Image",
+    "fields.Json",
     "fields.Many2many",
     "fields.Many2one",
+    "fields.Many2oneReference",
     "fields.Monetary",
     "fields.One2many",
+    "fields.Properties",
+    "fields.PropertiesDefinition",
+    "fields.Reference",
     "fields.Selection",
     "fields.Text",
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PYTEST - Testing
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -190,9 +250,9 @@ markers = [
     "integration: marks tests as integration tests",
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # COVERAGE - Code Coverage
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 [tool.coverage.run]
 source = ["."]
 omit = [
@@ -212,9 +272,9 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # MYPY - Type Checking
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true

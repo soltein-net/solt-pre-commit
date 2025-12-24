@@ -82,30 +82,49 @@ def copy_file(src: Path, dest: Path, dry_run: bool = False, force: bool = True) 
         dest: Destination file path
         dry_run: If True, only show what would be done
         force: If True, overwrite existing files
+
+    Returns:
+        True if file was copied/would be copied, False otherwise
     """
+    # Check source exists
     if not src.exists():
         print_step("⚠️ ", f"Source not found: {src}")
         return False
 
-    action = "overwrite" if dest.exists() else "create"
+    # Determine action
+    if dest.exists():
+        if not force:
+            print_step("⏭️ ", f"Skipped (exists): {dest.name}")
+            return False
+        action = "overwrite"
+    else:
+        action = "create"
 
-    if dest.exists() and not force:
-        print_step("⏭️ ", f"Already exists: {dest.name}")
-        return False
-
+    # Dry run - just show what would happen
     if dry_run:
         print_step("📄", f"Would {action}: {dest}")
         return True
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
+    # Actually copy the file
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
 
-    if action == "overwrite":
-        print_step("🔄", f"Updated: {dest}")
-    else:
-        print_step("✅", f"Created: {dest}")
+        if action == "overwrite":
+            print_step("🔄", f"Updated: {dest}")
+        else:
+            print_step("✅", f"Created: {dest}")
 
-    return True
+        # Verify the copy worked
+        if not dest.exists():
+            print_step("❌", f"Failed to create: {dest}")
+            return False
+
+        return True
+
+    except Exception as e:
+        print_step("❌", f"Error copying {src.name}: {e}")
+        return False
 
 
 def update_file_content(
@@ -206,6 +225,12 @@ def setup_repo(
     print(f"  Overwrite:  {'yes' if force else 'no'}")
     print(f"{'=' * 60}")
 
+    # Show source paths for debugging
+    print("\n  Source paths:")
+    print(f"    REPO_ROOT:     {REPO_ROOT}")
+    print(f"    CONFIGS_DIR:   {CONFIGS_DIR}")
+    print(f"    TEMPLATES_DIR: {TEMPLATES_DIR}")
+
     # ─────────────────────────────────────────────────────────────────────
     # CLEANUP OLD FILES
     # ─────────────────────────────────────────────────────────────────────
@@ -228,12 +253,29 @@ def setup_repo(
     # Add workflow file
     files.append(WORKFLOW_FILE)
 
-    for src, dest_rel, _description in files:
+    # Track success/failure
+    copied = 0
+    failed = 0
+
+    for src, dest_rel, description in files:
         dest = target / dest_rel
+
+        # Debug output
+        print(f"\n  [{description}]")
+        print(f"    Source: {src}")
+        print(f"    Exists: {src.exists()}")
+        print(f"    Dest:   {dest}")
+
         if src.exists():
-            copy_file(src, dest, dry_run, force)
+            if copy_file(src, dest, dry_run, force):
+                copied += 1
+            else:
+                failed += 1
         else:
             print_step("❌", f"Template not found: {src}")
+            failed += 1
+
+    print(f"\n  Summary: {copied} copied, {failed} failed")
 
     # ─────────────────────────────────────────────────────────────────────
     # UPDATE CONFIGURATIONS

@@ -1,6 +1,9 @@
 # =============================================================================
 # SOLT PRE-COMMIT - Reusable Workflow
 # =============================================================================
+# IMPORTANT: This workflow will FAIL (red) when blocking issues are found.
+# The validation job exit code is properly propagated.
+# =============================================================================
 name: Solt Validation (Reusable)
 
 on:
@@ -111,7 +114,7 @@ jobs:
       contents: read
       pull-requests: write
     outputs:
-      result: ${{ steps.summary.outputs.result }}
+      result: ${{ steps.final-check.outputs.result }}
       errors: ${{ steps.summary.outputs.errors }}
       warnings: ${{ steps.summary.outputs.warnings }}
       docstring_cov: ${{ steps.metrics.outputs.docstring_cov }}
@@ -153,17 +156,23 @@ jobs:
           if [ "${{ inputs.show-info }}" = "true" ]; then
             ARGS="$ARGS --show-info"
           fi
-          
-          set +e
+
           START_TIME=$(date +%s)
+
+          # Run validation and capture exit code
+          set +e
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} $ARGS 2>&1 | tee reports/validation.txt
-          EXIT_CODE=$?
-          END_TIME=$(date +%s)
-          DURATION=$((END_TIME - START_TIME))
+          VALIDATION_EXIT_CODE=$?
           set -e
 
-          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+
+          echo "exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
+
+          # Show exit code in logs for debugging
+          echo "::notice::Validation exit code: $VALIDATION_EXIT_CODE"
 
       - name: Run full validation for metrics
         run: |
@@ -171,7 +180,6 @@ jobs:
 
       - name: Run Ruff check
         id: ruff
-        continue-on-error: true
         run: |
           set +e
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -180,25 +188,24 @@ jobs:
           else
             CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
-          
+
           RUFF_CHANGED=0
           if [ -n "$CHANGED_PY" ]; then
             ruff check $CHANGED_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
             RUFF_CHANGED=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-changed.txt 2>/dev/null || echo 0)
           fi
-          
+
           ruff check ${{ steps.find-modules.outputs.modules }} --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
           RUFF_FULL=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-full.txt 2>/dev/null || echo 0)
-          
+
           RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           RUFF_FULL=$(echo "$RUFF_FULL" | grep -oE '^[0-9]+' || echo 0)
-          
+
           echo "changed=${RUFF_CHANGED:-0}" >> $GITHUB_OUTPUT
           echo "full=${RUFF_FULL:-0}" >> $GITHUB_OUTPUT
 
       - name: Run Pylint-Odoo check
         id: pylint
-        continue-on-error: true
         run: |
           set +e
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -206,19 +213,19 @@ jobs:
           else
             CHANGED_PY=$(git diff --name-only HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
-          
+
           PYLINT_CHANGED=0
           if [ -n "$CHANGED_PY" ]; then
             echo "$CHANGED_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-changed.txt || true
             PYLINT_CHANGED=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-changed.txt 2>/dev/null || echo 0)
           fi
-          
+
           find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-full.txt || true
           PYLINT_FULL=$(grep -cE "^[CRWEF][0-9]{4}:" reports/pylint-full.txt 2>/dev/null || echo 0)
-          
+
           PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           PYLINT_FULL=$(echo "$PYLINT_FULL" | grep -oE '^[0-9]+' || echo 0)
-          
+
           echo "changed=${PYLINT_CHANGED:-0}" >> $GITHUB_OUTPUT
           echo "full=${PYLINT_FULL:-0}" >> $GITHUB_OUTPUT
 
@@ -295,25 +302,156 @@ jobs:
           echo "pylint_changed=${{ steps.pylint.outputs.changed }}" >> $GITHUB_OUTPUT
           echo "pylint_full=${{ steps.pylint.outputs.full }}" >> $GITHUB_OUTPUT
 
-      - name: Generate summary
+      - name: Generate summary and extract errors
         id: summary
         run: |
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
           EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' || echo 0)
           if [ -z "$EXIT_CODE" ]; then EXIT_CODE=0; fi
-          
-          if [ "$EXIT_CODE" -ne 0 ]; then
-            RESULT="failure"
-          else
-            RESULT="success"
-          fi
-          
-          ERRORS=$(grep -ciE "error" reports/validation.txt 2>/dev/null || echo 0)
-          WARNINGS=$(grep -ciE "warning" reports/validation.txt 2>/dev/null || echo 0)
-          
-          echo "result=$RESULT" >> $GITHUB_OUTPUT
+
+          ERRORS=$(grep -ciE "^\[ERROR\]" reports/validation.txt 2>/dev/null || echo 0)
+          WARNINGS=$(grep -ciE "^\[WARN\]" reports/validation.txt 2>/dev/null || echo 0)
+
           echo "errors=$ERRORS" >> $GITHUB_OUTPUT
           echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
+          echo "validation_exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          # Extract top errors for PR comment
+          python3 << 'PYEOF'
+          import os
+          import re
+          import json
+
+          errors_list = []
+          warnings_list = []
+          total_errors = 0
+          total_warnings = 0
+
+          try:
+              with open('reports/validation.txt', 'r', encoding='utf-8', errors='replace') as f:
+                  content = f.read()
+
+              # Output format from solt-check-odoo:
+              # [ERROR] ERRORS (3) [BLOCKING]
+              # --------------------------------------------------
+              #
+              #   Python Duplicate Field Label (1)
+              #     - /path/to/file.py:45 Fields (amount, total) have same label
+              #
+              # [WARN] WARNINGS (5)
+              # --------------------------------------------------
+              #
+              #   Python Field Missing String (2)
+              #     - models/budget.py:67 Field "state" is missing string attribute
+
+              current_severity = None
+              current_check = None
+
+              for line in content.split('\n'):
+                  line_stripped = line.strip()
+
+                  # Detect severity section headers
+                  if line_stripped.startswith('[ERROR]'):
+                      current_severity = 'error'
+                      # Extract count from header like "[ERROR] ERRORS (3)"
+                      match = re.search(r'\((\d+)\)', line_stripped)
+                      if match:
+                          total_errors = int(match.group(1))
+                      continue
+                  elif line_stripped.startswith('[WARN]'):
+                      current_severity = 'warning'
+                      match = re.search(r'\((\d+)\)', line_stripped)
+                      if match:
+                          total_warnings = int(match.group(1))
+                      continue
+                  elif line_stripped.startswith('[INFO]'):
+                      current_severity = 'info'
+                      continue
+
+                  # Skip separators and empty lines
+                  if not line_stripped or line_stripped.startswith('---') or line_stripped.startswith('==='):
+                      continue
+
+                  # Detect check name headers like "  Python Field Missing String (2)"
+                  check_header_match = re.match(r'^  ([A-Z][^(]+)\s*\((\d+)\)', line)
+                  if check_header_match:
+                      current_check = check_header_match.group(1).strip()
+                      continue
+
+                  # Parse error/warning lines starting with "    - "
+                  if line.startswith('    - ') and current_severity in ('error', 'warning'):
+                      msg_content = line[6:]  # Remove "    - "
+
+                      # Try to extract file:line pattern
+                      # Pattern: /path/to/file.py:123 Message here
+                      # Or: file.py:123 Message here
+                      file_line_match = re.match(r'^([^\s:]+):(\d+)\s+(.+)$', msg_content)
+
+                      if file_line_match:
+                          filepath = file_line_match.group(1)
+                          lineno = file_line_match.group(2)
+                          message = file_line_match.group(3)
+
+                          # Shorten filepath - keep last 2 parts
+                          parts = filepath.replace('\\', '/').split('/')
+                          if len(parts) > 2:
+                              filepath = '/'.join(parts[-2:])
+
+                          # Truncate long messages
+                          if len(message) > 80:
+                              message = message[:77] + '...'
+
+                          entry = {
+                              'file': filepath,
+                              'line': lineno,
+                              'message': message,
+                              'check': current_check
+                          }
+                      else:
+                          # No file:line pattern, just message
+                          message = msg_content
+                          if len(message) > 100:
+                              message = message[:97] + '...'
+                          entry = {
+                              'file': '',
+                              'line': '',
+                              'message': message,
+                              'check': current_check
+                          }
+
+                      if current_severity == 'error':
+                          errors_list.append(entry)
+                      else:
+                          warnings_list.append(entry)
+
+          except Exception as e:
+              print(f"Error parsing validation output: {e}")
+              import traceback
+              traceback.print_exc()
+
+          # Limit entries
+          errors_list = errors_list[:10]
+          warnings_list = warnings_list[:5]
+
+          # Save to JSON for the comment step
+          result = {
+              'errors': errors_list,
+              'warnings': warnings_list,
+              'total_errors': total_errors,
+              'total_warnings': total_warnings
+          }
+
+          with open('reports/extracted_issues.json', 'w') as f:
+              json.dump(result, f, indent=2)
+
+          print(f"Extracted {len(errors_list)}/{total_errors} errors, {len(warnings_list)}/{total_warnings} warnings")
+
+          # Debug: show what we extracted
+          if errors_list:
+              print("Sample errors:")
+              for e in errors_list[:3]:
+                  print(f"  - {e.get('file')}:{e.get('line')} {e.get('message')}")
+          PYEOF
 
       - name: Upload reports
         uses: actions/upload-artifact@v4
@@ -331,6 +469,8 @@ jobs:
           EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
           DURATION: ${{ steps.validate.outputs.duration }}
           SCOPE: ${{ inputs.validation-scope }}
+          ERRORS_COUNT: ${{ steps.summary.outputs.errors }}
+          WARNINGS_COUNT: ${{ steps.summary.outputs.warnings }}
           DOCSTRING_COV: ${{ steps.metrics.outputs.docstring_cov }}
           DOCSTRING_DOCUMENTED: ${{ steps.metrics.outputs.docstring_documented }}
           DOCSTRING_TOTAL: ${{ steps.metrics.outputs.docstring_total }}
@@ -351,104 +491,162 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         with:
           script: |
+            const fs = require('fs');
+
             function safeInt(val, def = 0) {
               const parsed = parseInt(val);
               return isNaN(parsed) ? def : parsed;
             }
-            
+
             const prNumber = safeInt(process.env.PR_NUMBER);
             if (!prNumber) {
               console.log('No PR number found, skipping comment');
               return;
             }
-            
+
             const moduleCount = safeInt(process.env.MODULE_COUNT);
             const exitCode = safeInt(process.env.EXIT_CODE);
             const duration = safeInt(process.env.DURATION);
             const scope = process.env.SCOPE || 'changed';
             const threshold = safeInt(process.env.DOCSTRING_THRESHOLD, 80);
-            
+            const errorsCount = safeInt(process.env.ERRORS_COUNT);
+            const warningsCount = safeInt(process.env.WARNINGS_COUNT);
+
             const docstringCov = safeInt(process.env.DOCSTRING_COV);
             const documentedMethods = safeInt(process.env.DOCSTRING_DOCUMENTED);
             const totalMethods = safeInt(process.env.DOCSTRING_TOTAL, 1);
-            
+
             const stringCov = safeInt(process.env.STRING_COV);
             const fieldsWithString = safeInt(process.env.STRING_DOCUMENTED);
             const totalFields = safeInt(process.env.STRING_TOTAL, 1);
-            
+
             const helpCov = safeInt(process.env.HELP_COV);
             const fieldsWithHelp = safeInt(process.env.HELP_DOCUMENTED);
             const helpTotal = safeInt(process.env.HELP_TOTAL, 1);
-            
+
             const missingDocstringPr = safeInt(process.env.MISSING_DOCSTRING_PR);
             const missingStringPr = safeInt(process.env.MISSING_STRING_PR);
             const missingHelpPr = safeInt(process.env.MISSING_HELP_PR);
-            
+
             const ruffChanged = safeInt(process.env.RUFF_CHANGED);
             const ruffFull = safeInt(process.env.RUFF_FULL);
             const pylintChanged = safeInt(process.env.PYLINT_CHANGED);
             const pylintFull = safeInt(process.env.PYLINT_FULL);
-            
+
+            // Load extracted issues
+            let extractedIssues = { errors: [], warnings: [], total_errors: 0, total_warnings: 0 };
+            try {
+              const issuesJson = fs.readFileSync('reports/extracted_issues.json', 'utf8');
+              extractedIssues = JSON.parse(issuesJson);
+            } catch (e) {
+              console.log('Could not load extracted issues:', e.message);
+            }
+
+            // Use totals from extracted JSON if available, otherwise from grep counts
+            const totalErrors = extractedIssues.total_errors || errorsCount;
+            const totalWarnings = extractedIssues.total_warnings || warningsCount;
+
             function icon(val, th, reverse = false) {
               if (reverse) return val <= th ? ':white_check_mark:' : ':x:';
               return val >= th ? ':white_check_mark:' : ':warning:';
             }
-            
-            const overallStatus = exitCode === 0 ? ':white_check_mark: Passed' : ':x: Failed';
-            
-            const body = [
-              '## :bar_chart: Reporte de Validacion',
-              '',
-              '> :information_source: Este analisis es **informativo**.',
-              '',
-              '### :clipboard: Resumen',
-              '',
-              '| Metrica | Valor |',
-              '|---------|-------|',
-              `| **Estado** | ${overallStatus} |`,
-              `| Modulos | ${moduleCount} |`,
-              `| Scope | \`${scope}\` |`,
-              `| Tiempo | ${duration}s |`,
-              '',
-              '### :books: Cobertura de Documentacion',
-              '',
-              '| Metrica | Cobertura | Detalle | Meta | Estado |',
-              '|---------|-----------|---------|------|--------|',
-              `| Docstrings | **${docstringCov}%** | ${documentedMethods}/${totalMethods} | >=${threshold}% | ${icon(docstringCov, threshold)} |`,
-              `| Campos string | **${stringCov}%** | ${fieldsWithString}/${totalFields} | >=90% | ${icon(stringCov, 90)} |`,
-              `| Campos help | **${helpCov}%** | ${fieldsWithHelp}/${helpTotal} | >=50% | ${icon(helpCov, 50)} |`,
-              '',
-              '### :warning: Issues en este PR',
-              '',
-              '| Tipo | Cantidad |',
-              '|------|----------|',
-              `| Docstrings faltantes | ${missingDocstringPr} |`,
-              `| Campos sin string | ${missingStringPr} |`,
-              `| Campos sin help | ${missingHelpPr} |`,
-              '',
-              '### :mag: Calidad de Codigo',
-              '',
-              '| Herramienta | PR | Repo | Estado |',
-              '|-------------|----|------|--------|',
-              `| Ruff | ${ruffChanged} | ${ruffFull} | ${icon(ruffFull, 0, true)} |`,
-              `| Pylint | ${pylintChanged} | ${pylintFull} | ${icon(pylintFull, 0, true)} |`,
-              '',
-              '---',
-              ':robot: *solt-pre-commit*'
-            ].join('\n');
-            
+
+            const hasFailed = exitCode !== 0;
+            const overallStatus = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
+
+            // Build the comment body - EXACT format from original image but in English
+            const bodyParts = [];
+
+            // Header
+            bodyParts.push('## :bar_chart: Validation Report');
+            bodyParts.push('');
+            bodyParts.push('> :information_source: This analysis is **informational**.');
+            bodyParts.push('');
+
+            // If failed, show blocking errors FIRST
+            if (hasFailed && extractedIssues.errors && extractedIssues.errors.length > 0) {
+              bodyParts.push(`### :no_entry: Blocking Errors (${totalErrors})`);
+              bodyParts.push('');
+              bodyParts.push('| File | Line | Error |');
+              bodyParts.push('|------|------|-------|');
+
+              for (const err of extractedIssues.errors.slice(0, 10)) {
+                const file = err.file ? `\`${err.file}\`` : '-';
+                const line = err.line || '-';
+                const msg = err.message || 'Unknown error';
+                bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+              }
+
+              if (totalErrors > 10) {
+                bodyParts.push('');
+                bodyParts.push(`> :mag: Showing 10 of ${totalErrors} errors. See workflow logs for complete list.`);
+              }
+              bodyParts.push('');
+            }
+
+            // Summary section (like original image)
+            bodyParts.push('### :clipboard: Summary');
+            bodyParts.push('');
+            bodyParts.push('| Metric | Value |');
+            bodyParts.push('|--------|-------|');
+            bodyParts.push(`| Status | ${overallStatus} |`);
+            bodyParts.push(`| Modules | ${moduleCount} |`);
+            bodyParts.push(`| Scope | \`${scope}\` |`);
+            bodyParts.push(`| Time | ${duration}s |`);
+            bodyParts.push('');
+
+            // Documentation Coverage (like original image)
+            bodyParts.push('### :books: Documentation Coverage');
+            bodyParts.push('');
+            bodyParts.push('| Metric | Coverage | Detail | Goal | Status |');
+            bodyParts.push('|--------|----------|--------|------|--------|');
+            bodyParts.push(`| Docstrings | **${docstringCov}%** | ${documentedMethods}/${totalMethods} | >=${threshold}% | ${icon(docstringCov, threshold)} |`);
+            bodyParts.push(`| Field strings | **${stringCov}%** | ${fieldsWithString}/${totalFields} | >=90% | ${icon(stringCov, 90)} |`);
+            bodyParts.push(`| Field help | **${helpCov}%** | ${fieldsWithHelp}/${helpTotal} | >=50% | ${icon(helpCov, 50)} |`);
+            bodyParts.push('');
+
+            // Issues in this PR (like original image)
+            bodyParts.push('### :warning: Issues in this PR');
+            bodyParts.push('');
+            bodyParts.push('| Type | Count |');
+            bodyParts.push('|------|-------|');
+            bodyParts.push(`| Missing docstrings | ${missingDocstringPr} |`);
+            bodyParts.push(`| Fields without string | ${missingStringPr} |`);
+            bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
+            bodyParts.push('');
+
+            // Code Quality (like original image)
+            bodyParts.push('### :mag: Code Quality');
+            bodyParts.push('');
+            bodyParts.push('| Tool | PR | Repo | Status |');
+            bodyParts.push('|------|-----|------|--------|');
+            bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${icon(ruffFull, 0, true)} |`);
+            bodyParts.push(`| Pylint | ${pylintChanged} | ${pylintFull} | ${icon(pylintFull, 0, true)} |`);
+            bodyParts.push('');
+
+            // Footer
+            bodyParts.push('---');
+            if (hasFailed) {
+              bodyParts.push(':bulb: **Tip:** Fix the blocking errors above and push again.');
+              bodyParts.push('');
+            }
+            bodyParts.push(':robot: *solt-pre-commit*');
+
+            const body = bodyParts.join('\n');
+
             console.log(`Posting comment to PR #${prNumber}`);
-            
+
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
             });
-            
-            const botComment = comments.find(c => 
-              c.user.type === 'Bot' && c.body.includes('Reporte de Validacion')
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && 
+              (c.body.includes('Validation Failed') || c.body.includes('Validation Passed') || c.body.includes('Validation Report'))
             );
-            
+
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -467,13 +665,33 @@ jobs:
               console.log('Created new comment');
             }
 
-      - name: Check result
+      # CRITICAL: This step determines the final job status
+      - name: Final validation check
+        id: final-check
         run: |
-          RESULT="${{ steps.summary.outputs.result }}"
-          if [ -z "$RESULT" ]; then RESULT="success"; fi
-          if [ "$RESULT" = "failure" ]; then
-            echo "::error::Validation failed"
+          EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
+          EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' || echo 0)
+          if [ -z "$EXIT_CODE" ]; then EXIT_CODE=0; fi
+
+          FAIL_ON_WARNINGS="${{ inputs.fail-on-warnings }}"
+          WARNINGS="${{ steps.summary.outputs.warnings }}"
+          WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' || echo 0)
+
+          echo "::notice::Final check - Exit code: $EXIT_CODE, Warnings: $WARNINGS, Fail on warnings: $FAIL_ON_WARNINGS"
+
+          # Determine final result
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "::error::Validation FAILED with blocking issues (exit code: $EXIT_CODE)"
             exit 1
+          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$WARNINGS" -gt 0 ]; then
+            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "::error::Validation FAILED due to warnings (fail-on-warnings enabled)"
+            exit 1
+          else
+            echo "result=success" >> $GITHUB_OUTPUT
+            echo "::notice::Validation PASSED"
+            exit 0
           fi
 
   # ---------------------------------------------------------------------------
@@ -484,11 +702,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     if: |
-      github.event_name == 'push' && 
-      (github.ref == 'refs/heads/main' || 
-       github.ref == 'refs/heads/master' || 
-       github.ref == 'refs/heads/develop' || 
-       startsWith(github.ref, 'refs/heads/17.0') || 
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/master' ||
+       github.ref == 'refs/heads/develop' ||
+       startsWith(github.ref, 'refs/heads/17.0') ||
        startsWith(github.ref, 'refs/heads/18.0'))
 
     steps:
@@ -549,7 +767,7 @@ jobs:
           else
             CHANGED_FILES=$(git diff --name-only HEAD~1...HEAD 2>/dev/null | tr '\n' ' ')
           fi
-          
+
           VALID_FILES=""
           for f in $CHANGED_FILES; do
             if [ -f "$f" ]; then
@@ -557,10 +775,10 @@ jobs:
             fi
           done
           VALID_FILES=$(echo "$VALID_FILES" | xargs)
-          
+
           FILE_COUNT=$(echo "$VALID_FILES" | wc -w | tr -d ' ')
           if [ -z "$FILE_COUNT" ]; then FILE_COUNT=0; fi
-          
+
           echo "files=$VALID_FILES" >> $GITHUB_OUTPUT
           echo "count=$FILE_COUNT" >> $GITHUB_OUTPUT
 
@@ -570,13 +788,13 @@ jobs:
           FILES="${{ steps.changed.outputs.files }}"
           COUNT="${{ steps.changed.outputs.count }}"
           if [ -z "$COUNT" ]; then COUNT=0; fi
-          
+
           if [ -z "$FILES" ] || [ "$COUNT" = "0" ]; then
             echo "No files to check"
             echo "status=skipped" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
           echo "Checking $COUNT files..."
           if pre-commit run --files $FILES 2>&1 | tee precommit_output.txt; then
             echo "status=passed" >> $GITHUB_OUTPUT
