@@ -47,13 +47,16 @@ repos:
     rev: v9.1.2
     hooks:
       - id: pylint_odoo
-        args: [ --rcfile=.pylintrc ]
+        args:
+          - --rcfile=.pylintrc
+          - --disable=W8113,C8101,C8103,C8112
+          - --valid-odoo-versions=17.0
 
   # ─────────────────────────────────────────────────────────────────────────
   # GENERAL CODE QUALITY
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer

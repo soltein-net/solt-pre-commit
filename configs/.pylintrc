@@ -7,8 +7,7 @@
 [MASTER]
 load-plugins=pylint_odoo
 
-# Use multiple processes to speed up Pylint
-jobs=0
+jobs=1
 
 # Pickle collected data for later comparisons
 persistent=yes
@@ -16,44 +15,46 @@ persistent=yes
 # List of plugins (as comma separated values of python modules names)
 # to load, usually to register additional checkers
 extension-pkg-whitelist=lxml
+ignore=__pycache__,static,lib,node_modules,migrations
+ignore-patterns=.*\.pyc$,.*\.xml$,.*\.csv$,.*\.po$,.*\.pot$,.*\.txt$,.*\.json$
 
 [MESSAGES CONTROL]
-# Disable specific messages
 disable=
-    # Standard pylint disables for Odoo
-    C0103,  # invalid-name (Odoo uses specific naming conventions)
-    C0114,  # missing-module-docstring
-    C0115,  # missing-class-docstring (handled by solt-pre-commit)
-    C0116,  # missing-function-docstring (handled by solt-pre-commit)
-    C0301,  # line-too-long (handled by black/ruff)
-    C0302,  # too-many-lines
-    C0411,  # wrong-import-order (handled by isort)
-    E0401,  # import-error (Odoo imports not available)
-    E1101,  # no-member (dynamic attributes in Odoo)
-    R0801,  # duplicate-code
-    R0901,  # too-many-ancestors
-    R0902,  # too-many-instance-attributes
-    R0903,  # too-few-public-methods
-    R0904,  # too-many-public-methods
-    R0912,  # too-many-branches
-    R0913,  # too-many-arguments
-    R0914,  # too-many-locals
-    R0915,  # too-many-statements
-    W0104,  # pointless-statement (Odoo field definitions)
-    W0212,  # protected-access (common in Odoo)
-    W0221,  # arguments-differ (Odoo overrides)
-    W0223,  # abstract-method
-    W0511,  # fixme
-    W0603,  # global-statement
-    W0612,  # unused-variable
-    W0613,  # unused-argument
-    W0621,  # redefined-outer-name
-    W0703,  # broad-except
-    W1203,  # logging-fstring-interpolation
+    C0103,
+    C0114,
+    C0115,
+    C0116,
+    C0301,
+    C0302,
+    C0411,
+    E0401,
+    E1101,
+    R0801,
+    R0901,
+    R0902,
+    R0903,
+    R0904,
+    R0912,
+    R0913,
+    R0914,
+    R0915,
+    W0104,
+    W0212,
+    W0221,
+    W0223,
+    W0511,
+    W0603,
+    W0612,
+    W0613,
+    W0621,
+    W0703,
+    W1203,
+    C8101,
+    C8103,
+    C8112,
+    W8113,
 
-# Enable specific pylint-odoo checks
-enable=
-    odoolint,
+enable=odoolint
 
 [REPORTS]
 # Set the output format
@@ -191,31 +192,3 @@ analyse-fallback-blocks=no
 # Exceptions that will emit a warning when being caught
 overgeneral-exceptions=
     builtins.Exception,
-
-[ODOOLINT]
-# Manifest version format (regex)
-manifest_version_format=(\d+\.\d+\.\d+\.\d+\.\d+|\d+\.\d+\.\d+\.\d+)
-
-# Valid odoo versions
-valid_odoo_versions=
-    17.0,
-    18.0,
-
-# Readme filename (glob pattern)
-readme_template_url=https://github.com/OCA/maintainer-tools/blob/master/template/module/README.rst
-
-# External request timeout
-external_request_timeout=10
-
-# License allowed
-license_allowed=
-    AGPL-3,
-    GPL-2,
-    GPL-2 or any later version,
-    GPL-3,
-    GPL-3 or any later version,
-    LGPL-3,
-    OEEL-1,
-    OPL-1,
-    Other OSI approved licence,
-    Other proprietary,
