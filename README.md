@@ -473,8 +473,8 @@ Contributions welcome! Please:
 
 - **Issues**: [GitHub Issues](https://github.com/soltein-net/solt-pre-commit/issues)
 - **Documentation**: [Full Docs](https://soltein-net.github.io/solt-pre-commit)
-- **Email**: dev@soltein.mx
+- **Email**: soporte@soltein.mx
 
 ---
 
-**Developed with ❤️ by [Soltein](https://soltein.mx)**
+**Developed with ❤️ by [Soltein SA de CV](https://soltein.mx)**

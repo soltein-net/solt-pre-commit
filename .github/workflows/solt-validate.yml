@@ -140,6 +140,7 @@ jobs:
 
       - name: Run validation (changed files)
         id: validate
+        continue-on-error: true
         run: |
           mkdir -p reports
           ARGS="--scope ${{ inputs.validation-scope }}"
@@ -163,14 +164,19 @@ jobs:
 
           # Show exit code in logs for debugging
           echo "::notice::Validation exit code: $VALIDATION_EXIT_CODE"
+          
+          # Exit with validation code so step shows red if there are blocking errors
+          exit $VALIDATION_EXIT_CODE
 
       - name: Run full validation for metrics
+        if: always()
         continue-on-error: true
         run: |
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info 2>&1 | tee reports/validation-full.txt || true
 
       - name: Run Ruff check
         id: ruff
+        if: always()
         continue-on-error: true
         run: |
           set +e
@@ -210,6 +216,7 @@ jobs:
 
       - name: Run Pylint-Odoo check
         id: pylint
+        if: always()
         continue-on-error: true
         run: |
           set +e
@@ -362,12 +369,14 @@ jobs:
           EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' | head -1 || echo "0")
           if [ -z "$EXIT_CODE" ]; then EXIT_CODE="0"; fi
 
-          # Count errors/warnings - ensure single numeric value
+          # Count errors/warnings from FINAL SUMMARY section
+          # Format: "  Errors: 0" and "  Warnings: 48"
           ERRORS="0"
           WARNINGS="0"
           if [ -f "reports/validation.txt" ]; then
-            ERRORS=$(grep -c "^\[ERROR\]" reports/validation.txt 2>/dev/null || echo "0")
-            WARNINGS=$(grep -c "^\[WARN\]" reports/validation.txt 2>/dev/null || echo "0")
+            # Try to extract from summary lines like "  Errors: 0"
+            ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
+            WARNINGS=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
           fi
           # Ensure they are single numbers
           ERRORS=$(echo "$ERRORS" | grep -oE '^[0-9]+' | head -1 || echo "0")
@@ -400,17 +409,29 @@ jobs:
                   content = f.read()
 
               # Output format from solt-check-odoo:
-              # [ERROR] ERRORS (3) [BLOCKING]
+              # ❌ ERRORS (3) [BLOCKING]
               # --------------------------------------------------
               #
               #   Python Duplicate Field Label (1)
               #     - /path/to/file.py:45 Fields (amount, total) have same label
               #
-              # [WARN] WARNINGS (5)
+              # ⚠️  WARNINGS (5)
               # --------------------------------------------------
               #
               #   Python Field Missing String (2)
               #     - models/budget.py:67 Field "state" is missing string attribute
+              #
+              # FINAL SUMMARY:
+              #   Errors: 0
+              #   Warnings: 48
+              
+              # First, try to extract totals from FINAL SUMMARY section
+              errors_match = re.search(r'Errors:\s*(\d+)', content)
+              warnings_match = re.search(r'Warnings:\s*(\d+)', content)
+              if errors_match:
+                  total_errors = int(errors_match.group(1))
+              if warnings_match:
+                  total_warnings = int(warnings_match.group(1))
 
               current_severity = None
               current_check = None
@@ -418,21 +439,22 @@ jobs:
               for line in content.split('\n'):
                   line_stripped = line.strip()
 
-                  # Detect severity section headers
-                  if line_stripped.startswith('[ERROR]'):
+                  # Detect severity section headers (with emoji or bracket format)
+                  # Match: "❌ ERRORS (3)" or "[ERROR] ERRORS (3)"
+                  if 'ERRORS' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'error'
-                      # Extract count from header like "[ERROR] ERRORS (3)"
                       match = re.search(r'\((\d+)\)', line_stripped)
-                      if match:
+                      if match and total_errors == 0:
                           total_errors = int(match.group(1))
                       continue
-                  elif line_stripped.startswith('[WARN]'):
+                  # Match: "⚠️ WARNINGS (5)" or "[WARN] WARNINGS (5)"
+                  elif 'WARNING' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'warning'
                       match = re.search(r'\((\d+)\)', line_stripped)
-                      if match:
+                      if match and total_warnings == 0:
                           total_warnings = int(match.group(1))
                       continue
-                  elif line_stripped.startswith('[INFO]'):
+                  elif 'INFO' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'info'
                       continue
 
@@ -499,7 +521,7 @@ jobs:
 
           # Limit entries
           errors_list = errors_list[:10]
-          warnings_list = warnings_list[:5]
+          warnings_list = warnings_list[:10]
 
           # Save to JSON for the comment step
           result = {
@@ -655,10 +677,10 @@ jobs:
           MISSING_DOCSTRING_PR: ${{ steps.metrics.outputs.missing_docstring_pr }}
           MISSING_STRING_PR: ${{ steps.metrics.outputs.missing_string_pr }}
           MISSING_HELP_PR: ${{ steps.metrics.outputs.missing_help_pr }}
-          RUFF_CHANGED: ${{ steps.metrics.outputs.ruff_changed }}
-          RUFF_FULL: ${{ steps.metrics.outputs.ruff_full }}
-          PYLINT_CHANGED: ${{ steps.metrics.outputs.pylint_changed }}
-          PYLINT_FULL: ${{ steps.metrics.outputs.pylint_full }}
+          RUFF_CHANGED: ${{ steps.ruff.outputs.changed }}
+          RUFF_FULL: ${{ steps.ruff.outputs.full }}
+          PYLINT_CHANGED: ${{ steps.pylint.outputs.changed }}
+          PYLINT_FULL: ${{ steps.pylint.outputs.full }}
           DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
@@ -798,8 +820,32 @@ jobs:
                 bodyParts.push('');
               }
               
-              // If failed due to Ruff/warnings but no extracted errors, show warning
-              if (!hasExtractedErrors && failOnWarnings && (hasRuffIssues || hasPylintIssues)) {
+              // Show warnings as blocking when fail-on-warnings is enabled
+              const hasExtractedWarnings = extractedIssues.warnings && extractedIssues.warnings.length > 0;
+              if (!hasExtractedErrors && failOnWarnings && hasExtractedWarnings) {
+                bodyParts.push(`### :no_entry: Blocking Warnings (${totalWarnings})`);
+                bodyParts.push('');
+                bodyParts.push('> **Note:** \`fail-on-warnings\` is enabled. Warnings are treated as blocking issues.');
+                bodyParts.push('');
+                bodyParts.push('| File | Line | Warning |');
+                bodyParts.push('|------|------|---------|');
+
+                for (const warn of extractedIssues.warnings.slice(0, 10)) {
+                  const file = warn.file ? `\`${warn.file}\`` : '-';
+                  const line = warn.line || '-';
+                  const msg = warn.message || 'Unknown warning';
+                  bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+                }
+
+                if (totalWarnings > 10) {
+                  bodyParts.push('');
+                  bodyParts.push(`> :mag: Showing 10 of ${totalWarnings} warnings. [See workflow logs for complete list.](${workflowUrl})`);
+                }
+                bodyParts.push('');
+              }
+              
+              // If failed due to Ruff/Pylint issues (and no solt errors/warnings), show them
+              if (!hasExtractedErrors && !hasExtractedWarnings && failOnWarnings && (hasRuffIssues || hasPylintIssues)) {
                 bodyParts.push('### :no_entry: Blocking Issues');
                 bodyParts.push('');
                 bodyParts.push('> **Note:** `fail-on-warnings` is enabled. The following tool issues are blocking this PR:');
