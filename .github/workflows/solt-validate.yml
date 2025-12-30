@@ -151,10 +151,13 @@ jobs:
           START_TIME=$(date +%s)
 
           # Run validation and capture exit code
+          # Use pipefail to get the exit code of solt-check-odoo, not tee
+          set -o pipefail
           set +e
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} $ARGS 2>&1 | tee reports/validation.txt
-          VALIDATION_EXIT_CODE=$?
+          VALIDATION_EXIT_CODE=${PIPESTATUS[0]}
           set -e
+          set +o pipefail
 
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))

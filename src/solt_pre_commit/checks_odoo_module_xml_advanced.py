@@ -109,7 +109,18 @@ class ChecksOdooModuleXMLAdvanced:
                     )
 
     def check_button_without_type(self):
-        """Detect buttons without type attribute."""
+        """Detect buttons without type attribute.
+
+        Buttons in Odoo views should have a type attribute to specify their behavior.
+        However, buttons with special="cancel" are exempt because they use the special
+        attribute instead of type to define their behavior (closing wizards/dialogs).
+
+        Valid button patterns:
+        - <button type="object" name="action_confirm"/>
+        - <button type="action" name="%(action_id)d"/>
+        - <button special="cancel" string="Cancel"/>  (exempt from check)
+        - <button special="save" string="Save"/>  (exempt from check)
+        """
         for manifest_data in self.manifest_datas:
             tree = manifest_data.get("tree")
             if tree is None:
@@ -117,7 +128,9 @@ class ChecksOdooModuleXMLAdvanced:
 
             filename = manifest_data["filename"]
 
-            for node in tree.xpath("//button[not(@type)]"):
+            # Find buttons without type attribute AND without special attribute
+            # Buttons with special="cancel" or special="save" don't need type
+            for node in tree.xpath("//button[not(@type) and not(@special)]"):
                 name = node.get("name", "unnamed")
                 self.checks_errors["xml_button_without_type"].append(
                     f'{filename}:{node.sourceline} Button "{name}" is missing type attribute'
