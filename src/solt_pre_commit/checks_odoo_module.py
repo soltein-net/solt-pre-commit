@@ -344,7 +344,7 @@ class ResultPrinter:
     # Maximum message length before truncation (increased from 120)
     MAX_MESSAGE_LENGTH = 200
 
-    def __init__(self, use_colors=True, verbose=False, use_unicode=None):
+    def __init__(self, use_colors=True, verbose=False, use_unicode=None, max_messages=None):
         self.use_colors = use_colors and sys.stdout.isatty()
         self.verbose = verbose
         # Auto-detect unicode support: use ASCII in CI, unicode in terminal
@@ -352,6 +352,12 @@ class ResultPrinter:
             self.use_unicode = sys.stdout.isatty() and os.environ.get("CI") is None
         else:
             self.use_unicode = use_unicode
+        # Max messages per check type (None = show all, useful for CI)
+        # Default: 10 for terminal, unlimited for CI
+        if max_messages is None:
+            self.max_messages = None if os.environ.get("CI") else 10
+        else:
+            self.max_messages = max_messages
 
     def _get_icon(self, severity):
         """Get the appropriate icon based on environment."""
@@ -416,14 +422,16 @@ class ResultPrinter:
                 check_display = self._format_check_name(check_name)
                 print(f"\n  {self._bold(check_display)} ({len(messages)})")
 
-                for msg in messages[:10]:
+                # Show all messages if max_messages is None, otherwise limit
+                display_messages = messages if self.max_messages is None else messages[:self.max_messages]
+                for msg in display_messages:
                     # Truncate long messages but preserve readability
                     if len(msg) > self.MAX_MESSAGE_LENGTH:
                         msg = msg[: self.MAX_MESSAGE_LENGTH - 3] + "..."
                     print(f"    - {msg}")
 
-                if len(messages) > 10:
-                    remaining = len(messages) - 10
+                if self.max_messages and len(messages) > self.max_messages:
+                    remaining = len(messages) - self.max_messages
                     print(f"    ... and {remaining} more")
 
         print("")

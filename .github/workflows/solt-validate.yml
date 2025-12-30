@@ -2,7 +2,7 @@
 # SOLT PRE-COMMIT - Reusable Workflow
 # =============================================================================
 # IMPORTANT: This workflow will FAIL (red) when blocking issues are found.
-# The validation job exit code is properly propagated.
+# The validation job exit code is properly propagated via the final-check step.
 # =============================================================================
 name: Solt Validation (Reusable)
 
@@ -138,7 +138,9 @@ jobs:
           echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
           echo "Found $MODULE_COUNT modules: $MODULES"
 
-      - name: Run validation (changed files)
+      # NOTE: This step uses continue-on-error so subsequent steps run.
+      # The actual pass/fail is determined by "Final validation check" at the end.
+      - name: Run validation (collect results)
         id: validate
         continue-on-error: true
         run: |
@@ -151,7 +153,6 @@ jobs:
           START_TIME=$(date +%s)
 
           # Run validation and capture exit code
-          # Use pipefail to get the exit code of solt-check-odoo, not tee
           set -o pipefail
           set +e
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} $ARGS 2>&1 | tee reports/validation.txt
@@ -168,7 +169,7 @@ jobs:
           # Show exit code in logs for debugging
           echo "::notice::Validation exit code: $VALIDATION_EXIT_CODE"
           
-          # Exit with validation code so step shows red if there are blocking errors
+          # Exit with validation code to store in step outcome
           exit $VALIDATION_EXIT_CODE
 
       - name: Run full validation for metrics
@@ -396,11 +397,16 @@ jobs:
           
           echo "Summary: exit_code=$EXIT_CODE, errors=$ERRORS, warnings=$WARNINGS"
 
-          # Extract top errors for PR comment
+          # Extract first 10 errors/warnings for PR comment (full list is in workflow logs)
           python3 << 'PYEOF'
           import os
           import re
           import json
+
+          # Maximum number of issues to extract for PR comment
+          # Full list is shown in workflow logs via solt-check-odoo output
+          MAX_ERRORS = 10
+          MAX_WARNINGS = 10
 
           errors_list = []
           warnings_list = []
@@ -411,23 +417,6 @@ jobs:
               with open('reports/validation.txt', 'r', encoding='utf-8', errors='replace') as f:
                   content = f.read()
 
-              # Output format from solt-check-odoo:
-              # ❌ ERRORS (3) [BLOCKING]
-              # --------------------------------------------------
-              #
-              #   Python Duplicate Field Label (1)
-              #     - /path/to/file.py:45 Fields (amount, total) have same label
-              #
-              # ⚠️  WARNINGS (5)
-              # --------------------------------------------------
-              #
-              #   Python Field Missing String (2)
-              #     - models/budget.py:67 Field "state" is missing string attribute
-              #
-              # FINAL SUMMARY:
-              #   Errors: 0
-              #   Warnings: 48
-              
               # First, try to extract totals from FINAL SUMMARY section
               errors_match = re.search(r'Errors:\s*(\d+)', content)
               warnings_match = re.search(r'Warnings:\s*(\d+)', content)
@@ -443,14 +432,12 @@ jobs:
                   line_stripped = line.strip()
 
                   # Detect severity section headers (with emoji or bracket format)
-                  # Match: "❌ ERRORS (3)" or "[ERROR] ERRORS (3)"
                   if 'ERRORS' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'error'
                       match = re.search(r'\((\d+)\)', line_stripped)
                       if match and total_errors == 0:
                           total_errors = int(match.group(1))
                       continue
-                  # Match: "⚠️ WARNINGS (5)" or "[WARN] WARNINGS (5)"
                   elif 'WARNING' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'warning'
                       match = re.search(r'\((\d+)\)', line_stripped)
@@ -476,8 +463,6 @@ jobs:
                       msg_content = line[6:]  # Remove "    - "
 
                       # Try to extract file:line pattern
-                      # Pattern: /path/to/file.py:123 Message here
-                      # Or: file.py:123 Message here
                       file_line_match = re.match(r'^([^\s:]+):(\d+)\s+(.+)$', msg_content)
 
                       if file_line_match:
@@ -512,19 +497,15 @@ jobs:
                               'check': current_check
                           }
 
-                      if current_severity == 'error':
+                      if current_severity == 'error' and len(errors_list) < MAX_ERRORS:
                           errors_list.append(entry)
-                      else:
+                      elif current_severity == 'warning' and len(warnings_list) < MAX_WARNINGS:
                           warnings_list.append(entry)
 
           except Exception as e:
               print(f"Error parsing validation output: {e}")
               import traceback
               traceback.print_exc()
-
-          # Limit entries
-          errors_list = errors_list[:10]
-          warnings_list = warnings_list[:10]
 
           # Save to JSON for the comment step
           result = {
@@ -542,7 +523,7 @@ jobs:
           # Debug: show what we extracted
           if errors_list:
               print("Sample errors:")
-              for e in errors_list[:3]:
+              for e in errors_list[:5]:
                   print(f"  - {e.get('file')}:{e.get('line')} {e.get('message')}")
           
           # Also parse Pylint errors if they exist
@@ -552,7 +533,6 @@ jobs:
                   try:
                       with open(pylint_file, 'r', encoding='utf-8', errors='replace') as f:
                           for line in f:
-                              # Pylint format: path/to/file.py:123:0: C0123(code-name) Message
                               match = re.match(r'^(.+?):(\d+):\d+:\s*([CRWEF]\d+)\(([^)]+)\)\s*(.+)$', line.strip())
                               if match:
                                   filepath = match.group(1)
@@ -561,12 +541,10 @@ jobs:
                                   code_name = match.group(4)
                                   message = match.group(5)
           
-                                  # Shorten filepath
                                   parts = filepath.replace('\\', '/').split('/')
                                   if len(parts) > 2:
                                       filepath = '/'.join(parts[-2:])
           
-                                  # Truncate message
                                   if len(message) > 60:
                                       message = message[:57] + '...'
           
@@ -581,23 +559,9 @@ jobs:
           except Exception as e:
               print(f"Error parsing pylint output: {e}")
           
-          # Add pylint errors to the main list (up to 5)
-          if pylint_errors and len(errors_list) < 10:
-              remaining_slots = 10 - len(errors_list)
-              errors_list.extend(pylint_errors[:remaining_slots])
-              total_errors += len(pylint_errors)
-          
-          # Update result with pylint errors
-          result['errors'] = errors_list[:10]
-          result['total_errors'] = total_errors
+          # Store pylint errors separately
+          result['pylint_errors'] = pylint_errors[:20]
           result['pylint_errors_count'] = len(pylint_errors)
-          
-          # Re-save with updated data
-          with open('reports/extracted_issues.json', 'w') as f:
-              json.dump(result, f, indent=2)
-          
-          if pylint_errors:
-              print(f"Also found {len(pylint_errors)} Pylint errors")
           
           # Also parse Ruff errors if they exist
           ruff_errors = []
@@ -606,7 +570,6 @@ jobs:
                   try:
                       with open(ruff_file, 'r', encoding='utf-8', errors='replace') as f:
                           for line in f:
-                              # Ruff concise format: path/to/file.py:123:45: E501 Message
                               match = re.match(r'^(.+?):(\d+):(\d+):\s*([A-Z]+\d+)\s+(.+)$', line.strip())
                               if match:
                                   filepath = match.group(1)
@@ -614,14 +577,11 @@ jobs:
                                   code = match.group(4)
                                   message = match.group(5)
           
-                                  # Shorten filepath - remove /home/runner/work/REPO/ prefix
                                   filepath = re.sub(r'/home/runner/work/[^/]+/', '', filepath)
-                                  # Keep last 2 parts for readability
                                   parts = filepath.replace('\\', '/').split('/')
                                   if len(parts) > 2:
                                       filepath = '/'.join(parts[-2:])
           
-                                  # Truncate message
                                   if len(message) > 60:
                                       message = message[:57] + '...'
           
@@ -636,18 +596,17 @@ jobs:
           except Exception as e:
               print(f"Error parsing ruff output: {e}")
           
-          # Store ruff errors separately for the comment
-          result['ruff_errors'] = ruff_errors[:10]
+          result['ruff_errors'] = ruff_errors[:20]
           result['ruff_errors_count'] = len(ruff_errors)
           
-          # Re-save with ruff data
+          # Re-save with all data
           with open('reports/extracted_issues.json', 'w') as f:
               json.dump(result, f, indent=2)
           
+          if pylint_errors:
+              print(f"Also found {len(pylint_errors)} Pylint errors")
           if ruff_errors:
-              print(f"Also found {len(ruff_errors)} Ruff errors:")
-              for e in ruff_errors[:5]:
-                  print(f"  - {e.get('file')}:{e.get('line')} {e.get('message')}")
+              print(f"Also found {len(ruff_errors)} Ruff errors")
           PYEOF
 
       - name: Upload reports
@@ -750,7 +709,7 @@ jobs:
               console.log('Could not load extracted issues:', e.message);
             }
 
-            // Use totals from extracted JSON if available, otherwise from grep counts
+            // Use totals from extracted JSON if available
             const totalErrors = extractedIssues.total_errors || errorsCount;
             const totalWarnings = extractedIssues.total_warnings || warningsCount;
 
@@ -759,21 +718,17 @@ jobs:
               return val >= th ? ':white_check_mark:' : ':warning:';
             }
 
-            // Determine REAL final status considering all factors
-            // 1. solt-check-odoo exit code (blocking errors)
-            // 2. fail-on-warnings setting + warning counts
-            // 3. Ruff issues in changed files
+            // Determine final status
             const hasBlockingErrors = exitCode !== 0;
             const hasRuffIssues = ruffChanged > 0;
             const hasPylintIssues = pylintChanged > 0;
             const hasWarnings = warningsCount > 0 || hasRuffIssues || hasPylintIssues;
             
-            // Final decision: fail if blocking errors OR (fail-on-warnings AND has warnings)
             const hasFailed = hasBlockingErrors || (failOnWarnings && hasWarnings);
             
             const overallStatus = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
             
-            // Determine failure reason for display
+            // Determine failure reason
             let failureReason = '';
             if (hasBlockingErrors) {
               failureReason = 'blocking errors from solt-check-odoo';
@@ -785,10 +740,10 @@ jobs:
               failureReason = `warnings (${warningsCount}) with fail-on-warnings enabled`;
             }
 
-            // Build the comment body - EXACT format from original image but in English
+            // Build the comment body
             const bodyParts = [];
 
-            // Header - different message based on status
+            // Header
             bodyParts.push('## :bar_chart: Validation Report');
             bodyParts.push('');
             if (hasFailed) {
@@ -798,94 +753,91 @@ jobs:
             }
             bodyParts.push('');
 
-            // If failed, show blocking errors FIRST
+            // Show first 10 blocking errors directly, link to workflow for all
             const hasExtractedErrors = extractedIssues.errors && extractedIssues.errors.length > 0;
+            const hasExtractedWarnings = extractedIssues.warnings && extractedIssues.warnings.length > 0;
+            const MAX_DISPLAY = 10;
             
             if (hasFailed) {
-              // Show blocking errors section if we have any
               if (hasExtractedErrors) {
                 bodyParts.push(`### :no_entry: Blocking Errors (${totalErrors})`);
                 bodyParts.push('');
                 bodyParts.push('| File | Line | Error |');
                 bodyParts.push('|------|------|-------|');
 
-                for (const err of extractedIssues.errors.slice(0, 10)) {
+                // Show only first 10 errors
+                for (const err of extractedIssues.errors.slice(0, MAX_DISPLAY)) {
                   const file = err.file ? `\`${err.file}\`` : '-';
                   const line = err.line || '-';
                   const msg = err.message || 'Unknown error';
                   bodyParts.push(`| ${file} | ${line} | ${msg} |`);
                 }
 
-                if (totalErrors > 10) {
-                  bodyParts.push('');
-                  bodyParts.push(`> :mag: Showing 10 of ${totalErrors} errors. [See workflow logs for complete list.](${workflowUrl})`);
-                }
                 bodyParts.push('');
+                if (totalErrors > MAX_DISPLAY) {
+                  bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${totalErrors} errors. **[View all errors in workflow logs](${workflowUrl})**`);
+                  bodyParts.push('');
+                }
               }
               
               // Show warnings as blocking when fail-on-warnings is enabled
-              const hasExtractedWarnings = extractedIssues.warnings && extractedIssues.warnings.length > 0;
-              if (!hasExtractedErrors && failOnWarnings && hasExtractedWarnings) {
-                bodyParts.push(`### :no_entry: Blocking Warnings (${totalWarnings})`);
+              if (failOnWarnings && hasExtractedWarnings) {
+                bodyParts.push(`### :warning: Blocking Warnings (${totalWarnings})`);
                 bodyParts.push('');
-                bodyParts.push('> **Note:** \`fail-on-warnings\` is enabled. Warnings are treated as blocking issues.');
+                bodyParts.push('> **Note:** `fail-on-warnings` is enabled. Warnings are treated as blocking issues.');
                 bodyParts.push('');
                 bodyParts.push('| File | Line | Warning |');
                 bodyParts.push('|------|------|---------|');
 
-                for (const warn of extractedIssues.warnings.slice(0, 10)) {
+                // Show only first 10 warnings
+                for (const warn of extractedIssues.warnings.slice(0, MAX_DISPLAY)) {
                   const file = warn.file ? `\`${warn.file}\`` : '-';
                   const line = warn.line || '-';
                   const msg = warn.message || 'Unknown warning';
                   bodyParts.push(`| ${file} | ${line} | ${msg} |`);
                 }
 
-                if (totalWarnings > 10) {
-                  bodyParts.push('');
-                  bodyParts.push(`> :mag: Showing 10 of ${totalWarnings} warnings. [See workflow logs for complete list.](${workflowUrl})`);
-                }
                 bodyParts.push('');
+                if (totalWarnings > MAX_DISPLAY) {
+                  bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${totalWarnings} warnings. **[View all warnings in workflow logs](${workflowUrl})**`);
+                  bodyParts.push('');
+                }
               }
               
-              // If failed due to Ruff/Pylint issues (and no solt errors/warnings), show them
-              if (!hasExtractedErrors && !hasExtractedWarnings && failOnWarnings && (hasRuffIssues || hasPylintIssues)) {
-                bodyParts.push('### :no_entry: Blocking Issues');
-                bodyParts.push('');
-                bodyParts.push('> **Note:** `fail-on-warnings` is enabled. The following tool issues are blocking this PR:');
+              // If failed due to Ruff/Pylint issues
+              const ruffErrors = extractedIssues.ruff_errors || [];
+              if (failOnWarnings && (hasRuffIssues || hasPylintIssues)) {
+                bodyParts.push('### :wrench: Code Quality Issues');
                 bodyParts.push('');
                 
-                // Show Ruff errors in detail if available
-                const ruffErrors = extractedIssues.ruff_errors || [];
                 if (hasRuffIssues && ruffErrors.length > 0) {
-                  bodyParts.push(`#### Ruff Errors (${ruffChanged} in PR)`);
+                  bodyParts.push(`#### Ruff (${ruffChanged} issues in PR)`);
                   bodyParts.push('');
                   bodyParts.push('| File | Line | Error |');
                   bodyParts.push('|------|------|-------|');
-                  for (const err of ruffErrors.slice(0, 10)) {
+                  for (const err of ruffErrors.slice(0, MAX_DISPLAY)) {
                     const file = err.file ? `\`${err.file}\`` : '-';
                     const line = err.line || '-';
                     const msg = err.message || 'Unknown error';
                     bodyParts.push(`| ${file} | ${line} | ${msg} |`);
                   }
-                  if (ruffChanged > 10) {
-                    bodyParts.push('');
-                    bodyParts.push(`> Showing 10 of ${ruffChanged} Ruff issues.`);
-                  }
                   bodyParts.push('');
+                  if (ruffChanged > MAX_DISPLAY) {
+                    bodyParts.push(`> Showing ${MAX_DISPLAY} of ${ruffChanged} Ruff issues. **[View all in workflow logs](${workflowUrl})**`);
+                    bodyParts.push('');
+                  }
                 } else if (hasRuffIssues) {
-                  bodyParts.push(`- **Ruff:** ${ruffChanged} issues in changed files (${ruffFull} total in repo)`);
+                  bodyParts.push(`- **Ruff:** ${ruffChanged} issues in changed files`);
                 }
                 
                 if (hasPylintIssues) {
-                  bodyParts.push(`- **Pylint:** ${pylintChanged} issues in changed files (${pylintFull} total in repo)`);
+                  bodyParts.push(`- **Pylint:** ${pylintChanged} issues in changed files`);
+                  bodyParts.push('');
                 }
-                bodyParts.push('');
-                bodyParts.push(`> :mag: [See workflow logs](${workflowUrl}) or run \`ruff check .\` locally for details.`);
-                bodyParts.push('');
               }
             }
 
-            // Summary section (like original image)
+            // Summary section
             bodyParts.push('### :clipboard: Summary');
             bodyParts.push('');
             bodyParts.push('| Metric | Value |');
@@ -896,7 +848,7 @@ jobs:
             bodyParts.push(`| Time | ${duration}s |`);
             bodyParts.push('');
 
-            // Documentation Coverage (like original image)
+            // Documentation Coverage
             bodyParts.push('### :books: Documentation Coverage');
             bodyParts.push('');
             bodyParts.push('| Metric | Coverage | Detail | Goal | Status |');
@@ -906,7 +858,7 @@ jobs:
             bodyParts.push(`| Field help | **${helpCov}%** | ${fieldsWithHelp}/${helpTotal} | >=50% | ${icon(helpCov, 50)} |`);
             bodyParts.push('');
 
-            // Issues in this PR (like original image)
+            // Issues in this PR
             bodyParts.push('### :warning: Issues in this PR');
             bodyParts.push('');
             bodyParts.push('| Type | Count |');
@@ -916,7 +868,7 @@ jobs:
             bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
             bodyParts.push('');
 
-            // Code Quality (like original image)
+            // Code Quality
             bodyParts.push('### :mag: Code Quality');
             bodyParts.push('');
             bodyParts.push('| Tool | PR | Repo | Status |');
@@ -970,6 +922,7 @@ jobs:
             }
 
       # CRITICAL: This step determines the final job status
+      # It runs AFTER all other steps and will FAIL the job if there are blocking issues
       - name: Final validation check
         id: final-check
         if: always()
@@ -982,7 +935,6 @@ jobs:
           WARNINGS="${{ steps.summary.outputs.warnings }}"
           WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' || echo 0)
           
-          # Ruff issues in CHANGED files only (not full repo)
           RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
           RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           if [ -z "$RUFF_CHANGED" ]; then RUFF_CHANGED=0; fi

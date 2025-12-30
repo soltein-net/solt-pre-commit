@@ -26,6 +26,14 @@ class ChecksOdooModuleXMLAdvanced:
         "active_model": "Use 'default_*' or pass via context explicitly",
     }
 
+    # Minimum ID value to report as potentially hardcoded
+    # Small numbers (<=100) are often legitimate values like:
+    # - Selection field values (1, 2, 3...)
+    # - Month numbers (1-12)
+    # - Limit values, percentages, etc.
+    # Real record IDs in production databases are typically much larger
+    HARDCODED_ID_THRESHOLD = 100
+
     def __init__(self, manifest_datas: List[dict], module_name: str):
         self.module_name = module_name
         self.manifest_datas = manifest_datas
@@ -152,7 +160,17 @@ class ChecksOdooModuleXMLAdvanced:
                 )
 
     def check_hardcoded_ids(self):
-        """Detect hardcoded IDs that should use ref()."""
+        """Detect hardcoded IDs that should use ref().
+
+        Only reports numbers greater than HARDCODED_ID_THRESHOLD (default: 100)
+        to avoid false positives from:
+        - Selection field values (1, 2, 3...)
+        - Month numbers (1-12)
+        - Limit values, percentages
+        - Other legitimate small integer values in domains
+
+        Real Odoo record IDs in production are typically much larger numbers.
+        """
         id_pattern = re.compile(r"['\"](\d+)['\"]")
 
         for manifest_data in self.manifest_datas:
@@ -169,7 +187,9 @@ class ChecksOdooModuleXMLAdvanced:
                     if "ref(" not in value:
                         matches = id_pattern.findall(value)
                         for match in matches:
-                            if int(match) > 1:
+                            # Only report IDs larger than threshold
+                            # Small numbers are usually selection values, not record IDs
+                            if int(match) > self.HARDCODED_ID_THRESHOLD:
                                 self.checks_errors["xml_hardcoded_id"].append(
                                     f"{filename}:{node.sourceline} "
                                     f'Possible hardcoded ID "{match}" in {attr}, '
