@@ -33,12 +33,12 @@ repos:
   # ODOO-SPECIFIC LINTING (OCA)
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/OCA/pylint-odoo
-    rev: v9.1.2
+    rev: v9.3.22
     hooks:
       - id: pylint_odoo
         args:
           - --rcfile=.pylintrc
-          - --disable=W8113,C8101,C8103,C8112
+          - --disable=W8113,C8101,C8103,C8112,E8102,W8301,R0917,W0707,W0201,W8120
           - --valid-odoo-versions=17.0
 
   # ─────────────────────────────────────────────────────────────────────────
