@@ -184,6 +184,10 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+          
+          # Debug: Show modules being checked
+          echo "=== Modules to check: ${{ steps.find-modules.outputs.modules }} ==="
+          
           # Get changed Python files, EXCLUDING deleted files (--diff-filter=ACMR)
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
@@ -204,16 +208,38 @@ jobs:
             EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
             
             if [ -n "$EXISTING_PY" ]; then
+              echo "=== Ruff checking changed files: $EXISTING_PY ==="
               ruff check $EXISTING_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
               RUFF_CHANGED=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-changed.txt 2>/dev/null || echo 0)
             fi
           fi
 
-          ruff check ${{ steps.find-modules.outputs.modules }} --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
-          RUFF_FULL=$(grep -cE "^.+:[0-9]+:[0-9]+:" reports/ruff-full.txt 2>/dev/null || echo 0)
+          # Run Ruff on full repo - use find to get all Python files
+          echo "=== Running Ruff on full repository ==="
+          ALL_PY_FILES=$(find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | tr '\n' ' ')
+          PY_FILE_COUNT=$(echo "$ALL_PY_FILES" | wc -w | tr -d ' ')
+          echo "Found $PY_FILE_COUNT Python files to check"
+          
+          if [ -n "$ALL_PY_FILES" ] && [ "$PY_FILE_COUNT" -gt 0 ]; then
+            ruff check $ALL_PY_FILES --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
+          else
+            # Fallback: run on module directories directly
+            echo "Fallback: running ruff on module directories"
+            ruff check ${{ steps.find-modules.outputs.modules }} --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
+          fi
+          
+          # Count issues - look for pattern file.py:line:col: CODE message
+          RUFF_FULL=$(grep -cE "^.+\.py:[0-9]+:[0-9]+:" reports/ruff-full.txt 2>/dev/null || echo 0)
+          
+          # Debug output
+          echo "=== Ruff full report (first 20 lines): ==="
+          head -20 reports/ruff-full.txt 2>/dev/null || echo "(empty)"
+          echo "=== End of Ruff sample ==="
 
           RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           RUFF_FULL=$(echo "$RUFF_FULL" | grep -oE '^[0-9]+' || echo 0)
+          
+          echo "Ruff issues - Changed: $RUFF_CHANGED, Full: $RUFF_FULL"
 
           echo "changed=${RUFF_CHANGED:-0}" >> $GITHUB_OUTPUT
           echo "full=${RUFF_FULL:-0}" >> $GITHUB_OUTPUT
