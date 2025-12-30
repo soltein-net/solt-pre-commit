@@ -444,7 +444,7 @@ class ChecksOdooModulePython:
         # Step 1: Build a map of model _name -> model_info for quick lookup
         # This map contains ALL models defined in this module
         model_by_name: Dict[str, dict] = {}
-        for model_key, model_info in self.all_models.items():
+        for _model_key, model_info in self.all_models.items():
             model_name = model_info.get("_name")
             if model_name:
                 model_by_name[model_name] = model_info
@@ -461,7 +461,7 @@ class ChecksOdooModulePython:
             self._model_mail_thread_cache[known_model] = True
 
         # Step 3: Mark models that DIRECTLY inherit from mail.thread mixins
-        for model_key, model_info in self.all_models.items():
+        for _model_key, model_info in self.all_models.items():
             if model_info.get("has_mail_thread"):
                 model_name = model_info.get("_name")
                 if model_name:
@@ -471,10 +471,10 @@ class ChecksOdooModulePython:
         # Keep iterating until no more changes are made
         # This handles chains like: ModelC -> ModelB -> ModelA -> mail.thread
         max_iterations = 10  # Safety limit
-        for iteration in range(max_iterations):
+        for _ in range(max_iterations):
             changed = False
 
-            for model_key, model_info in self.all_models.items():
+            for _model_key, model_info in self.all_models.items():
                 model_name = model_info.get("_name")
 
                 # Skip if already marked as having mail.thread
