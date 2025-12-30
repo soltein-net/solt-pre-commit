@@ -423,7 +423,7 @@ class ResultPrinter:
                 print(f"\n  {self._bold(check_display)} ({len(messages)})")
 
                 # Show all messages if max_messages is None, otherwise limit
-                display_messages = messages if self.max_messages is None else messages[:self.max_messages]
+                display_messages = messages if self.max_messages is None else messages[: self.max_messages]
                 for msg in display_messages:
                     # Truncate long messages but preserve readability
                     if len(msg) > self.MAX_MESSAGE_LENGTH:
