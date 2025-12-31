@@ -1,194 +1,161 @@
 # =============================================================================
-# PYLINT CONFIGURATION FOR ODOO MODULES
+# PYLINT CONFIGURATION FOR ODOO MODULES - SOLTEIN
 # =============================================================================
 # This file is copied to client repositories by solt-pre-commit
 # =============================================================================
 
 [MASTER]
 load-plugins=pylint_odoo
-
-jobs=1
-
-# Pickle collected data for later comparisons
-persistent=yes
-
-# List of plugins (as comma separated values of python modules names)
-# to load, usually to register additional checkers
-extension-pkg-whitelist=lxml
-ignore=__pycache__,static,lib,node_modules,migrations
-ignore-patterns=.*\.pyc$,.*\.xml$,.*\.csv$,.*\.po$,.*\.pot$,.*\.txt$,.*\.json$
-
-[MESSAGES CONTROL]
-disable=
-    C0103,
-    C0114,
-    C0115,
-    C0116,
-    C0301,
-    C0302,
-    C0411,
-    E0401,
-    E1101,
-    R0801,
-    R0901,
-    R0902,
-    R0903,
-    R0904,
-    R0912,
-    R0913,
-    R0914,
-    R0915,
-    W0104,
-    W0212,
-    W0221,
-    W0223,
-    W0511,
-    W0603,
-    W0612,
-    W0613,
-    W0621,
-    W0703,
-    W1203,
-    C8101,
-    C8103,
-    C8112,
-    W8113,
-
-enable=odoolint
-
-[REPORTS]
-# Set the output format
-output-format=colorized
-
-# Include message IDs in output
-msg-template={path}:{line}: [{msg_id}({symbol}), {obj}] {msg}
-
-# Reports disabled (only show messages)
-reports=no
-
-# Evaluation score disabled
 score=no
 
-[FORMAT]
-# Maximum number of characters on a single line
-max-line-length=120
+[ODOOLINT]
+# README template URL
+readme-template-url=https://github.com/soltein-net/solt-pre-commit/blob/main/templates/README-template.md
 
-# Maximum number of lines in a module
-max-module-lines=2000
+# Required author in manifest
+manifest-required-authors=Soltein SA de CV
 
-# String used as indentation unit
-indent-string='    '
+# Required keys in manifest
+manifest-required-keys=license
 
-# Number of spaces of indent required inside a hanging or continued line
-indent-after-paren=4
+# Deprecated keys in manifest
+manifest-deprecated-keys=description,active
 
-[BASIC]
-# Good variable names which should always be accepted
-good-names=
-    i,
-    j,
-    k,
-    e,
-    ex,
-    f,
-    fp,
-    _,
-    id,
-    cr,
-    uid,
-    ids,
-    env,
-    cls,
-    rec,
-    res,
-    val,
-    vals,
-    obj,
-    ref,
-    xml,
+# Allowed licenses
+license-allowed=AGPL-3,GPL-2,GPL-2 or any later version,GPL-3,GPL-3 or any later version,LGPL-3
 
-# Bad variable names which should always be refused
-bad-names=
-    foo,
-    bar,
-    baz,
-    toto,
-    tutu,
-    tata,
+# Valid Odoo versions
+valid-odoo-versions=17.0,18.0
 
-# Naming style for constants
-const-naming-style=UPPER_CASE
+[MESSAGES CONTROL]
+disable=all
 
-# Naming style for class names
-class-naming-style=PascalCase
+# =============================================================================
+# ENABLED CHECKS - Explicit whitelist approach (like OCA)
+# =============================================================================
+# This configuration enables specific checks rather than disabling some.
+# This gives more control and visibility over what is being checked.
+# =============================================================================
+enable=
+    # -------------------------------------------------------------------------
+    # CRITICAL - Syntax and Runtime Errors (always blocking)
+    # -------------------------------------------------------------------------
+    xml-syntax-error,
+    po-syntax-error,
+    duplicate-key,
+    duplicate-id-csv,
+    duplicate-xml-record-id,
+    duplicate-xml-fields,
+    duplicate-po-message-definition,
+    sql-injection,
+    eval-used,
+    eval-referenced,
+    
+    # -------------------------------------------------------------------------
+    # MANIFEST CHECKS
+    # -------------------------------------------------------------------------
+    manifest-required-author,
+    manifest-required-key,
+    manifest-version-format,
+    manifest-author-string,
+    manifest-deprecated-key,
+    license-allowed,
+    development-status-allowed,
+    
+    # -------------------------------------------------------------------------
+    # ODOO API CHECKS
+    # -------------------------------------------------------------------------
+    api-one-deprecated,
+    api-one-multi-together,
+    method-compute,
+    method-inverse,
+    method-search,
+    method-required-super,
+    openerp-exception-warning,
+    translation-field,
+    translation-required,
+    translation-contains-variable,
+    translation-positional-used,
+    
+    # -------------------------------------------------------------------------
+    # XML/VIEW CHECKS
+    # -------------------------------------------------------------------------
+    dangerous-view-replace-wo-priority,
+    dangerous-qweb-replace-wo-priority,
+    redundant-modulename-xml,
+    deprecated-data-xml-node,
+    deprecated-openerp-xml-node,
+    xml-attribute-translatable,
+    xml-deprecated-qweb-directive,
+    xml-deprecated-tree-attribute,
+    character-not-valid-in-resource-link,
+    
+    # -------------------------------------------------------------------------
+    # SECURITY CHECKS
+    # -------------------------------------------------------------------------
+    create-user-wo-reset-password,
+    dangerous-filter-wo-user,
+    external-request-timeout,
+    
+    # -------------------------------------------------------------------------
+    # CODE QUALITY CHECKS
+    # -------------------------------------------------------------------------
+    anomalous-backslash-in-string,
+    dangerous-default-value,
+    assignment-from-none,
+    pointless-statement,
+    pointless-string-statement,
+    print-used,
+    redundant-keyword-arg,
+    reimported,
+    relative-import,
+    return-in-init,
+    unreachable,
+    except-pass,
+    invalid-commit,
+    missing-return,
+    
+    # -------------------------------------------------------------------------
+    # STYLE CHECKS (warnings, not blocking)
+    # -------------------------------------------------------------------------
+    attribute-deprecated,
+    attribute-string-redundant,
+    class-camelcase,
+    consider-merging-classes-inherited,
+    context-overridden,
+    renamed-field-parameter,
+    use-vim-comment,
+    wrong-tabs-instead-of-spaces,
+    
+    # -------------------------------------------------------------------------
+    # FILE/RESOURCE CHECKS
+    # -------------------------------------------------------------------------
+    file-not-used,
+    resource-not-exist,
+    missing-newline-extrafiles,
+    rst-syntax-error,
+    incoherent-interpreter-exec-perm,
+    
+    # -------------------------------------------------------------------------
+    # IMPORT CHECKS
+    # -------------------------------------------------------------------------
+    odoo-addons-relative-import,
+    test-folder-imported,
+    
+    # -------------------------------------------------------------------------
+    # PO/TRANSLATION CHECKS
+    # -------------------------------------------------------------------------
+    po-msgstr-variables,
+    
+    # -------------------------------------------------------------------------
+    # OPTIONAL CHECKS (informational)
+    # -------------------------------------------------------------------------
+    # missing-readme,
+    # missing-manifest-dependency,
+    # deprecated-module,
+    # too-complex,
 
-# Naming style for function names
-function-naming-style=snake_case
-
-# Naming style for method names
-method-naming-style=snake_case
-
-# Naming style for module names
-module-naming-style=snake_case
-
-# Naming style for variable names
-variable-naming-style=snake_case
-
-# Naming style for arguments
-argument-naming-style=snake_case
-
-# Naming style for attributes
-attr-naming-style=snake_case
-
-[SIMILARITIES]
-# Minimum lines number of a similarity
-min-similarity-lines=8
-
-# Ignore comments when computing similarities
-ignore-comments=yes
-
-# Ignore docstrings when computing similarities
-ignore-docstrings=yes
-
-# Ignore imports when computing similarities
-ignore-imports=yes
-
-[DESIGN]
-# Maximum number of arguments for function / method
-max-args=10
-
-# Maximum number of locals for function / method body
-max-locals=20
-
-# Maximum number of return / yield for function / method body
-max-returns=10
-
-# Maximum number of branch for function / method body
-max-branches=15
-
-# Maximum number of statements in function / method body
-max-statements=60
-
-# Maximum number of parents for a class
-max-parents=10
-
-# Maximum number of attributes for a class
-max-attributes=20
-
-# Minimum number of public methods for a class
-min-public-methods=0
-
-# Maximum number of public methods for a class
-max-public-methods=30
-
-[IMPORTS]
-# Allow wildcard imports from modules
-allow-wildcard-with-all=no
-
-# Analyse import fallback blocks
-analyse-fallback-blocks=no
-
-[EXCEPTIONS]
-# Exceptions that will emit a warning when being caught
-overgeneral-exceptions=
-    builtins.Exception,
+[REPORTS]
+msg-template={path}:{line}: [{msg_id}({symbol}), {obj}] {msg}
+output-format=colorized
+reports=no
