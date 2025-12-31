@@ -316,7 +316,7 @@ def setup_repo(
     print("\n📂 Files created/updated:")
     print("   pyproject.toml             → Python tools config (ruff, black, isort, pytest)")
     print("   .pylintrc                  → Pylint-odoo configuration")
-    print("   .solt-hooks.yaml           → Solt validation settings")
+    print("   .solt-hooks.yaml           → Soltein validation settings")
     print("   .pre-commit-config.yaml    → Pre-commit hook configuration")
     print("   .github/workflows/solt-validate.yml → CI workflow")
 

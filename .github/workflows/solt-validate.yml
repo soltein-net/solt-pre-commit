@@ -4,7 +4,7 @@
 # IMPORTANT: This workflow will FAIL (red) when blocking issues are found.
 # The validation job exit code is properly propagated via the final-check step.
 # =============================================================================
-name: Solt Validation (Reusable)
+name: Soltein Validation (Reusable)
 
 on:
   workflow_call:

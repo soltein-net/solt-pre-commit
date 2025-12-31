@@ -196,13 +196,13 @@ git push origin v1.x.0
 
 When `setup-repo.py` runs, it creates these files in the client repo:
 
-| File | Source | Purpose |
-|------|--------|---------|
+| File | Source | Purpose                                 |
+|------|--------|-----------------------------------------|
 | `pyproject.toml` | `configs/pyproject-base.toml` | Ruff, black, isort, pytest, mypy config |
-| `.pylintrc` | `configs/.pylintrc` | Pylint-odoo configuration |
-| `.solt-hooks.yaml` | `templates/.solt-hooks.yaml` | Solt validation settings |
-| `.pre-commit-config.yaml` | `templates/.pre-commit-config.yaml` | Pre-commit hooks |
-| `.github/workflows/solt_validate.yml` | `templates/github-workflows/solt_validate.yml` | CI workflow |
+| `.pylintrc` | `configs/.pylintrc` | Pylint-odoo configuration               |
+| `.solt-hooks.yaml` | `templates/.solt-hooks.yaml` | Soltein validation settings             |
+| `.pre-commit-config.yaml` | `templates/.pre-commit-config.yaml` | Pre-commit hooks                        |
+| `.github/workflows/solt_validate.yml` | `templates/github-workflows/solt_validate.yml` | CI workflow                             |
 
 ### Configuration Priority
 
