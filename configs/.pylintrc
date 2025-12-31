@@ -2,6 +2,7 @@
 # PYLINT CONFIGURATION FOR ODOO MODULES - SOLTEIN
 # =============================================================================
 # This file is copied to client repositories by solt-pre-commit
+# Compatible with pylint-odoo v9.x
 # =============================================================================
 
 [MASTER]
@@ -31,129 +32,91 @@ valid-odoo-versions=17.0,18.0
 disable=all
 
 # =============================================================================
-# ENABLED CHECKS - Explicit whitelist approach (like OCA)
+# ENABLED CHECKS
 # =============================================================================
-# This configuration enables specific checks rather than disabling some.
-# This gives more control and visibility over what is being checked.
+# Run: pylint --load-plugins=pylint_odoo --list-msgs | grep -E "^:.*[CWER]8"
+# to see all available pylint-odoo checks
 # =============================================================================
 enable=
     # -------------------------------------------------------------------------
-    # CRITICAL - Syntax and Runtime Errors (always blocking)
+    # CRITICAL - Syntax and Security (always blocking)
     # -------------------------------------------------------------------------
-    xml-syntax-error,
-    po-syntax-error,
-    duplicate-key,
-    duplicate-id-csv,
-    duplicate-xml-record-id,
-    duplicate-xml-fields,
-    duplicate-po-message-definition,
     sql-injection,
     eval-used,
-    eval-referenced,
-    
+
     # -------------------------------------------------------------------------
-    # MANIFEST CHECKS
+    # MANIFEST CHECKS (C81xx)
     # -------------------------------------------------------------------------
     manifest-required-author,
     manifest-required-key,
     manifest-version-format,
     manifest-author-string,
     manifest-deprecated-key,
+    manifest-maintainers-list,
+    manifest-superfluous-key,
+    manifest-behind-migrations,
+    manifest-data-duplicated,
     license-allowed,
     development-status-allowed,
-    
+    missing-readme,
+
     # -------------------------------------------------------------------------
-    # ODOO API CHECKS
+    # METHOD NAMING CHECKS (C81xx)
     # -------------------------------------------------------------------------
-    api-one-deprecated,
-    api-one-multi-together,
     method-compute,
     method-inverse,
     method-search,
     method-required-super,
-    openerp-exception-warning,
-    translation-field,
+
+    # -------------------------------------------------------------------------
+    # TRANSLATION CHECKS (C81xx, W81xx, W83xx, E83xx)
+    # -------------------------------------------------------------------------
     translation-required,
+    translation-field,
     translation-contains-variable,
     translation-positional-used,
-    
+    translation-format-interpolation,
+    translation-fstring-interpolation,
+    translation-not-lazy,
+    translation-too-few-args,
+    translation-too-many-args,
+
     # -------------------------------------------------------------------------
-    # XML/VIEW CHECKS
+    # CODE QUALITY (W81xx, E81xx)
     # -------------------------------------------------------------------------
-    dangerous-view-replace-wo-priority,
-    dangerous-qweb-replace-wo-priority,
-    redundant-modulename-xml,
-    deprecated-data-xml-node,
-    deprecated-openerp-xml-node,
-    xml-attribute-translatable,
-    xml-deprecated-qweb-directive,
-    xml-deprecated-tree-attribute,
-    character-not-valid-in-resource-link,
-    
-    # -------------------------------------------------------------------------
-    # SECURITY CHECKS
-    # -------------------------------------------------------------------------
-    create-user-wo-reset-password,
-    dangerous-filter-wo-user,
-    external-request-timeout,
-    
-    # -------------------------------------------------------------------------
-    # CODE QUALITY CHECKS
-    # -------------------------------------------------------------------------
-    anomalous-backslash-in-string,
-    dangerous-default-value,
-    assignment-from-none,
-    pointless-statement,
-    pointless-string-statement,
     print-used,
-    redundant-keyword-arg,
-    reimported,
-    relative-import,
-    return-in-init,
-    unreachable,
     except-pass,
     invalid-commit,
     missing-return,
-    
+    context-overridden,
+    external-request-timeout,
+    no-raise-unlink,
+    no-write-in-compute,
+
     # -------------------------------------------------------------------------
-    # STYLE CHECKS (warnings, not blocking)
+    # DEPRECATION CHECKS
     # -------------------------------------------------------------------------
     attribute-deprecated,
+    deprecated-odoo-model-method,
+    odoo-exception-warning,
+    deprecated-name-get,
+
+    # -------------------------------------------------------------------------
+    # STYLE/QUALITY WARNINGS
+    # -------------------------------------------------------------------------
     attribute-string-redundant,
-    class-camelcase,
     consider-merging-classes-inherited,
-    context-overridden,
     renamed-field-parameter,
     use-vim-comment,
-    wrong-tabs-instead-of-spaces,
-    
-    # -------------------------------------------------------------------------
-    # FILE/RESOURCE CHECKS
-    # -------------------------------------------------------------------------
-    file-not-used,
-    resource-not-exist,
-    missing-newline-extrafiles,
-    rst-syntax-error,
-    incoherent-interpreter-exec-perm,
-    
-    # -------------------------------------------------------------------------
-    # IMPORT CHECKS
-    # -------------------------------------------------------------------------
+    website-manifest-key-not-valid-uri,
     odoo-addons-relative-import,
     test-folder-imported,
-    
-    # -------------------------------------------------------------------------
-    # PO/TRANSLATION CHECKS
-    # -------------------------------------------------------------------------
-    po-msgstr-variables,
-    
-    # -------------------------------------------------------------------------
-    # OPTIONAL CHECKS (informational)
-    # -------------------------------------------------------------------------
-    # missing-readme,
-    # missing-manifest-dependency,
-    # deprecated-module,
-    # too-complex,
+    bad-builtin-groupby,
+    prefer-env-translation,
+    inheritable-method-lambda,
+    inheritable-method-string,
+    prohibited-method-override,
+    super-method-mismatch,
 
 [REPORTS]
 msg-template={path}:{line}: [{msg_id}({symbol}), {obj}] {msg}
