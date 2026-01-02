@@ -89,6 +89,7 @@ blocking_severities:
 skip_string_fields:
   - active
   - name
+  - display_name
   - sequence
   - company_id
   - currency_id
@@ -103,9 +104,17 @@ skip_string_fields:
 skip_help_fields:
   - active
   - name
+  - display_name
   - sequence
   - company_id
   - currency_id
+  - create_uid
+  - create_date
+  - write_uid
+  - write_date
+  - message_ids
+  - message_follower_ids
+  - activity_ids
 
 skip_docstring_methods: [ ]
   # - default_get

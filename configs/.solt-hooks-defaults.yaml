@@ -101,14 +101,22 @@ skip_string_fields:
   - message_ids
   - message_follower_ids
   - activity_ids
+  - display_name
 
 skip_help_fields:
   - active
   - name
+  - display_name
   - sequence
   - company_id
   - currency_id
-  - display_name
+  - create_uid
+  - create_date
+  - write_uid
+  - write_date
+  - message_ids
+  - message_follower_ids
+  - activity_ids
 
 skip_docstring_methods: [ ]
 
