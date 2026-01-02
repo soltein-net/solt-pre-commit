@@ -922,7 +922,8 @@ jobs:
             bodyParts.push('');
             bodyParts.push('| Tool | PR | Repo | Status |');
             bodyParts.push('|------|-----|------|--------|');
-            bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${icon(ruffFull, 0, true)} |`);
+            bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${icon(ruffChanged, 0, true)} |`);
+            bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintFull} | ${icon(pylintChanged, 0, true)} |`);
             bodyParts.push('');
 
             // Footer
@@ -984,11 +985,17 @@ jobs:
           WARNINGS="${{ steps.summary.outputs.warnings }}"
           WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' || echo 0)
           
+          # Ruff issues in CHANGED files only
           RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
           RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           if [ -z "$RUFF_CHANGED" ]; then RUFF_CHANGED=0; fi
 
-          echo "::notice::Final check - Exit code: $EXIT_CODE, Warnings: $WARNINGS, Ruff (changed): $RUFF_CHANGED, Fail on warnings: $FAIL_ON_WARNINGS"
+          # Pylint-Odoo issues in CHANGED files only
+          PYLINT_CHANGED="${{ steps.pylint.outputs.changed }}"
+          PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | grep -oE '^[0-9]+' || echo 0)
+          if [ -z "$PYLINT_CHANGED" ]; then PYLINT_CHANGED=0; fi
+
+          echo "::notice::Final check - Exit code: $EXIT_CODE, Warnings: $WARNINGS, Ruff (changed): $RUFF_CHANGED, Pylint (changed): $PYLINT_CHANGED, Fail on warnings: $FAIL_ON_WARNINGS"
 
           # Determine final result
           if [ "$EXIT_CODE" -ne 0 ]; then
@@ -1002,6 +1009,10 @@ jobs:
           elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
             echo "::error::Validation FAILED due to Ruff issues in changed files ($RUFF_CHANGED issues, fail-on-warnings enabled)"
+            exit 1
+          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then
+            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "::error::Validation FAILED due to Pylint-Odoo issues in changed files ($PYLINT_CHANGED issues, fail-on-warnings enabled)"
             exit 1
           else
             echo "result=success" >> $GITHUB_OUTPUT
