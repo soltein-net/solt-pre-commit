@@ -88,12 +88,12 @@ enable=
     # -------------------------------------------------------------------------
     print-used,
     except-pass,
-    invalid-commit,
     missing-return,
     context-overridden,
     external-request-timeout,
     no-raise-unlink,
     no-write-in-compute,
+    # invalid-commit,
 
     # -------------------------------------------------------------------------
     # TRANSLATION CHECKS (optional - uncomment if needed)

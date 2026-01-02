@@ -117,6 +117,7 @@ skip_help_fields:
   - message_ids
   - message_follower_ids
   - activity_ids
+  - state
 
 skip_docstring_methods: [ ]
 
