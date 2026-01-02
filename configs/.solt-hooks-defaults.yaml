@@ -108,6 +108,7 @@ skip_help_fields:
   - sequence
   - company_id
   - currency_id
+  - display_name
 
 skip_docstring_methods: [ ]
 

@@ -15,22 +15,24 @@ repos:
       - id: solt-check-branch
         stages: [ pre-commit, pre-push ]
       - id: solt-check-odoo
-        # args: [--show-info]  # Uncomment to see info-level issues
+        # args: [--show-info] # Uncomment to see info-level issues
         # args: [--scope, full]  # Uncomment to validate entire repo
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PYTHON CODE QUALITY - Ruff (fast linter and formatter)
+  # PYTHON CODE QUALITY - Ruff (linter only, NO autofix, NO formatter)
   # Uses configuration from pyproject.toml
+  # Note: Ruff is INFORMATIONAL - does not block commits/PRs
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.4
     hooks:
       - id: ruff
-        args: [ --fix ]
-      - id: ruff-format
+        args: [ --no-fix, --output-format=concise ]
+        # Removed: --fix (no autofix)
+        # Removed: ruff-format hook (no auto-formatting)
 
   # ─────────────────────────────────────────────────────────────────────────
-  # ODOO-SPECIFIC LINTING (OCA)
+  # ODOO-SPECIFIC LINTING (OCA) - BLOCKING with fail-on-warnings
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/OCA/pylint-odoo
     rev: v9.3.22
@@ -38,8 +40,6 @@ repos:
       - id: pylint_odoo
         args:
           - --rcfile=.pylintrc
-          - --disable=W8113,C8101,C8103,C8112,E8102,W8301,R0917,W0707,W0201,W8120
-          - --valid-odoo-versions=17.0
 
   # ─────────────────────────────────────────────────────────────────────────
   # GENERAL CODE QUALITY
@@ -60,5 +60,5 @@ repos:
 # CI CONFIGURATION
 # =============================================================================
 ci:
-  autofix_prs: true
+  autofix_prs: false  # Disabled - no auto-fixing
   autoupdate_schedule: weekly

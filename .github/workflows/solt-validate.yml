@@ -25,10 +25,20 @@ on:
         type: string
         default: 'changed'
       fail-on-warnings:
-        description: 'Fail if warnings are found'
+        description: 'Fail if warnings are found (affects solt-check-odoo and Pylint-Odoo)'
         required: false
         type: boolean
         default: false
+      ruff-blocking:
+        description: 'Make Ruff issues blocking (requires fail-on-warnings: true)'
+        required: false
+        type: boolean
+        default: false
+      pylint-blocking:
+        description: 'Make Pylint-Odoo issues blocking (requires fail-on-warnings: true)'
+        required: false
+        type: boolean
+        default: true
       show-info:
         description: 'Show info-level issues in report'
         required: false
@@ -692,6 +702,8 @@ jobs:
           DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+          RUFF_BLOCKING: ${{ inputs.ruff-blocking }}
+          PYLINT_BLOCKING: ${{ inputs.pylint-blocking }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
@@ -724,6 +736,8 @@ jobs:
             const errorsCount = safeInt(process.env.ERRORS_COUNT);
             const warningsCount = safeInt(process.env.WARNINGS_COUNT);
             const failOnWarnings = process.env.FAIL_ON_WARNINGS === 'true';
+            const ruffBlocking = process.env.RUFF_BLOCKING === 'true';
+            const pylintBlocking = process.env.PYLINT_BLOCKING === 'true';
 
             const docstringCov = safeInt(process.env.DOCSTRING_COV);
             const documentedMethods = safeInt(process.env.DOCSTRING_DOCUMENTED);
@@ -746,8 +760,9 @@ jobs:
             const pylintChanged = safeInt(process.env.PYLINT_CHANGED);
             const pylintFull = safeInt(process.env.PYLINT_FULL);
             
-            // Debug Ruff values
-            console.log(`Ruff values - Changed: ${ruffChanged}, Full: ${ruffFull}`);
+            // Debug values
+            console.log(`Ruff values - Changed: ${ruffChanged}, Full: ${ruffFull}, Blocking: ${ruffBlocking}`);
+            console.log(`Pylint values - Changed: ${pylintChanged}, Full: ${pylintFull}`);
 
             // Load extracted issues
             let extractedIssues = { errors: [], warnings: [], total_errors: 0, total_warnings: 0 };
@@ -771,7 +786,10 @@ jobs:
             const hasBlockingErrors = exitCode !== 0;
             const hasRuffIssues = ruffChanged > 0;
             const hasPylintIssues = pylintChanged > 0;
-            const hasWarnings = warningsCount > 0 || hasRuffIssues || hasPylintIssues;
+            // Tools only contribute to warnings if their blocking flag is enabled
+            const hasWarnings = warningsCount > 0 || 
+                               (pylintBlocking && hasPylintIssues) || 
+                               (ruffBlocking && hasRuffIssues);
             
             const hasFailed = hasBlockingErrors || (failOnWarnings && hasWarnings);
             
@@ -781,10 +799,10 @@ jobs:
             let failureReason = '';
             if (hasBlockingErrors) {
               failureReason = 'blocking errors from solt-check-odoo';
-            } else if (failOnWarnings && hasRuffIssues) {
-              failureReason = `Ruff issues (${ruffChanged}) with fail-on-warnings enabled`;
-            } else if (failOnWarnings && hasPylintIssues) {
-              failureReason = `Pylint issues (${pylintChanged}) with fail-on-warnings enabled`;
+            } else if (failOnWarnings && pylintBlocking && hasPylintIssues) {
+              failureReason = `Pylint-Odoo issues (${pylintChanged}) with pylint-blocking enabled`;
+            } else if (failOnWarnings && ruffBlocking && hasRuffIssues) {
+              failureReason = `Ruff issues (${ruffChanged}) with ruff-blocking enabled`;
             } else if (failOnWarnings && warningsCount > 0) {
               failureReason = `warnings (${warningsCount}) with fail-on-warnings enabled`;
             }
@@ -917,13 +935,15 @@ jobs:
             bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
             bodyParts.push('');
 
-            // Code Quality
+            // Code Quality - show blocking mode for each tool
+            const ruffMode = ruffBlocking ? 'blocking' : 'info';
+            const pylintMode = pylintBlocking ? 'blocking' : 'info';
             bodyParts.push('### :mag: Code Quality');
             bodyParts.push('');
-            bodyParts.push('| Tool | PR | Repo | Status |');
-            bodyParts.push('|------|-----|------|--------|');
-            bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${icon(ruffChanged, 0, true)} |`);
-            bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintFull} | ${icon(pylintChanged, 0, true)} |`);
+            bodyParts.push('| Tool | PR | Repo | Mode | Status |');
+            bodyParts.push('|------|-----|------|------|--------|');
+            bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${ruffMode} | ${icon(ruffChanged, 0, true)} |`);
+            bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintFull} | ${pylintMode} | ${icon(pylintChanged, 0, true)} |`);
             bodyParts.push('');
 
             // Footer
@@ -982,6 +1002,8 @@ jobs:
           if [ -z "$EXIT_CODE" ]; then EXIT_CODE=0; fi
 
           FAIL_ON_WARNINGS="${{ inputs.fail-on-warnings }}"
+          RUFF_BLOCKING="${{ inputs.ruff-blocking }}"
+          PYLINT_BLOCKING="${{ inputs.pylint-blocking }}"
           WARNINGS="${{ steps.summary.outputs.warnings }}"
           WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' || echo 0)
           
@@ -995,7 +1017,17 @@ jobs:
           PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           if [ -z "$PYLINT_CHANGED" ]; then PYLINT_CHANGED=0; fi
 
-          echo "::notice::Final check - Exit code: $EXIT_CODE, Warnings: $WARNINGS, Ruff (changed): $RUFF_CHANGED, Pylint (changed): $PYLINT_CHANGED, Fail on warnings: $FAIL_ON_WARNINGS"
+          RUFF_MODE="info"
+          if [ "$RUFF_BLOCKING" = "true" ]; then
+            RUFF_MODE="blocking"
+          fi
+
+          PYLINT_MODE="info"
+          if [ "$PYLINT_BLOCKING" = "true" ]; then
+            PYLINT_MODE="blocking"
+          fi
+
+          echo "::notice::Final check - Exit code: $EXIT_CODE, Warnings: $WARNINGS, Pylint (changed): $PYLINT_CHANGED ($PYLINT_MODE), Ruff (changed): $RUFF_CHANGED ($RUFF_MODE), Fail on warnings: $FAIL_ON_WARNINGS"
 
           # Determine final result
           if [ "$EXIT_CODE" -ne 0 ]; then
@@ -1006,13 +1038,13 @@ jobs:
             echo "result=failure" >> $GITHUB_OUTPUT
             echo "::error::Validation FAILED due to warnings (fail-on-warnings enabled)"
             exit 1
-          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
+          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$PYLINT_BLOCKING" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED due to Ruff issues in changed files ($RUFF_CHANGED issues, fail-on-warnings enabled)"
+            echo "::error::Validation FAILED due to Pylint-Odoo issues in changed files ($PYLINT_CHANGED issues, pylint-blocking enabled)"
             exit 1
-          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then
+          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$RUFF_BLOCKING" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED due to Pylint-Odoo issues in changed files ($PYLINT_CHANGED issues, fail-on-warnings enabled)"
+            echo "::error::Validation FAILED due to Ruff issues in changed files ($RUFF_CHANGED issues, ruff-blocking enabled)"
             exit 1
           else
             echo "result=success" >> $GITHUB_OUTPUT

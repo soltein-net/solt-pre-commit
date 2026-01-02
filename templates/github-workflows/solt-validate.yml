@@ -35,6 +35,10 @@ jobs:
       fail-on-warnings: true
       show-info: false
 
+      # ─── Linter Blocking Configuration ───
+      pylint-blocking: true   # ← Block on pylint issues
+      ruff-blocking: false    # ← No blocking on ruff issues
+
       # ─── Badge Configuration ───
       # Replace with your Gist ID
       gist-id: 'YOUR_GIST_ID_HERE'

@@ -12,7 +12,7 @@ repos:
   - repo: local
     hooks:
       - id: solt-check-branch
-        name: Solt - Validate Branch Name
+        name: Soltein - Validate Branch Name
         entry: python -m solt_pre_commit.checks_branch_name
         language: python
         always_run: true
@@ -21,7 +21,7 @@ repos:
         additional_dependencies: [ pyyaml ]
 
       - id: solt-check-odoo
-        name: Solt - Validate Odoo Module
+        name: Soltein - Validate Odoo Module
         entry: python -m solt_pre_commit.checks_odoo_module
         language: python
         files: (__manifest__|__openerp__)\.py$
@@ -30,18 +30,20 @@ repos:
         additional_dependencies: [ lxml, polib, pyyaml ]
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PYTHON CODE QUALITY - Ruff (fast linter and formatter)
+  # PYTHON CODE QUALITY - Ruff (linter only, NO autofix, NO formatter)
   # Uses configuration from pyproject.toml
+  # Note: Ruff is INFORMATIONAL - does not block commits/PRs
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.4
     hooks:
       - id: ruff
-        args: [ --fix ]
-      - id: ruff-format
+        args: [ --no-fix, --output-format=concise ]
+        # Removed: --fix (no autofix)
+        # Removed: ruff-format hook (no auto-formatting)
 
   # ─────────────────────────────────────────────────────────────────────────
-  # ODOO-SPECIFIC LINTING (OCA)
+  # ODOO-SPECIFIC LINTING (OCA) - BLOCKING with fail-on-warnings
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/OCA/pylint-odoo
     rev: v9.3.22
@@ -49,10 +51,8 @@ repos:
       - id: pylint_odoo
         args:
           - --rcfile=.pylintrc
-          - --disable=W8113,C8101,C8103,C8112,E8102,W8301,R0917,W0707,W0201,W8120
-          - --valid-odoo-versions=17.0
 
-  # ─────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
   # GENERAL CODE QUALITY
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -71,5 +71,5 @@ repos:
 # CI CONFIGURATION
 # =============================================================================
 ci:
-  autofix_prs: true
+  autofix_prs: false
   autoupdate_schedule: weekly
