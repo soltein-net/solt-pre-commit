@@ -871,37 +871,7 @@ jobs:
                 }
               }
               
-              // If failed due to Ruff/Pylint issues
-              const ruffErrors = extractedIssues.ruff_errors || [];
-              if (failOnWarnings && (hasRuffIssues || hasPylintIssues)) {
-                bodyParts.push('### :wrench: Code Quality Issues');
-                bodyParts.push('');
-                
-                if (hasRuffIssues && ruffErrors.length > 0) {
-                  bodyParts.push(`#### Ruff (${ruffChanged} issues in PR)`);
-                  bodyParts.push('');
-                  bodyParts.push('| File | Line | Error |');
-                  bodyParts.push('|------|------|-------|');
-                  for (const err of ruffErrors.slice(0, MAX_DISPLAY)) {
-                    const file = err.file ? `\`${err.file}\`` : '-';
-                    const line = err.line || '-';
-                    const msg = err.message || 'Unknown error';
-                    bodyParts.push(`| ${file} | ${line} | ${msg} |`);
-                  }
-                  bodyParts.push('');
-                  if (ruffChanged > MAX_DISPLAY) {
-                    bodyParts.push(`> Showing ${MAX_DISPLAY} of ${ruffChanged} Ruff issues. **[View all in workflow logs](${workflowUrl})**`);
-                    bodyParts.push('');
-                  }
-                } else if (hasRuffIssues) {
-                  bodyParts.push(`- **Ruff:** ${ruffChanged} issues in changed files`);
-                }
-                
-                if (hasPylintIssues) {
-                  bodyParts.push(`- **Pylint:** ${pylintChanged} issues in changed files`);
-                  bodyParts.push('');
-                }
-              }
+              // Note: Detailed Ruff/Pylint tables are shown in the Code Quality section below
             }
 
             // Summary section
@@ -945,6 +915,46 @@ jobs:
             bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${ruffMode} | ${icon(ruffChanged, 0, true)} |`);
             bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintFull} | ${pylintMode} | ${icon(pylintChanged, 0, true)} |`);
             bodyParts.push('');
+
+            // Show detailed Ruff issues if any (always show, not just when failed)
+            const ruffErrorsDetail = extractedIssues.ruff_errors || [];
+            if (ruffChanged > 0 && ruffErrorsDetail.length > 0) {
+              bodyParts.push(`**Ruff** (${ruffChanged} issues in PR)`);
+              bodyParts.push('');
+              bodyParts.push('| File | Line | Error |');
+              bodyParts.push('|------|------|-------|');
+              for (const err of ruffErrorsDetail.slice(0, MAX_DISPLAY)) {
+                const file = err.file ? `\`${err.file}\`` : '-';
+                const line = err.line || '-';
+                const msg = err.message || 'Unknown error';
+                bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+              }
+              bodyParts.push('');
+              if (ruffChanged > MAX_DISPLAY) {
+                bodyParts.push(`> Showing ${MAX_DISPLAY} of ${ruffChanged} Ruff issues. **[View all in workflow logs](${workflowUrl})**`);
+                bodyParts.push('');
+              }
+            }
+
+            // Show detailed Pylint-Odoo issues if any (always show, not just when failed)
+            const pylintErrorsDetail = extractedIssues.pylint_errors || [];
+            if (pylintChanged > 0 && pylintErrorsDetail.length > 0) {
+              bodyParts.push(`**Pylint-Odoo** (${pylintChanged} issues in PR)`);
+              bodyParts.push('');
+              bodyParts.push('| File | Line | Error |');
+              bodyParts.push('|------|------|-------|');
+              for (const err of pylintErrorsDetail.slice(0, MAX_DISPLAY)) {
+                const file = err.file ? `\`${err.file}\`` : '-';
+                const line = err.line || '-';
+                const msg = err.message || 'Unknown error';
+                bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+              }
+              bodyParts.push('');
+              if (pylintChanged > MAX_DISPLAY) {
+                bodyParts.push(`> Showing ${MAX_DISPLAY} of ${pylintChanged} Pylint issues. **[View all in workflow logs](${workflowUrl})**`);
+                bodyParts.push('');
+              }
+            }
 
             // Footer
             bodyParts.push('---');
