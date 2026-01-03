@@ -194,6 +194,39 @@ class OdooFieldVisitor(ast.NodeVisitor):
 
         self.generic_visit(node)
 
+    def _extract_string_value(self, node) -> Optional[str]:
+        """Extract string value from AST node.
+
+        Handles:
+        - Direct string: "My String"
+        - Translation call: _("My String")
+        - Lazy translation: _lt("My String")
+
+        Does NOT handle:
+        - Variables: MY_CONSTANT
+        - Complex expressions
+        """
+        # Direct string constant
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+
+        # Translation function call: _("string") or _lt("string")
+        if isinstance(node, ast.Call):
+            func = node.func
+            # Check if it's a translation function
+            is_translation = False
+            if isinstance(func, ast.Name) and func.id in ("_", "_lt"):
+                is_translation = True
+            elif isinstance(func, ast.Attribute) and func.attr in ("_", "_lt"):
+                is_translation = True
+
+            if is_translation and node.args:
+                first_arg = node.args[0]
+                if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                    return first_arg.value
+
+        return None
+
     def _extract_field_info(self, field_name: str, value_node, lineno: int) -> Optional[dict]:
         """Extract information from an Odoo field."""
         if not isinstance(value_node, ast.Call):
@@ -226,19 +259,27 @@ class OdooFieldVisitor(ast.NodeVisitor):
             "is_private": field_name.startswith("_"),
         }
 
+        # Handle positional arguments
         if value_node.args:
             first_arg = value_node.args[0]
-            if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
-                if field_type in ("Many2one", "One2many", "Many2many"):
-                    field_info["comodel_name"] = first_arg.value
-                else:
-                    field_info["string"] = first_arg.value
+            string_value = self._extract_string_value(first_arg)
 
+            if string_value is not None:
+                if field_type in ("Many2one", "One2many", "Many2many"):
+                    field_info["comodel_name"] = string_value
+                else:
+                    field_info["string"] = string_value
+
+        # Handle keyword arguments
         for kw in value_node.keywords:
-            if kw.arg == "string" and isinstance(kw.value, ast.Constant):
-                field_info["string"] = kw.value.value
-            elif kw.arg == "help" and isinstance(kw.value, ast.Constant):
-                field_info["help"] = kw.value.value
+            if kw.arg == "string":
+                string_value = self._extract_string_value(kw.value)
+                if string_value is not None:
+                    field_info["string"] = string_value
+            elif kw.arg == "help":
+                help_value = self._extract_string_value(kw.value)
+                if help_value is not None:
+                    field_info["help"] = help_value
             elif kw.arg == "related" and isinstance(kw.value, ast.Constant):
                 field_info["related"] = kw.value.value
             elif kw.arg == "compute":
@@ -252,8 +293,10 @@ class OdooFieldVisitor(ast.NodeVisitor):
                 field_info["tracking"] = self._get_bool_value(kw.value, default=True)
             elif kw.arg == "selection":
                 field_info["selection"] = True
-            elif kw.arg == "comodel_name" and isinstance(kw.value, ast.Constant):
-                field_info["comodel_name"] = kw.value.value
+            elif kw.arg == "comodel_name":
+                comodel_value = self._extract_string_value(kw.value)
+                if comodel_value is not None:
+                    field_info["comodel_name"] = comodel_value
 
         return field_info
 
@@ -269,6 +312,7 @@ class ChecksOdooModulePython:
     DEFAULT_SKIP_STRING_FIELDS: Set[str] = {
         "active",
         "name",
+        "display_name",
         "sequence",
         "company_id",
         "currency_id",
@@ -284,9 +328,17 @@ class ChecksOdooModulePython:
     DEFAULT_SKIP_HELP_FIELDS: Set[str] = {
         "active",
         "name",
+        "display_name",
         "sequence",
         "company_id",
         "currency_id",
+        "create_uid",
+        "create_date",
+        "write_uid",
+        "write_date",
+        "message_ids",
+        "message_follower_ids",
+        "activity_ids",
     }
 
     def __init__(self, manifest_datas: List[dict], module_name: str, config=None):
