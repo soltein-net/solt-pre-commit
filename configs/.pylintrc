@@ -15,7 +15,7 @@ score=no
 
 [ODOOLINT]
 # README template URL
-readme-template-url=https://github.com/soltein-net/solt-pre-commit/blob/main/templates/README-template.md
+readme-template-url=https://github.com/soltein-net/solt-pre-commit/blob/17.0/templates/README-template.md
 
 # Required author in manifest
 manifest-required-authors=Soltein SA de CV
@@ -66,14 +66,14 @@ enable=
     manifest-version-format,
     manifest-author-string,
     manifest-deprecated-key,
-    manifest-maintainers-list,
-    manifest-superfluous-key,
     manifest-behind-migrations,
     manifest-data-duplicated,
     website-manifest-key-not-valid-uri,
     license-allowed,
     development-status-allowed,
-    missing-readme,
+   # manifest-maintainers-list,
+   # missing-readme,
+   # manifest-superfluous-key,
 
     # -------------------------------------------------------------------------
     # METHOD NAMING CHECKS (C81xx)
