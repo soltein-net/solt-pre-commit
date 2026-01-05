@@ -29,7 +29,11 @@ class Severity:
     COLORS = {ERROR: "\033[91m", WARNING: "\033[93m", INFO: "\033[94m"}
     RESET = "\033[0m"
     BOLD = "\033[1m"
-    ICONS = {ERROR: "❌", WARNING: "⚠️ ", INFO: "ℹ️ "}
+    # ASCII-safe icons for CI environments
+    ICONS = {ERROR: "[ERROR]", WARNING: "[WARN]", INFO: "[INFO]"}
+    # Unicode icons for terminal
+    ICONS_UNICODE = {ERROR: "\u274c", WARNING: "\u26a0\ufe0f", INFO: "\u2139\ufe0f"}
+
 
 
 # Default severity for each check
@@ -145,9 +149,36 @@ class ChangedFilesDetector:
     def __init__(self, base_branch: str | None = None):
         self.base_branch = base_branch or self._detect_base_branch()
         self._changed_files: set[str] | None = None
+        self._is_ci = bool(os.environ.get("CI"))
+
+    def _log(self, message: str) -> None:
+        """Log debug message in CI environment."""
+        if self._is_ci:
+            print(f"[ChangedFilesDetector] {message}")
 
     def _detect_base_branch(self) -> str:
-        """Auto-detect the base branch."""
+        """Auto-detect the base branch.
+
+        Priority:
+        1. SOLT_BASE_BRANCH environment variable (set by CI workflow)
+        2. GITHUB_BASE_REF environment variable (GitHub Actions PR context)
+        3. Auto-detect from known branch names (main, master, develop)
+        4. Fallback to HEAD~1
+        """
+        # 1. Check explicit environment variable from workflow
+        solt_base = os.environ.get("SOLT_BASE_BRANCH")
+        if solt_base:
+            # Ensure it has origin/ prefix
+            if not solt_base.startswith("origin/"):
+                solt_base = f"origin/{solt_base}"
+            return solt_base
+
+        # 2. Check GitHub Actions PR context
+        github_base = os.environ.get("GITHUB_BASE_REF")
+        if github_base:
+            return f"origin/{github_base}"
+
+        # 3. Auto-detect from known branches
         candidates = ["main", "master", "develop"]
         for branch in candidates:
             try:
@@ -159,15 +190,72 @@ class ChangedFilesDetector:
                 return f"origin/{branch}"
             except subprocess.CalledProcessError:
                 continue
+
+        # 4. Fallback
         return "HEAD~1"
 
+    def _ensure_base_branch_available(self) -> bool:
+        """Ensure the base branch ref is available for diff."""
+        if self.base_branch == "HEAD~1":
+            return True
+
+        # Check if the ref exists
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--verify", self.base_branch],
+                capture_output=True,
+                check=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            self._log(f"Base branch {self.base_branch} not found locally, trying to fetch...")
+            # Try to fetch it
+            branch_name = self.base_branch.replace("origin/", "")
+            try:
+                subprocess.run(
+                    ["git", "fetch", "origin", branch_name, "--depth=1"],
+                    capture_output=True,
+                    check=True,
+                )
+                self._log(f"Successfully fetched origin/{branch_name}")
+                return True
+            except subprocess.CalledProcessError as e:
+                self._log(f"Failed to fetch {branch_name}: {e}")
+                return False
+
     def get_changed_files(self) -> set[str]:
-        """Get set of changed files compared to base branch."""
+        """Get set of changed files compared to base branch.
+
+        Uses three-dot diff (base...HEAD) for PRs to get only the changes
+        introduced by the PR, not all differences between branches.
+        """
         if self._changed_files is not None:
             return self._changed_files
 
         self._changed_files = set()
+        self._log(f"Detecting changed files vs {self.base_branch}")
 
+        # Ensure base branch is available
+        if not self._ensure_base_branch_available():
+            self._log("Base branch not available, returning empty set")
+            return self._changed_files
+
+        # Try three-dot diff first (PR changes only - from merge base)
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "--diff-filter=ACMR", f"{self.base_branch}...HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            files = result.stdout.strip().split("\n")
+            self._changed_files = {os.path.realpath(f) for f in files if f}
+            self._log(f"Three-dot diff found {len(self._changed_files)} changed files")
+            return self._changed_files
+        except subprocess.CalledProcessError:
+            pass
+
+        # Fallback to two-dot diff
         try:
             result = subprocess.run(
                 ["git", "diff", "--name-only", "--diff-filter=ACMR", self.base_branch],
@@ -177,18 +265,24 @@ class ChangedFilesDetector:
             )
             files = result.stdout.strip().split("\n")
             self._changed_files = {os.path.realpath(f) for f in files if f}
+            self._log(f"Two-dot diff found {len(self._changed_files)} changed files")
+            return self._changed_files
         except subprocess.CalledProcessError:
-            try:
-                result = subprocess.run(
-                    ["git", "diff", "--name-only", "--cached", "--diff-filter=ACMR"],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                files = result.stdout.strip().split("\n")
-                self._changed_files = {os.path.realpath(f) for f in files if f}
-            except subprocess.CalledProcessError:
-                pass
+            pass
+
+        # Final fallback: staged files
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "--cached", "--diff-filter=ACMR"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            files = result.stdout.strip().split("\n")
+            self._changed_files = {os.path.realpath(f) for f in files if f}
+            self._log(f"Staged files fallback found {len(self._changed_files)} files")
+        except subprocess.CalledProcessError:
+            self._log("All diff methods failed")
 
         return self._changed_files
 

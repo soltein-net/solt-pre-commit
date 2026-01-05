@@ -6,15 +6,12 @@
 
 import argparse
 import ast
-import fnmatch
 import glob
 import os
-import subprocess
+import re
 import sys
+import time
 from collections import defaultdict
-from pathlib import Path
-
-import yaml
 
 from . import (
     checks_odoo_module_csv,
@@ -23,259 +20,19 @@ from . import (
     checks_odoo_module_xml,
     checks_odoo_module_xml_advanced,
 )
+from .config_loader import (
+    ChangedFilesDetector,
+    Severity,
+    SoltConfig,
+)
 
-DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/main/docs/README_TEMPLATE.rst"
+# Backward compatibility alias
+SeverityConfig = SoltConfig
+
+DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/17.0/docs/README_TEMPLATE.rst"
 DFTL_README_FILES = ["README.md", "README.txt", "README.rst"]
 DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "update_xml"]
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
-
-
-# =============================================================================
-# SEVERITY SYSTEM
-# =============================================================================
-
-
-class Severity:
-    """Severity levels for checks."""
-
-    ERROR = "error"
-    WARNING = "warning"
-    INFO = "info"
-
-    PRIORITY = {ERROR: 3, WARNING: 2, INFO: 1}
-    COLORS = {ERROR: "\033[91m", WARNING: "\033[93m", INFO: "\033[94m"}
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    # ASCII-safe icons for CI environments
-    ICONS = {ERROR: "[ERROR]", WARNING: "[WARN]", INFO: "[INFO]"}
-    # Unicode icons for terminal
-    ICONS_UNICODE = {ERROR: "\u274c", WARNING: "\u26a0\ufe0f", INFO: "\u2139\ufe0f"}
-
-
-# Default severity for each check
-DEFAULT_SEVERITY = {
-    # Syntax errors - always block
-    "xml_syntax_error": Severity.ERROR,
-    "csv_syntax_error": Severity.ERROR,
-    "python_syntax_error": Severity.ERROR,
-    "manifest_syntax_error": Severity.ERROR,
-    "po_syntax_error": Severity.ERROR,
-    # Duplicates - block
-    "xml_duplicate_record_id": Severity.ERROR,
-    "csv_duplicate_record_id": Severity.ERROR,
-    "po_duplicate_message_definition": Severity.ERROR,
-    "xml_duplicate_fields": Severity.ERROR,
-    # Odoo runtime warnings - block
-    "python_duplicate_field_label": Severity.ERROR,
-    "python_inconsistent_compute_sudo": Severity.ERROR,
-    "python_tracking_without_mail_thread": Severity.ERROR,
-    "python_selection_on_related": Severity.ERROR,
-    "xml_deprecated_active_id_usage": Severity.ERROR,
-    "xml_alert_missing_role": Severity.ERROR,
-    # Dangerous patterns - warning
-    "xml_view_dangerous_replace_low_priority": Severity.WARNING,
-    "xml_create_user_wo_reset_password": Severity.WARNING,
-    "xml_dangerous_filter_wo_user": Severity.WARNING,
-    "xml_hardcoded_id": Severity.WARNING,
-    "xml_duplicate_view_priority": Severity.WARNING,
-    # Deprecations - warning
-    "xml_deprecated_tree_attribute": Severity.WARNING,
-    "xml_deprecated_data_node": Severity.WARNING,
-    "xml_deprecated_openerp_xml_node": Severity.WARNING,
-    "xml_deprecated_t_raw": Severity.WARNING,
-    "xml_deprecated_qweb_directive": Severity.WARNING,
-    "xml_button_without_type": Severity.WARNING,
-    # Code quality - warning/info
-    "python_field_missing_string": Severity.WARNING,
-    "python_field_missing_help": Severity.WARNING,
-    "python_method_missing_docstring": Severity.WARNING,
-    "python_docstring_too_short": Severity.INFO,
-    "python_docstring_uninformative": Severity.INFO,
-    # PO quality
-    "po_requires_module": Severity.WARNING,
-    "po_python_parse_printf": Severity.WARNING,
-    "po_python_parse_format": Severity.WARNING,
-    # Other
-    "xml_redundant_module_name": Severity.INFO,
-    "xml_not_valid_char_link": Severity.WARNING,
-    "missing_readme": Severity.INFO,
-}
-
-
-# =============================================================================
-# CHANGED FILES DETECTION
-# =============================================================================
-
-
-class ChangedFilesDetector:
-    """Detects which files have changed for PR/commit validation."""
-
-    def __init__(self, base_branch=None):
-        self.base_branch = base_branch or self._detect_base_branch()
-
-    def _detect_base_branch(self):
-        """Auto-detect the base branch."""
-        candidates = ["main", "master", "develop"]
-        for branch in candidates:
-            try:
-                subprocess.run(
-                    ["git", "rev-parse", "--verify", f"origin/{branch}"],
-                    capture_output=True,
-                    check=True,
-                )
-                return f"origin/{branch}"
-            except subprocess.CalledProcessError:
-                continue
-        return "HEAD~1"
-
-    def get_changed_files(self):
-        """Get list of changed files compared to base branch."""
-        try:
-            result = subprocess.run(
-                ["git", "diff", "--name-only", "--diff-filter=ACMR", self.base_branch],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            files = result.stdout.strip().split("\n")
-            return [f for f in files if f]
-        except subprocess.CalledProcessError:
-            try:
-                result = subprocess.run(
-                    ["git", "diff", "--name-only", "--cached", "--diff-filter=ACMR"],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                files = result.stdout.strip().split("\n")
-                return [f for f in files if f]
-            except subprocess.CalledProcessError:
-                return []
-
-    def filter_module_files(self, module_path, all_module_files):
-        """Filter module files to only those that changed."""
-        changed = {os.path.realpath(f) for f in self.get_changed_files()}
-        return [f for f in all_module_files if os.path.realpath(f["filename"]) in changed]
-
-
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-
-class SeverityConfig:
-    """Configuration for severity system and validation scope."""
-
-    CONFIG_FILES = [".solt-hooks.yaml", ".solt-hooks.yml", "solt-hooks.yaml"]
-
-    def __init__(self, config_path=None):
-        self.config = self._load_config(config_path)
-        self.severity_map = self._build_severity_map()
-        self.disabled_checks = set(self.config.get("disabled_checks", []))
-        self.blocking_severities = self._get_blocking_severities()
-
-        self.validation_scope = self.config.get("validation_scope", "changed")
-        self.base_branch = self.config.get("base_branch")
-
-        self.skip_string_fields = set(
-            self.config.get(
-                "skip_string_fields",
-                [
-                    "active",
-                    "name",
-                    "sequence",
-                    "company_id",
-                    "currency_id",
-                    "create_uid",
-                    "create_date",
-                    "write_uid",
-                    "write_date",
-                    "message_ids",
-                    "message_follower_ids",
-                    "activity_ids",
-                ],
-            )
-        )
-        self.skip_help_fields = set(
-            self.config.get(
-                "skip_help_fields",
-                ["active", "name", "sequence", "company_id", "currency_id"],
-            )
-        )
-        self.skip_docstring_methods = set(self.config.get("skip_docstring_methods", []))
-        self.min_docstring_length = self.config.get("min_docstring_length", 10)
-
-        self.exclude_paths = self.config.get(
-            "exclude_paths",
-            [
-                "**/migrations/**",
-                "**/tests/**",
-                "**/static/**",
-                "**/__pycache__/**",
-                "**/node_modules/**",
-            ],
-        )
-
-    def _load_config(self, config_path=None):
-        """Load configuration from .solt-hooks.yaml."""
-        if config_path:
-            search_paths = [Path(config_path)]
-        else:
-            current = Path.cwd()
-            search_paths = []
-            for _ in range(5):
-                for config_name in self.CONFIG_FILES:
-                    search_paths.append(current / config_name)
-                current = current.parent
-
-        for path in search_paths:
-            if path.exists():
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        return yaml.safe_load(f) or {}
-                except (yaml.YAMLError, OSError):
-                    pass
-        return {}
-
-    def _build_severity_map(self):
-        """Build severity map from defaults and config overrides."""
-        severity_map = DEFAULT_SEVERITY.copy()
-        config_severity = self.config.get("severity", {})
-        for check_name, level in config_severity.items():
-            if level in (Severity.ERROR, Severity.WARNING, Severity.INFO):
-                severity_map[check_name] = level
-        return severity_map
-
-    def _get_blocking_severities(self):
-        """Get which severities should block the commit."""
-        default_blocking = [Severity.ERROR]
-        blocking = self.config.get("blocking_severities", default_blocking)
-        if isinstance(blocking, str):
-            blocking = [blocking]
-        return set(blocking)
-
-    def get_severity(self, check_name):
-        return self.severity_map.get(check_name, Severity.WARNING)
-
-    def is_check_disabled(self, check_name):
-        return check_name in self.disabled_checks
-
-    def is_blocking(self, severity):
-        return severity in self.blocking_severities
-
-    def should_report(self, check_name):
-        return not self.is_check_disabled(check_name)
-
-    def is_path_excluded(self, filepath):
-        """Check if a file path should be excluded."""
-        for pattern in self.exclude_paths:
-            if fnmatch.fnmatch(filepath, pattern):
-                return True
-        return False
-
-    def use_changed_files_only(self):
-        """Check if we should only validate changed files."""
-        return self.validation_scope == "changed"
 
 
 class CheckResult:
@@ -293,8 +50,6 @@ class CheckResult:
         To:
           solt-budget/module/file.py:25 Error
         """
-        import re
-
         # Pattern matches: /home/runner/work/REPO_NAME/
         # This removes the CI runner prefix but keeps REPO_NAME/rest/of/path
         return re.sub(r"/home/runner/work/[^/]+/", "", message)

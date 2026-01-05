@@ -148,11 +148,22 @@ jobs:
           echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
           echo "Found $MODULE_COUNT modules: $MODULES"
 
+      # Fetch base branch for accurate diff in PRs
+      - name: Fetch base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Fetching base branch: ${{ github.base_ref }}"
+          git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} --depth=1 || true
+          echo "Available remote branches:"
+          git branch -r | head -10
+
       # NOTE: This step uses continue-on-error so subsequent steps run.
       # The actual pass/fail is determined by "Final validation check" at the end.
       - name: Run validation (collect results)
         id: validate
         continue-on-error: true
+        env:
+          SOLT_BASE_BRANCH: ${{ github.base_ref }}
         run: |
           mkdir -p reports
           ARGS="--scope ${{ inputs.validation-scope }}"
@@ -161,6 +172,15 @@ jobs:
           fi
 
           START_TIME=$(date +%s)
+
+          # Debug: Show base branch and changed files count
+          if [ -n "${{ github.base_ref }}" ]; then
+            echo "::notice::Base branch for diff: origin/${{ github.base_ref }}"
+            CHANGED_COUNT=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l || echo "unknown")
+            echo "::notice::Files changed in PR: $CHANGED_COUNT"
+          else
+            echo "::notice::Not a PR - using auto-detected base branch"
+          fi
 
           # Run validation and capture exit code
           set -o pipefail
@@ -185,6 +205,8 @@ jobs:
       - name: Run full validation for metrics
         if: always()
         continue-on-error: true
+        env:
+          SOLT_BASE_BRANCH: ${{ github.base_ref }}
         run: |
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info 2>&1 | tee reports/validation-full.txt || true
 
