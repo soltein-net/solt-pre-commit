@@ -10,6 +10,7 @@ import glob
 import os
 import re
 import sys
+import time
 from collections import defaultdict
 
 from . import (
@@ -254,9 +255,10 @@ class ChecksOdooModule:
         self.manifest_referenced_files = self._referenced_files_by_extension()
         self.check_result = CheckResult(self.severity_config)
 
+        # Use shared detector from config (avoids repeated git calls and logs)
         self._changed_detector = None
         if self.severity_config.use_changed_files_only():
-            self._changed_detector = ChangedFilesDetector(self.severity_config.base_branch)
+            self._changed_detector = self.severity_config.changed_detector
 
     @staticmethod
     def _get_manifest_file_path(original_manifest_path):
