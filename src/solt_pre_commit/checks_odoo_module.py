@@ -10,7 +10,6 @@ import glob
 import os
 import re
 import sys
-import time
 from collections import defaultdict
 
 from . import (
@@ -21,7 +20,6 @@ from . import (
     checks_odoo_module_xml_advanced,
 )
 from .config_loader import (
-    ChangedFilesDetector,
     Severity,
     SoltConfig,
 )

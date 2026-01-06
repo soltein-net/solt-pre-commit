@@ -553,9 +553,9 @@ jobs:
                           if len(parts) > 2:
                               filepath = '/'.join(parts[-2:])
 
-                          # Truncate long messages
-                          if len(message) > 80:
-                              message = message[:77] + '...'
+                          # Truncate long messages (increased limit for readability)
+                          if len(message) > 120:
+                              message = message[:117] + '...'
 
                           entry = {
                               'file': filepath,
@@ -566,8 +566,8 @@ jobs:
                       else:
                           # No file:line pattern, just message
                           message = msg_content
-                          if len(message) > 100:
-                              message = message[:97] + '...'
+                          if len(message) > 150:
+                              message = message[:147] + '...'
                           entry = {
                               'file': '',
                               'line': '',
@@ -623,8 +623,8 @@ jobs:
                                   if len(parts) > 2:
                                       filepath = '/'.join(parts[-2:])
           
-                                  if len(message) > 60:
-                                      message = message[:57] + '...'
+                                  if len(message) > 100:
+                                      message = message[:97] + '...'
           
                                   pylint_errors.append({
                                       'file': filepath,
@@ -660,8 +660,8 @@ jobs:
                                   if len(parts) > 2:
                                       filepath = '/'.join(parts[-2:])
           
-                                  if len(message) > 60:
-                                      message = message[:57] + '...'
+                                  if len(message) > 100:
+                                      message = message[:97] + '...'
           
                                   ruff_errors.append({
                                       'file': filepath,
