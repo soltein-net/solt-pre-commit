@@ -10,6 +10,7 @@ import glob
 import os
 import re
 import sys
+import time
 from collections import defaultdict
 
 from . import (
@@ -343,7 +344,7 @@ class ChecksOdooModule:
         if not all_files:
             return []
         if self._changed_detector:
-            return self._changed_detector.filter_module_files(self.odoo_addon_path, all_files)
+            return self._changed_detector.filter_changed_files(all_files)
         return all_files
 
     def _should_run_check(self, check_type):
