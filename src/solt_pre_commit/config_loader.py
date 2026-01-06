@@ -35,7 +35,6 @@ class Severity:
     ICONS_UNICODE = {ERROR: "\u274c", WARNING: "\u26a0\ufe0f", INFO: "\u2139\ufe0f"}
 
 
-
 # Default severity for each check
 DEFAULT_SEVERITY: dict[str, str] = {
     # Syntax errors - always block
