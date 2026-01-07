@@ -87,6 +87,11 @@ class CheckResult:
             counts[severity] += len(messages)
         return counts
 
+    def has_errors_or_warnings(self):
+        """Check if there are any errors or warnings (ignoring info)."""
+        counts = self.get_counts()
+        return counts[Severity.ERROR] > 0 or counts[Severity.WARNING] > 0
+
     def is_empty(self):
         return all(len(msgs) == 0 for msgs in self.results.values())
 
@@ -157,8 +162,6 @@ class ResultPrinter:
         for severity in [Severity.ERROR, Severity.WARNING, Severity.INFO]:
             checks = by_severity[severity]
             if not checks:
-                continue
-            if severity == Severity.INFO and not self.verbose:
                 continue
 
             count = counts[severity]
@@ -685,20 +688,31 @@ def run(
 
         checks_objects.append((checks_obj.odoo_addon_name, checks_obj))
 
+        # Track results for summary
         if not checks_obj.check_result.is_empty():
             all_results.append((checks_obj.odoo_addon_name, checks_obj.check_result))
             if checks_obj.check_result.has_blocking_issues():
                 has_blocking = True
 
-            if verbose:
+        # Print module results
+        if verbose:
+            if show_all_modules:
+                # Show all modules (with issues or passed)
+                if not checks_obj.check_result.is_empty():
+                    printer.print_results(
+                        checks_obj.check_result,
+                        checks_obj.odoo_addon_name,
+                        severity_config.validation_scope,
+                    )
+                else:
+                    printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
+            elif not checks_obj.check_result.is_empty():
+                # Show modules with any issues (errors, warnings, or info)
                 printer.print_results(
                     checks_obj.check_result,
                     checks_obj.odoo_addon_name,
                     severity_config.validation_scope,
                 )
-        elif verbose and show_all_modules:
-            # Only show "passed" modules when --show-all-modules is used
-            printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
 
     # Show global coverage metrics
     if verbose and show_coverage:
