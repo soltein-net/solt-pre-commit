@@ -11,8 +11,6 @@ from typing import List
 
 from lxml import etree
 
-DFTL_MIN_PRIORITY = 99
-
 
 class ChecksOdooModuleXML:
     """Basic XML validator for Odoo modules."""
@@ -39,23 +37,6 @@ class ChecksOdooModuleXML:
                     }
                 )
                 self.checks_errors["xml_syntax_error"].append(f"{manifest_data['filename']} {xml_err}")
-
-    @staticmethod
-    def _get_priority(view):
-        try:
-            priority_node = view.xpath("field[@name='priority'][1]")[0]
-            return int(priority_node.get("eval", priority_node.text) or 0)
-        except (IndexError, ValueError):
-            return 0
-
-    @staticmethod
-    def _is_replaced_field(view):
-        try:
-            arch = view.xpath("field[@name='arch' and @type='xml'][1]")[0]
-        except IndexError:
-            return False
-        replaces = arch.xpath(".//field[@name='name' and @position='replace'][1] | .//*[@position='replace'][1]")
-        return bool(replaces)
 
     def check_xml_records(self):
         """Validate records: duplicates, duplicate fields."""
@@ -122,18 +103,9 @@ class ChecksOdooModuleXML:
             )
 
     def _visit_xml_record_view(self, manifest_data, record):
-        """Validate views: dangerous replace, deprecated attributes."""
+        """Validate views: deprecated attributes."""
         if record.get("model") != "ir.ui.view":
             return
-
-        priority = self._get_priority(record)
-        is_replaced = self._is_replaced_field(record)
-
-        if is_replaced and priority < DFTL_MIN_PRIORITY:
-            self.checks_errors["xml_view_dangerous_replace_low_priority"].append(
-                f"{manifest_data['filename']}:{record.sourceline} "
-                f'Dangerous "replace" with priority {priority} < {DFTL_MIN_PRIORITY}'
-            )
 
         # Deprecated attributes in tree
         deprecate_attrs = {"string", "colors", "fonts"}

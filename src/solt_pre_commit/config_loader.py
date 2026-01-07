@@ -56,7 +56,6 @@ DEFAULT_SEVERITY: dict[str, str] = {
     "xml_deprecated_active_id_usage": Severity.ERROR,
     "xml_alert_missing_role": Severity.ERROR,
     # Dangerous patterns - warning
-    "xml_view_dangerous_replace_low_priority": Severity.WARNING,
     "xml_create_user_wo_reset_password": Severity.WARNING,
     "xml_dangerous_filter_wo_user": Severity.WARNING,
     "xml_hardcoded_id": Severity.WARNING,
@@ -67,7 +66,6 @@ DEFAULT_SEVERITY: dict[str, str] = {
     "xml_deprecated_openerp_xml_node": Severity.WARNING,
     "xml_deprecated_t_raw": Severity.WARNING,
     "xml_deprecated_qweb_directive": Severity.WARNING,
-    "xml_button_without_type": Severity.WARNING,
     # Code quality - warning/info
     "python_field_missing_string": Severity.WARNING,
     "python_field_missing_help": Severity.WARNING,

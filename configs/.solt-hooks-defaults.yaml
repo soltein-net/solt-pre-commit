@@ -48,7 +48,6 @@ severity:
   xml_alert_missing_role: error
 
   # Dangerous patterns
-  xml_view_dangerous_replace_low_priority: warning
   xml_create_user_wo_reset_password: warning
   xml_dangerous_filter_wo_user: warning
   xml_hardcoded_id: warning
@@ -60,7 +59,6 @@ severity:
   xml_deprecated_openerp_xml_node: warning
   xml_deprecated_t_raw: warning
   xml_deprecated_qweb_directive: warning
-  xml_button_without_type: warning
 
   # Code quality
   python_field_missing_string: warning

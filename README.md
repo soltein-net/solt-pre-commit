@@ -165,7 +165,6 @@ Catches these Odoo warnings **before** they appear in your logs:
 - `xml_alert_missing_role` - Alert without role attribute
 
 ### Warnings
-- `xml_view_dangerous_replace_low_priority` - Dangerous replace pattern
 - `xml_deprecated_tree_attribute` - Deprecated tree attributes
 - `xml_hardcoded_id` - Hardcoded IDs instead of ref()
 - `xml_create_user_wo_reset_password` - User creation issue

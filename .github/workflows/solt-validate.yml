@@ -160,7 +160,7 @@ jobs:
       # NOTE: This step uses continue-on-error so subsequent steps run.
       # The actual pass/fail is determined by "Final validation check" at the end.
       # For push events (merge to main), we use full scope and don't block.
-      - name: Run validation (collect results)
+      - name: Run validation (changed files)
         id: validate
         continue-on-error: true
         env:
@@ -218,7 +218,7 @@ jobs:
         env:
           SOLT_BASE_BRANCH: ${{ github.base_ref }}
         run: |
-          solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info 2>&1 | tee reports/validation-full.txt || true
+          solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info --show-all-modules 2>&1 | tee reports/validation-full.txt || true
 
       - name: Run Ruff check
         id: ruff

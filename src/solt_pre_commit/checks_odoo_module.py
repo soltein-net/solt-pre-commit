@@ -258,6 +258,23 @@ class ChecksOdooModule:
         if self.severity_config.use_changed_files_only():
             self._changed_detector = self.severity_config.changed_detector
 
+    def has_changed_files(self) -> bool:
+        """Check if this module has any changed files.
+
+        Returns True if:
+        - validation_scope is 'full' (all modules are considered to have changes)
+        - validation_scope is 'changed' and there are modified files in this module
+        """
+        if not self._changed_detector:
+            return True  # Full scope - consider all modules as having changes
+
+        # Check if any file type has changed files
+        for ext in self.manifest_referenced_files:
+            files = self._get_files_to_validate(ext)
+            if files:
+                return True
+        return False
+
     @staticmethod
     def _get_manifest_file_path(original_manifest_path):
         for manifest_name in MANIFEST_NAMES:
@@ -631,6 +648,7 @@ def run(
     force_scope=None,
     json_report=None,
     show_coverage=True,
+    show_all_modules=False,
 ):
     """Main entry point."""
     import time
@@ -678,7 +696,8 @@ def run(
                     checks_obj.odoo_addon_name,
                     severity_config.validation_scope,
                 )
-        elif verbose:
+        elif verbose and show_all_modules:
+            # Only show "passed" modules when --show-all-modules is used
             printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
 
     # Show global coverage metrics
@@ -755,6 +774,11 @@ def main():
         default=None,
         help="Generate JSON coverage report to specified file path",
     )
+    parser.add_argument(
+        "--show-all-modules",
+        action="store_true",
+        help="Show all modules even if they have no issues (default: only show modules with issues)",
+    )
 
     args = parser.parse_args()
 
@@ -778,6 +802,7 @@ def main():
         show_info=args.show_info,
         force_scope=args.scope,
         json_report=args.json_report,
+        show_all_modules=args.show_all_modules,
     )
 
 
