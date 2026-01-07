@@ -76,7 +76,7 @@ class OdooFieldVisitor(ast.NodeVisitor):
         self.fields: Dict[str, List[dict]] = defaultdict(list)
         self.methods: Dict[str, List[dict]] = defaultdict(list)
 
-    def visit_ClassDef(self, node: ast.ClassDef):
+    def visit_ClassDef(self, node: ast.ClassDef):  # noqa: N802
         """Visit class definitions to detect Odoo models."""
         self.current_class = node.name
         self.current_class_lineno = node.lineno
@@ -134,11 +134,11 @@ class OdooFieldVisitor(ast.NodeVisitor):
         }
         return bool(set(inherit_list) & mail_mixins)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef):
+    def visit_FunctionDef(self, node: ast.FunctionDef):  # noqa: N802
         self._process_function(node)
         self.generic_visit(node)
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):  # noqa: N802
         self._process_function(node)
         self.generic_visit(node)
 
@@ -179,7 +179,7 @@ class OdooFieldVisitor(ast.NodeVisitor):
 
         self.methods[self.current_class].append(method_info)
 
-    def visit_Assign(self, node: ast.Assign):
+    def visit_Assign(self, node: ast.Assign):  # noqa: N802
         """Visit assignments to detect Odoo fields."""
         if not self.current_class:
             self.generic_visit(node)
@@ -260,15 +260,23 @@ class OdooFieldVisitor(ast.NodeVisitor):
         }
 
         # Handle positional arguments
+        # For relational fields: first arg is comodel_name, second arg is string
+        # For other fields: first arg is string
         if value_node.args:
             first_arg = value_node.args[0]
-            string_value = self._extract_string_value(first_arg)
+            first_value = self._extract_string_value(first_arg)
 
-            if string_value is not None:
+            if first_value is not None:
                 if field_type in ("Many2one", "One2many", "Many2many"):
-                    field_info["comodel_name"] = string_value
+                    field_info["comodel_name"] = first_value
+                    # Check for second positional argument (string) in relational fields
+                    if len(value_node.args) >= 2:
+                        second_arg = value_node.args[1]
+                        second_value = self._extract_string_value(second_arg)
+                        if second_value is not None:
+                            field_info["string"] = second_value
                 else:
-                    field_info["string"] = string_value
+                    field_info["string"] = first_value
 
         # Handle keyword arguments
         for kw in value_node.keywords:
