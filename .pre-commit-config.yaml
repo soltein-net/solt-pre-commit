@@ -1,0 +1,31 @@
+# =============================================================================
+# PRE-COMMIT CONFIGURATION - solt-pre-commit repository
+# =============================================================================
+
+repos:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PYTHON CODE QUALITY - Ruff
+  # ─────────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [ --no-fix, --output-format=concise ]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # GENERAL CODE QUALITY
+  # ─────────────────────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [ --maxkb=500 ]
+      - id: debug-statements
+
+ci:
+  autofix_prs: false
+  autoupdate_schedule: weekly
