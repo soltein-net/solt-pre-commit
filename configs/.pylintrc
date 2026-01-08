@@ -89,11 +89,11 @@ enable=
     print-used,
     except-pass,
     missing-return,
-    context-overridden,
     external-request-timeout,
     no-raise-unlink,
     no-write-in-compute,
     # invalid-commit,
+    # context-overridden,
 
     # -------------------------------------------------------------------------
     # TRANSLATION CHECKS (optional - uncomment if needed)
