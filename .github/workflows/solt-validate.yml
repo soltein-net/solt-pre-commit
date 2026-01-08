@@ -289,6 +289,11 @@ jobs:
 
           echo "=== Pylint-Odoo Linting ==="
 
+          # Function to strip ANSI color codes
+          strip_ansi() {
+            sed 's/\x1b\[[0-9;]*m//g' | sed 's/\[0m//g' | sed 's/\[1;[0-9]*m//g' | sed 's/\[35m//g'
+          }
+
           # Get changed Python files for PR scope
           CHANGED_PY=""
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -310,14 +315,15 @@ jobs:
 
             if [ -n "$EXISTING_PY" ]; then
               echo "Checking changed Python files with Pylint-Odoo..."
-              echo "$EXISTING_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-changed.txt || true
+              # Run pylint and strip ANSI codes from output
+              echo "$EXISTING_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | strip_ansi | tee reports/pylint-changed.txt || true
               PYLINT_CHANGED=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint-changed.txt 2>/dev/null || echo "0")
             fi
           fi
 
           # Check full repository (limited for performance)
           echo "=== Pylint-Odoo full repository scan ==="
-          find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-full.txt || true
+          find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | strip_ansi | tee reports/pylint-full.txt || true
           PYLINT_FULL=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint-full.txt 2>/dev/null || echo "0")
 
           # Sanitize and output
@@ -347,16 +353,22 @@ jobs:
           TOTAL_BLOCKING=0
 
           # --- Solt validation errors ---
+          # Get the error count from the FINAL SUMMARY section
           echo "=== SOLT-CHECK-ODOO ERRORS ==="
           if [ -f "reports/validation.txt" ]; then
-            # Extract errors (lines with ERROR or lines under ERRORS section)
-            SOLT_ERRORS=$(grep -c "\[ERROR\]" reports/validation.txt 2>/dev/null || echo "0")
+            # Extract error count from "Errors: N" in FINAL SUMMARY
+            SOLT_ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
+            SOLT_ERRORS=$(echo "$SOLT_ERRORS" | tr -cd '0-9')
+            : "${SOLT_ERRORS:=0}"
+
             if [ "$SOLT_ERRORS" -gt 0 ]; then
-              echo "Found $SOLT_ERRORS solt-check-odoo errors:"
-              grep "\[ERROR\]" reports/validation.txt | head -20
+              echo "Found $SOLT_ERRORS solt-check-odoo blocking errors:"
+              # Show actual error lines (start with "    - " under ERRORS section)
+              # These are formatted as "    - filepath:line message"
+              awk '/ERRORS/,/^[^ ]/' reports/validation.txt | grep "^    - " | head -20
               TOTAL_BLOCKING=$((TOTAL_BLOCKING + SOLT_ERRORS))
             else
-              echo "No solt-check-odoo errors found."
+              echo "No solt-check-odoo blocking errors found."
             fi
           else
             echo "No validation report found."
@@ -540,7 +552,14 @@ jobs:
               'ruff_errors_count': 0
           }
 
+          def strip_ansi(text):
+              """Remove ANSI escape codes from text."""
+              ansi_escape = re.compile(r'\x1b\[[0-9;]*m|\[0m|\[1;[0-9]*m|\[35m')
+              return ansi_escape.sub('', text)
+
           def escape_html(text):
+              # First strip any ANSI codes, then escape HTML
+              text = strip_ansi(text)
               return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
           def shorten_path(filepath):
