@@ -157,10 +157,10 @@ jobs:
           echo "Available remote branches:"
           git branch -r | head -10
 
-      # NOTE: This step uses continue-on-error so subsequent steps run.
-      # The actual pass/fail is determined by "Final validation check" at the end.
-      # For push events (merge to main), we use full scope and don't block.
-      - name: Run validation (changed files)
+      # ---------------------------------------------------------------------------
+      # SOLT-CHECK-ODOO VALIDATION
+      # ---------------------------------------------------------------------------
+      - name: Solt validation (PR scope)
         id: validate
         continue-on-error: true
         env:
@@ -169,7 +169,6 @@ jobs:
           mkdir -p reports
 
           # For push events (not PR), always use full scope
-          # This ensures proper validation after merge to main
           if [ "${{ github.event_name }}" = "push" ]; then
             ARGS="--scope full"
             echo "::notice::Push event detected - using full scope for metrics"
@@ -188,8 +187,6 @@ jobs:
             echo "::notice::Base branch for diff: origin/${{ github.base_ref }}"
             CHANGED_COUNT=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l || echo "unknown")
             echo "::notice::Files changed in PR: $CHANGED_COUNT"
-          else
-            echo "::notice::Push event - will generate full repository metrics"
           fi
 
           # Run validation and capture exit code
@@ -205,14 +202,11 @@ jobs:
 
           echo "exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          echo "::notice::Solt validation exit code: $VALIDATION_EXIT_CODE"
 
-          # Show exit code in logs for debugging
-          echo "::notice::Validation exit code: $VALIDATION_EXIT_CODE"
-
-          # Exit with validation code to store in step outcome
           exit $VALIDATION_EXIT_CODE
 
-      - name: Run full validation for metrics
+      - name: Solt validation (full repo metrics)
         if: always()
         continue-on-error: true
         env:
@@ -220,16 +214,21 @@ jobs:
         run: |
           solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info --show-all-modules 2>&1 | tee reports/validation-full.txt || true
 
-      - name: Run Ruff check
+      # ---------------------------------------------------------------------------
+      # RUFF LINTING
+      # ---------------------------------------------------------------------------
+      - name: Ruff linting
         id: ruff
         if: always()
         continue-on-error: true
         run: |
           set +e
+          mkdir -p reports
 
-          echo "=== Modules to check: ${{ steps.find-modules.outputs.modules }} ==="
+          echo "=== Ruff Linting ==="
 
-          # Get changed Python files
+          # Get changed Python files for PR scope
+          CHANGED_PY=""
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
             CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
@@ -237,6 +236,7 @@ jobs:
             CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
 
+          # Check changed files only
           RUFF_CHANGED="0"
           if [ -n "$CHANGED_PY" ]; then
             EXISTING_PY=""
@@ -248,17 +248,17 @@ jobs:
             EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
 
             if [ -n "$EXISTING_PY" ]; then
-              echo "=== Ruff checking changed files ==="
+              echo "Checking ${#EXISTING_PY} changed Python files..."
               ruff check $EXISTING_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
               RUFF_CHANGED=$(grep -cE "^.+\.py:[0-9]+" reports/ruff-changed.txt 2>/dev/null || echo "0")
             fi
           fi
 
-          # Run Ruff on full repo
-          echo "=== Running Ruff on full repository ==="
+          # Check full repository
+          echo "=== Ruff full repository scan ==="
           ALL_PY_FILES=$(find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | tr '\n' ' ')
           PY_FILE_COUNT=$(echo "$ALL_PY_FILES" | wc -w | tr -d ' ')
-          echo "Found $PY_FILE_COUNT Python files to check"
+          echo "Found $PY_FILE_COUNT Python files"
 
           RUFF_FULL="0"
           if [ -n "$ALL_PY_FILES" ] && [ "$PY_FILE_COUNT" -gt 0 ]; then
@@ -266,41 +266,38 @@ jobs:
             RUFF_FULL=$(grep -cE "^.+\.py:[0-9]+" reports/ruff-full.txt 2>/dev/null || echo "0")
           fi
 
-          # Debug output
-          echo "=== Ruff full report (first 20 lines): ==="
-          head -20 reports/ruff-full.txt 2>/dev/null || echo "(empty)"
-
-          # CRITICAL: Sanitize values - remove ALL non-numeric characters
+          # Sanitize and output
           RUFF_CHANGED=$(printf '%s' "$RUFF_CHANGED" | tr -cd '0-9')
           RUFF_FULL=$(printf '%s' "$RUFF_FULL" | tr -cd '0-9')
-
-          # Ensure non-empty
           : "${RUFF_CHANGED:=0}"
           : "${RUFF_FULL:=0}"
 
-          echo "=== FINAL COUNTS ==="
-          echo "RUFF_CHANGED: $RUFF_CHANGED"
-          echo "RUFF_FULL: $RUFF_FULL"
-          echo "===================="
-
-          # Write to GITHUB_OUTPUT using printf to avoid newline issues
+          echo "Ruff results: PR=$RUFF_CHANGED, Repo=$RUFF_FULL"
           printf 'changed=%s\n' "$RUFF_CHANGED" >> "$GITHUB_OUTPUT"
           printf 'full=%s\n' "$RUFF_FULL" >> "$GITHUB_OUTPUT"
 
-      - name: Run Pylint-Odoo check
+      # ---------------------------------------------------------------------------
+      # PYLINT-ODOO LINTING
+      # ---------------------------------------------------------------------------
+      - name: Pylint-Odoo linting
         id: pylint
         if: always()
         continue-on-error: true
         run: |
           set +e
+          mkdir -p reports
 
-          # Get changed Python files
+          echo "=== Pylint-Odoo Linting ==="
+
+          # Get changed Python files for PR scope
+          CHANGED_PY=""
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           else
             CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
 
+          # Check changed files only
           PYLINT_CHANGED="0"
           if [ -n "$CHANGED_PY" ]; then
             EXISTING_PY=""
@@ -312,64 +309,118 @@ jobs:
             EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
 
             if [ -n "$EXISTING_PY" ]; then
-              echo "=== Pylint checking changed files ==="
+              echo "Checking changed Python files with Pylint-Odoo..."
               echo "$EXISTING_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-changed.txt || true
-              # Count lines matching pylint message format: filename.py:line: [CODE] message
               PYLINT_CHANGED=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint-changed.txt 2>/dev/null || echo "0")
             fi
           fi
 
-          # Run on full repo (limited to 100 files for performance)
-          echo "=== Running Pylint on full repository ==="
+          # Check full repository (limited for performance)
+          echo "=== Pylint-Odoo full repository scan ==="
           find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | tee reports/pylint-full.txt || true
           PYLINT_FULL=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint-full.txt 2>/dev/null || echo "0")
 
-          # Debug output
-          echo "=== Pylint full report (first 20 lines): ==="
-          head -20 reports/pylint-full.txt 2>/dev/null || echo "(empty)"
-
-          # CRITICAL: Sanitize values - remove ALL non-numeric characters
+          # Sanitize and output
           PYLINT_CHANGED=$(printf '%s' "$PYLINT_CHANGED" | tr -cd '0-9')
           PYLINT_FULL=$(printf '%s' "$PYLINT_FULL" | tr -cd '0-9')
-
-          # Ensure non-empty
           : "${PYLINT_CHANGED:=0}"
           : "${PYLINT_FULL:=0}"
 
-          echo "=== FINAL COUNTS ==="
-          echo "PYLINT_CHANGED: $PYLINT_CHANGED"
-          echo "PYLINT_FULL: $PYLINT_FULL"
-          echo "===================="
-
-          # Write to GITHUB_OUTPUT using printf to avoid newline issues
+          echo "Pylint results: PR=$PYLINT_CHANGED, Repo=$PYLINT_FULL"
           printf 'changed=%s\n' "$PYLINT_CHANGED" >> "$GITHUB_OUTPUT"
           printf 'full=%s\n' "$PYLINT_FULL" >> "$GITHUB_OUTPUT"
 
-      - name: Calculate real metrics
+      # ---------------------------------------------------------------------------
+      # ISSUES SUMMARY - Shows all blocking issues from all tools
+      # ---------------------------------------------------------------------------
+      - name: Consolidate all issues
+        id: all-issues
+        if: always()
+        run: |
+          mkdir -p reports
+
+          echo "============================================================"
+          echo "               ALL BLOCKING ISSUES SUMMARY"
+          echo "============================================================"
+          echo ""
+
+          TOTAL_BLOCKING=0
+
+          # --- Solt validation errors ---
+          echo "=== SOLT-CHECK-ODOO ERRORS ==="
+          if [ -f "reports/validation.txt" ]; then
+            # Extract errors (lines with ERROR or lines under ERRORS section)
+            SOLT_ERRORS=$(grep -c "\[ERROR\]" reports/validation.txt 2>/dev/null || echo "0")
+            if [ "$SOLT_ERRORS" -gt 0 ]; then
+              echo "Found $SOLT_ERRORS solt-check-odoo errors:"
+              grep "\[ERROR\]" reports/validation.txt | head -20
+              TOTAL_BLOCKING=$((TOTAL_BLOCKING + SOLT_ERRORS))
+            else
+              echo "No solt-check-odoo errors found."
+            fi
+          else
+            echo "No validation report found."
+          fi
+          echo ""
+
+          # --- Pylint-Odoo errors (if blocking) ---
+          PYLINT_CHANGED="${{ steps.pylint.outputs.changed }}"
+          PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | tr -cd '0-9')
+          : "${PYLINT_CHANGED:=0}"
+
+          echo "=== PYLINT-ODOO ISSUES (PR files) ==="
+          if [ "${{ inputs.pylint-blocking }}" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then
+            echo "Found $PYLINT_CHANGED Pylint-Odoo issues (BLOCKING):"
+            if [ -f "reports/pylint-changed.txt" ]; then
+              grep -E "\.py:[0-9]+:.*\[" reports/pylint-changed.txt | head -20
+            fi
+            TOTAL_BLOCKING=$((TOTAL_BLOCKING + PYLINT_CHANGED))
+          elif [ "$PYLINT_CHANGED" -gt 0 ]; then
+            echo "Found $PYLINT_CHANGED Pylint-Odoo issues (info only - not blocking)"
+          else
+            echo "No Pylint-Odoo issues in changed files."
+          fi
+          echo ""
+
+          # --- Ruff errors (if blocking) ---
+          RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
+          RUFF_CHANGED=$(echo "$RUFF_CHANGED" | tr -cd '0-9')
+          : "${RUFF_CHANGED:=0}"
+
+          echo "=== RUFF ISSUES (PR files) ==="
+          if [ "${{ inputs.ruff-blocking }}" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
+            echo "Found $RUFF_CHANGED Ruff issues (BLOCKING):"
+            if [ -f "reports/ruff-changed.txt" ]; then
+              grep -E "^.+\.py:[0-9]+" reports/ruff-changed.txt | head -20
+            fi
+            TOTAL_BLOCKING=$((TOTAL_BLOCKING + RUFF_CHANGED))
+          elif [ "$RUFF_CHANGED" -gt 0 ]; then
+            echo "Found $RUFF_CHANGED Ruff issues (info only - not blocking)"
+          else
+            echo "No Ruff issues in changed files."
+          fi
+          echo ""
+
+          echo "============================================================"
+          echo "TOTAL BLOCKING ISSUES: $TOTAL_BLOCKING"
+          echo "============================================================"
+
+          echo "total_blocking=$TOTAL_BLOCKING" >> $GITHUB_OUTPUT
+
+      - name: Calculate metrics
         id: metrics
         if: always()
         env:
           DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
         run: |
-          # Debug: Show if validation files exist
-          echo "=== Debug: Checking report files ==="
-          ls -la reports/ 2>/dev/null || echo "reports/ directory not found"
-
-          if [ -f "reports/validation-full.txt" ]; then
-            echo "=== Last 30 lines of validation-full.txt ==="
-            tail -30 reports/validation-full.txt
-            echo "=== Searching for METRICS: line ==="
-            grep "METRICS:" reports/validation-full.txt || echo "METRICS: line not found"
-          else
-            echo "validation-full.txt not found"
-          fi
+          mkdir -p reports
 
           python3 << 'EOF'
           import os
           import re
           import json
 
-          print("=== Python metrics script starting ===")
+          print("=== Calculating metrics ===")
 
           metrics_data = {
               'docstring_cov': 0, 'docstring_documented': 0, 'docstring_total': 1,
@@ -378,32 +429,24 @@ jobs:
               'models': 0
           }
 
+          # Parse metrics from full validation
           try:
               with open('reports/validation-full.txt', 'r') as f:
                   content = f.read()
-              print(f"Read {len(content)} bytes from validation-full.txt")
 
               metrics_match = re.search(r'^METRICS:(.+)$', content, re.MULTILINE)
               if metrics_match:
-                  print(f"Found METRICS line: {metrics_match.group(1)[:100]}...")
                   for pair in metrics_match.group(1).split(','):
                       if '=' in pair:
                           key, value = pair.split('=', 1)
                           try:
                               metrics_data[key.strip()] = float(value) if '.' in value else int(value)
                           except ValueError:
-                              print(f"  Failed to parse: {pair}")
-              else:
-                  print("METRICS: line NOT found in file")
-                  # Try to find any line containing METRICS
-                  for line in content.split('\n'):
-                      if 'METRICS' in line or 'metrics' in line.lower():
-                          print(f"  Found similar line: {line[:100]}")
+                              pass
           except FileNotFoundError:
-              print("ERROR: validation-full.txt not found")
-          except Exception as e:
-              print(f"ERROR reading validation-full.txt: {e}")
+              print("Warning: validation-full.txt not found")
 
+          # Count issues in PR files
           missing_docstring_pr = missing_string_pr = missing_help_pr = 0
           try:
               with open('reports/validation.txt', 'r') as f:
@@ -418,6 +461,7 @@ jobs:
           threshold = int(os.environ.get('DOCSTRING_THRESHOLD', 80))
           docs_status = 'passing' if docstring_cov >= threshold else 'failing'
 
+          # Write outputs
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"docstring_cov={int(docstring_cov)}\n")
               f.write(f"docstring_documented={int(metrics_data.get('docstring_documented', 0))}\n")
@@ -437,23 +481,20 @@ jobs:
           with open('reports/metrics.json', 'w') as f:
               json.dump(metrics_data, f, indent=2)
 
-          print(f"=== Final metrics ===")
-          print(f"Docstrings: {docstring_cov:.1f}% ({metrics_data.get('docstring_documented', 0)}/{metrics_data.get('docstring_total', 1)})")
-          print(f"Field strings: {metrics_data.get('string_cov', 0):.1f}%")
-          print(f"Field help: {metrics_data.get('help_cov', 0):.1f}%")
+          print(f"Docstrings: {docstring_cov:.1f}%")
           print(f"Status: {docs_status}")
           EOF
 
+          # Pass through linter results
           echo "ruff_changed=${{ steps.ruff.outputs.changed }}" >> $GITHUB_OUTPUT
           echo "ruff_full=${{ steps.ruff.outputs.full }}" >> $GITHUB_OUTPUT
           echo "pylint_changed=${{ steps.pylint.outputs.changed }}" >> $GITHUB_OUTPUT
           echo "pylint_full=${{ steps.pylint.outputs.full }}" >> $GITHUB_OUTPUT
 
-      - name: Generate summary and extract errors
+      - name: Extract issues for PR comment
         id: summary
         if: always()
         run: |
-          # Create reports directory if it doesn't exist
           mkdir -p reports
           touch reports/validation.txt
 
@@ -461,251 +502,176 @@ jobs:
           EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' | head -1 || echo "0")
           if [ -z "$EXIT_CODE" ]; then EXIT_CODE="0"; fi
 
-          # Count errors/warnings from FINAL SUMMARY section
-          # Format: "  Errors: 0" and "  Warnings: 48"
+          # Count errors/warnings from validation output
           ERRORS="0"
           WARNINGS="0"
           if [ -f "reports/validation.txt" ]; then
-            # Try to extract from summary lines like "  Errors: 0"
             ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
             WARNINGS=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
           fi
-          # Ensure they are single numbers
           ERRORS=$(echo "$ERRORS" | grep -oE '^[0-9]+' | head -1 || echo "0")
           WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' | head -1 || echo "0")
           if [ -z "$ERRORS" ]; then ERRORS="0"; fi
           if [ -z "$WARNINGS" ]; then WARNINGS="0"; fi
 
-          # Write outputs safely
           {
             echo "errors=$ERRORS"
             echo "warnings=$WARNINGS"
             echo "validation_exit_code=$EXIT_CODE"
           } >> "$GITHUB_OUTPUT"
 
-          echo "Summary: exit_code=$EXIT_CODE, errors=$ERRORS, warnings=$WARNINGS"
-
-          # Extract first 10 errors/warnings for PR comment (full list is in workflow logs)
+          # Extract issues from all sources for PR comment
           python3 << 'PYEOF'
           import os
           import re
           import json
 
-          # Maximum number of issues to extract for PR comment
-          # Full list is shown in workflow logs via solt-check-odoo output
           MAX_ERRORS = 10
           MAX_WARNINGS = 10
 
-          errors_list = []
-          warnings_list = []
-          total_errors = 0
-          total_warnings = 0
+          result = {
+              'errors': [],
+              'warnings': [],
+              'total_errors': 0,
+              'total_warnings': 0,
+              'pylint_errors': [],
+              'pylint_errors_count': 0,
+              'ruff_errors': [],
+              'ruff_errors_count': 0
+          }
 
+          def escape_html(text):
+              return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+          def shorten_path(filepath):
+              parts = filepath.replace('\\', '/').split('/')
+              if len(parts) > 2:
+                  return '/'.join(parts[-2:])
+              return filepath
+
+          # Parse solt-check-odoo validation output
           try:
               with open('reports/validation.txt', 'r', encoding='utf-8', errors='replace') as f:
                   content = f.read()
 
-              # First, try to extract totals from FINAL SUMMARY section
               errors_match = re.search(r'Errors:\s*(\d+)', content)
               warnings_match = re.search(r'Warnings:\s*(\d+)', content)
               if errors_match:
-                  total_errors = int(errors_match.group(1))
+                  result['total_errors'] = int(errors_match.group(1))
               if warnings_match:
-                  total_warnings = int(warnings_match.group(1))
+                  result['total_warnings'] = int(warnings_match.group(1))
 
               current_severity = None
-              current_check = None
-
               for line in content.split('\n'):
                   line_stripped = line.strip()
 
-                  # Detect severity section headers (with emoji or bracket format)
                   if 'ERRORS' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'error'
-                      match = re.search(r'\((\d+)\)', line_stripped)
-                      if match and total_errors == 0:
-                          total_errors = int(match.group(1))
-                      continue
                   elif 'WARNING' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'warning'
-                      match = re.search(r'\((\d+)\)', line_stripped)
-                      if match and total_warnings == 0:
-                          total_warnings = int(match.group(1))
-                      continue
                   elif 'INFO' in line_stripped.upper() and '(' in line_stripped:
                       current_severity = 'info'
-                      continue
 
-                  # Skip separators and empty lines
-                  if not line_stripped or line_stripped.startswith('---') or line_stripped.startswith('==='):
-                      continue
-
-                  # Detect check name headers like "  Python Field Missing String (2)"
-                  check_header_match = re.match(r'^  ([A-Z][^(]+)\s*\((\d+)\)', line)
-                  if check_header_match:
-                      current_check = check_header_match.group(1).strip()
-                      continue
-
-                  # Parse error/warning lines starting with "    - "
                   if line.startswith('    - ') and current_severity in ('error', 'warning'):
-                      msg_content = line[6:]  # Remove "    - "
+                      msg_content = line[6:]
+                      file_match = re.match(r'^([^\s:]+):(\d+)\s+(.+)$', msg_content)
 
-                      # Try to extract file:line pattern
-                      file_line_match = re.match(r'^([^\s:]+):(\d+)\s+(.+)$', msg_content)
-
-                      if file_line_match:
-                          filepath = file_line_match.group(1)
-                          lineno = file_line_match.group(2)
-                          message = file_line_match.group(3)
-
-                          # Shorten filepath - keep last 2 parts
-                          parts = filepath.replace('\\', '/').split('/')
-                          if len(parts) > 2:
-                              filepath = '/'.join(parts[-2:])
-
-                          # Truncate long messages (increased limit for readability)
-                          if len(message) > 120:
-                              message = message[:117] + '...'
-
-                          # Escape HTML characters to prevent rendering issues in PR comments
-                          message = message.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
+                      if file_match:
                           entry = {
-                              'file': filepath,
-                              'line': lineno,
-                              'message': message,
-                              'check': current_check
+                              'file': shorten_path(file_match.group(1)),
+                              'line': file_match.group(2),
+                              'message': escape_html(file_match.group(3)[:120])
                           }
                       else:
-                          # No file:line pattern, just message
-                          message = msg_content
-                          if len(message) > 150:
-                              message = message[:147] + '...'
-                          # Escape HTML characters
-                          message = message.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                           entry = {
                               'file': '',
                               'line': '',
-                              'message': message,
-                              'check': current_check
+                              'message': escape_html(msg_content[:150])
                           }
 
-                      if current_severity == 'error' and len(errors_list) < MAX_ERRORS:
-                          errors_list.append(entry)
-                      elif current_severity == 'warning' and len(warnings_list) < MAX_WARNINGS:
-                          warnings_list.append(entry)
+                      if current_severity == 'error' and len(result['errors']) < MAX_ERRORS:
+                          result['errors'].append(entry)
+                      elif current_severity == 'warning' and len(result['warnings']) < MAX_WARNINGS:
+                          result['warnings'].append(entry)
 
-          except Exception as e:
-              print(f"Error parsing validation output: {e}")
-              import traceback
-              traceback.print_exc()
+          except FileNotFoundError:
+              pass
 
-          # Save to JSON for the comment step
-          result = {
-              'errors': errors_list,
-              'warnings': warnings_list,
-              'total_errors': total_errors,
-              'total_warnings': total_warnings
-          }
+          # Parse Pylint-Odoo output - FIXED REGEX
+          try:
+              with open('reports/pylint-changed.txt', 'r', encoding='utf-8', errors='replace') as f:
+                  pylint_content = f.read()
 
+              # Match format: filename.py:line:col: [CODE(name), Class.method] message
+              # or: filename.py:line: [CODE(name), ] message
+              pylint_pattern = re.compile(
+                  r'^(.+?\.py):(\d+):\s*(?:\d+:\s*)?\[([A-Z]\d+)\(([^)]+)\),\s*([^\]]*)\]\s*(.+)$'
+              )
+
+              for line in pylint_content.split('\n'):
+                  match = pylint_pattern.match(line.strip())
+                  if match:
+                      filepath = shorten_path(match.group(1))
+                      lineno = match.group(2)
+                      code = match.group(3)
+                      code_name = match.group(4)
+                      context = match.group(5).strip()
+                      message = match.group(6).strip()
+
+                      # Format message nicely
+                      if context:
+                          full_msg = f"[{code}] {message}"
+                      else:
+                          full_msg = f"[{code}] {message}"
+
+                      result['pylint_errors'].append({
+                          'file': filepath,
+                          'line': lineno,
+                          'message': escape_html(full_msg[:120]),
+                          'code': code,
+                          'code_name': code_name
+                      })
+
+              result['pylint_errors_count'] = len(result['pylint_errors'])
+              print(f"Parsed {result['pylint_errors_count']} Pylint-Odoo issues")
+
+          except FileNotFoundError:
+              print("No pylint-changed.txt found")
+
+          # Parse Ruff output
+          try:
+              with open('reports/ruff-changed.txt', 'r', encoding='utf-8', errors='replace') as f:
+                  ruff_content = f.read()
+
+              # Match format: path/file.py:line:col: CODE message
+              ruff_pattern = re.compile(r'^(.+?\.py):(\d+):(\d+):\s*([A-Z]+\d+)\s+(.+)$')
+
+              for line in ruff_content.split('\n'):
+                  match = ruff_pattern.match(line.strip())
+                  if match:
+                      filepath = shorten_path(match.group(1))
+                      # Remove CI runner path prefix
+                      filepath = re.sub(r'/home/runner/work/[^/]+/', '', filepath)
+
+                      result['ruff_errors'].append({
+                          'file': filepath,
+                          'line': match.group(2),
+                          'message': escape_html(f"[{match.group(4)}] {match.group(5)[:100]}"),
+                          'code': match.group(4)
+                      })
+
+              result['ruff_errors_count'] = len(result['ruff_errors'])
+              print(f"Parsed {result['ruff_errors_count']} Ruff issues")
+
+          except FileNotFoundError:
+              print("No ruff-changed.txt found")
+
+          # Save results
           with open('reports/extracted_issues.json', 'w') as f:
               json.dump(result, f, indent=2)
 
-          print(f"Extracted {len(errors_list)}/{total_errors} errors, {len(warnings_list)}/{total_warnings} warnings")
-
-          # Debug: show what we extracted
-          if errors_list:
-              print("Sample errors:")
-              for e in errors_list[:5]:
-                  print(f"  - {e.get('file')}:{e.get('line')} {e.get('message')}")
-
-          # Also parse Pylint errors if they exist
-          pylint_errors = []
-          try:
-              for pylint_file in ['reports/pylint-changed.txt', 'reports/pylint-full.txt']:
-                  try:
-                      with open(pylint_file, 'r', encoding='utf-8', errors='replace') as f:
-                          for line in f:
-                              match = re.match(r'^(.+?):(\d+):\d+:\s*([CRWEF]\d+)\(([^)]+)\)\s*(.+)$', line.strip())
-                              if match:
-                                  filepath = match.group(1)
-                                  lineno = match.group(2)
-                                  code = match.group(3)
-                                  code_name = match.group(4)
-                                  message = match.group(5)
-
-                                  parts = filepath.replace('\\', '/').split('/')
-                                  if len(parts) > 2:
-                                      filepath = '/'.join(parts[-2:])
-
-                                  if len(message) > 100:
-                                      message = message[:97] + '...'
-
-                                  # Escape HTML characters
-                                  message = message.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-                                  pylint_errors.append({
-                                      'file': filepath,
-                                      'line': lineno,
-                                      'message': f"[{code}] {message}",
-                                      'check': f"Pylint: {code_name}"
-                                  })
-                  except FileNotFoundError:
-                      pass
-          except Exception as e:
-              print(f"Error parsing pylint output: {e}")
-
-          # Store pylint errors separately
-          result['pylint_errors'] = pylint_errors[:20]
-          result['pylint_errors_count'] = len(pylint_errors)
-
-          # Also parse Ruff errors if they exist
-          ruff_errors = []
-          try:
-              for ruff_file in ['reports/ruff-changed.txt']:
-                  try:
-                      with open(ruff_file, 'r', encoding='utf-8', errors='replace') as f:
-                          for line in f:
-                              match = re.match(r'^(.+?):(\d+):(\d+):\s*([A-Z]+\d+)\s+(.+)$', line.strip())
-                              if match:
-                                  filepath = match.group(1)
-                                  lineno = match.group(2)
-                                  code = match.group(4)
-                                  message = match.group(5)
-
-                                  filepath = re.sub(r'/home/runner/work/[^/]+/', '', filepath)
-                                  parts = filepath.replace('\\', '/').split('/')
-                                  if len(parts) > 2:
-                                      filepath = '/'.join(parts[-2:])
-
-                                  if len(message) > 100:
-                                      message = message[:97] + '...'
-
-                                  # Escape HTML characters
-                                  message = message.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-                                  ruff_errors.append({
-                                      'file': filepath,
-                                      'line': lineno,
-                                      'message': f"[{code}] {message}",
-                                      'check': f"Ruff: {code}"
-                                  })
-                  except FileNotFoundError:
-                      pass
-          except Exception as e:
-              print(f"Error parsing ruff output: {e}")
-
-          result['ruff_errors'] = ruff_errors[:20]
-          result['ruff_errors_count'] = len(ruff_errors)
-
-          # Re-save with all data
-          with open('reports/extracted_issues.json', 'w') as f:
-              json.dump(result, f, indent=2)
-
-          if pylint_errors:
-              print(f"Also found {len(pylint_errors)} Pylint errors")
-          if ruff_errors:
-              print(f"Also found {len(ruff_errors)} Ruff errors")
+          print(f"\nExtracted: {len(result['errors'])} solt errors, {len(result['warnings'])} warnings")
+          print(f"Pylint: {result['pylint_errors_count']}, Ruff: {result['ruff_errors_count']}")
           PYEOF
 
       - name: Upload reports
@@ -803,20 +769,24 @@ jobs:
             const pylintChanged = safeInt(process.env.PYLINT_CHANGED);
             const pylintFull = safeInt(process.env.PYLINT_FULL);
 
-            // Debug values
-            console.log(`Ruff values - Changed: ${ruffChanged}, Full: ${ruffFull}, Blocking: ${ruffBlocking}`);
-            console.log(`Pylint values - Changed: ${pylintChanged}, Full: ${pylintFull}`);
+            console.log(`Pylint: PR=${pylintChanged}, Repo=${pylintFull}, blocking=${pylintBlocking}`);
+            console.log(`Ruff: PR=${ruffChanged}, Repo=${ruffFull}, blocking=${ruffBlocking}`);
 
             // Load extracted issues
-            let extractedIssues = { errors: [], warnings: [], total_errors: 0, total_warnings: 0 };
+            let extractedIssues = {
+              errors: [], warnings: [],
+              total_errors: 0, total_warnings: 0,
+              pylint_errors: [], pylint_errors_count: 0,
+              ruff_errors: [], ruff_errors_count: 0
+            };
             try {
               const issuesJson = fs.readFileSync('reports/extracted_issues.json', 'utf8');
               extractedIssues = JSON.parse(issuesJson);
+              console.log(`Loaded issues: pylint=${extractedIssues.pylint_errors?.length || 0}, ruff=${extractedIssues.ruff_errors?.length || 0}`);
             } catch (e) {
               console.log('Could not load extracted issues:', e.message);
             }
 
-            // Use totals from extracted JSON if available
             const totalErrors = extractedIssues.total_errors || errorsCount;
             const totalWarnings = extractedIssues.total_warnings || warningsCount;
 
@@ -829,28 +799,14 @@ jobs:
             const hasBlockingErrors = exitCode !== 0;
             const hasRuffIssues = ruffChanged > 0;
             const hasPylintIssues = pylintChanged > 0;
-            // Tools only contribute to warnings if their blocking flag is enabled
             const hasWarnings = warningsCount > 0 ||
                                (pylintBlocking && hasPylintIssues) ||
                                (ruffBlocking && hasRuffIssues);
 
             const hasFailed = hasBlockingErrors || (failOnWarnings && hasWarnings);
-
             const overallStatus = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
 
-            // Determine failure reason
-            let failureReason = '';
-            if (hasBlockingErrors) {
-              failureReason = 'blocking errors from solt-check-odoo';
-            } else if (failOnWarnings && pylintBlocking && hasPylintIssues) {
-              failureReason = `Pylint-Odoo issues (${pylintChanged}) with pylint-blocking enabled`;
-            } else if (failOnWarnings && ruffBlocking && hasRuffIssues) {
-              failureReason = `Ruff issues (${ruffChanged}) with ruff-blocking enabled`;
-            } else if (failOnWarnings && warningsCount > 0) {
-              failureReason = `warnings (${warningsCount}) with fail-on-warnings enabled`;
-            }
-
-            // Build the comment body
+            // Build comment
             const bodyParts = [];
 
             // Header
@@ -863,58 +819,89 @@ jobs:
             }
             bodyParts.push('');
 
-            // Show first 10 blocking errors directly, link to workflow for all
-            const hasExtractedErrors = extractedIssues.errors && extractedIssues.errors.length > 0;
-            const hasExtractedWarnings = extractedIssues.warnings && extractedIssues.warnings.length > 0;
             const MAX_DISPLAY = 10;
 
+            // Show blocking errors section
             if (hasFailed) {
+              // Solt-check-odoo errors
+              const hasExtractedErrors = extractedIssues.errors && extractedIssues.errors.length > 0;
               if (hasExtractedErrors) {
-                bodyParts.push(`### :no_entry: Blocking Errors (${totalErrors})`);
+                bodyParts.push(`### :no_entry: Solt Validation Errors (${totalErrors})`);
                 bodyParts.push('');
                 bodyParts.push('| File | Line | Error |');
                 bodyParts.push('|------|------|-------|');
-
-                // Show only first 10 errors
                 for (const err of extractedIssues.errors.slice(0, MAX_DISPLAY)) {
                   const file = err.file ? `\`${err.file}\`` : '-';
-                  const line = err.line || '-';
-                  const msg = err.message || 'Unknown error';
-                  bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+                  bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
                 }
-
                 bodyParts.push('');
                 if (totalErrors > MAX_DISPLAY) {
-                  bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${totalErrors} errors. **[View all errors in workflow logs](${workflowUrl})**`);
+                  bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${totalErrors} errors. **[View all in workflow logs](${workflowUrl})**`);
                   bodyParts.push('');
                 }
               }
 
-              // Show warnings as blocking when fail-on-warnings is enabled
+              // Pylint-Odoo errors (when blocking)
+              const pylintErrors = extractedIssues.pylint_errors || [];
+              if (pylintBlocking && pylintChanged > 0) {
+                bodyParts.push(`### :no_entry: Pylint-Odoo Issues (${pylintChanged})`);
+                bodyParts.push('');
+                if (pylintErrors.length > 0) {
+                  bodyParts.push('| File | Line | Issue |');
+                  bodyParts.push('|------|------|-------|');
+                  for (const err of pylintErrors.slice(0, MAX_DISPLAY)) {
+                    const file = err.file ? `\`${err.file}\`` : '-';
+                    bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
+                  }
+                  bodyParts.push('');
+                  if (pylintChanged > MAX_DISPLAY) {
+                    bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${pylintChanged} issues. **[View all in workflow logs](${workflowUrl})**`);
+                    bodyParts.push('');
+                  }
+                } else {
+                  bodyParts.push(`> :warning: ${pylintChanged} issues found but details not available. **[View in workflow logs](${workflowUrl})**`);
+                  bodyParts.push('');
+                }
+              }
+
+              // Ruff errors (when blocking)
+              const ruffErrors = extractedIssues.ruff_errors || [];
+              if (ruffBlocking && ruffChanged > 0) {
+                bodyParts.push(`### :no_entry: Ruff Issues (${ruffChanged})`);
+                bodyParts.push('');
+                if (ruffErrors.length > 0) {
+                  bodyParts.push('| File | Line | Issue |');
+                  bodyParts.push('|------|------|-------|');
+                  for (const err of ruffErrors.slice(0, MAX_DISPLAY)) {
+                    const file = err.file ? `\`${err.file}\`` : '-';
+                    bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
+                  }
+                  bodyParts.push('');
+                  if (ruffChanged > MAX_DISPLAY) {
+                    bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${ruffChanged} issues. **[View all in workflow logs](${workflowUrl})**`);
+                    bodyParts.push('');
+                  }
+                } else {
+                  bodyParts.push(`> :warning: ${ruffChanged} issues found but details not available. **[View in workflow logs](${workflowUrl})**`);
+                  bodyParts.push('');
+                }
+              }
+
+              // Warnings (when fail-on-warnings)
+              const hasExtractedWarnings = extractedIssues.warnings && extractedIssues.warnings.length > 0;
               if (failOnWarnings && hasExtractedWarnings) {
                 bodyParts.push(`### :warning: Blocking Warnings (${totalWarnings})`);
                 bodyParts.push('');
-                bodyParts.push('> **Note:** `fail-on-warnings` is enabled. Warnings are treated as blocking issues.');
+                bodyParts.push('> **Note:** `fail-on-warnings` is enabled.');
                 bodyParts.push('');
                 bodyParts.push('| File | Line | Warning |');
                 bodyParts.push('|------|------|---------|');
-
-                // Show only first 10 warnings
                 for (const warn of extractedIssues.warnings.slice(0, MAX_DISPLAY)) {
                   const file = warn.file ? `\`${warn.file}\`` : '-';
-                  const line = warn.line || '-';
-                  const msg = warn.message || 'Unknown warning';
-                  bodyParts.push(`| ${file} | ${line} | ${msg} |`);
+                  bodyParts.push(`| ${file} | ${warn.line || '-'} | ${warn.message || 'Unknown'} |`);
                 }
-
                 bodyParts.push('');
-                if (totalWarnings > MAX_DISPLAY) {
-                  bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${totalWarnings} warnings. **[View all warnings in workflow logs](${workflowUrl})**`);
-                  bodyParts.push('');
-                }
               }
-
-              // Note: Detailed Ruff/Pylint tables are shown in the Code Quality section below
             }
 
             // Summary section
@@ -948,7 +935,7 @@ jobs:
             bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
             bodyParts.push('');
 
-            // Code Quality - show blocking mode for each tool
+            // Code Quality summary
             const ruffMode = ruffBlocking ? 'blocking' : 'info';
             const pylintMode = pylintBlocking ? 'blocking' : 'info';
             bodyParts.push('### :mag: Code Quality');
@@ -959,42 +946,37 @@ jobs:
             bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintFull} | ${pylintMode} | ${icon(pylintChanged, 0, true)} |`);
             bodyParts.push('');
 
-            // Show detailed Ruff issues if any (always show, not just when failed)
-            const ruffErrorsDetail = extractedIssues.ruff_errors || [];
-            if (ruffChanged > 0 && ruffErrorsDetail.length > 0) {
-              bodyParts.push(`**Ruff** (${ruffChanged} issues in PR)`);
-              bodyParts.push('');
-              bodyParts.push('| File | Line | Error |');
-              bodyParts.push('|------|------|-------|');
-              for (const err of ruffErrorsDetail.slice(0, MAX_DISPLAY)) {
-                const file = err.file ? `\`${err.file}\`` : '-';
-                const line = err.line || '-';
-                const msg = err.message || 'Unknown error';
-                bodyParts.push(`| ${file} | ${line} | ${msg} |`);
-              }
-              bodyParts.push('');
-              if (ruffChanged > MAX_DISPLAY) {
-                bodyParts.push(`> Showing ${MAX_DISPLAY} of ${ruffChanged} Ruff issues. **[View all in workflow logs](${workflowUrl})**`);
+            // Show non-blocking tool details (info mode)
+            if (!hasFailed) {
+              // Show Pylint details even when passing (if there are issues)
+              const pylintErrors = extractedIssues.pylint_errors || [];
+              if (pylintChanged > 0 && pylintErrors.length > 0 && !pylintBlocking) {
+                bodyParts.push(`<details><summary>Pylint-Odoo details (${pylintChanged} issues - info only)</summary>`);
+                bodyParts.push('');
+                bodyParts.push('| File | Line | Issue |');
+                bodyParts.push('|------|------|-------|');
+                for (const err of pylintErrors.slice(0, MAX_DISPLAY)) {
+                  const file = err.file ? `\`${err.file}\`` : '-';
+                  bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
+                }
+                bodyParts.push('');
+                bodyParts.push('</details>');
                 bodyParts.push('');
               }
-            }
 
-            // Show detailed Pylint-Odoo issues if any (always show, not just when failed)
-            const pylintErrorsDetail = extractedIssues.pylint_errors || [];
-            if (pylintChanged > 0 && pylintErrorsDetail.length > 0) {
-              bodyParts.push(`**Pylint-Odoo** (${pylintChanged} issues in PR)`);
-              bodyParts.push('');
-              bodyParts.push('| File | Line | Error |');
-              bodyParts.push('|------|------|-------|');
-              for (const err of pylintErrorsDetail.slice(0, MAX_DISPLAY)) {
-                const file = err.file ? `\`${err.file}\`` : '-';
-                const line = err.line || '-';
-                const msg = err.message || 'Unknown error';
-                bodyParts.push(`| ${file} | ${line} | ${msg} |`);
-              }
-              bodyParts.push('');
-              if (pylintChanged > MAX_DISPLAY) {
-                bodyParts.push(`> Showing ${MAX_DISPLAY} of ${pylintChanged} Pylint issues. **[View all in workflow logs](${workflowUrl})**`);
+              // Show Ruff details even when passing
+              const ruffErrors = extractedIssues.ruff_errors || [];
+              if (ruffChanged > 0 && ruffErrors.length > 0 && !ruffBlocking) {
+                bodyParts.push(`<details><summary>Ruff details (${ruffChanged} issues - info only)</summary>`);
+                bodyParts.push('');
+                bodyParts.push('| File | Line | Issue |');
+                bodyParts.push('|------|------|-------|');
+                for (const err of ruffErrors.slice(0, MAX_DISPLAY)) {
+                  const file = err.file ? `\`${err.file}\`` : '-';
+                  bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
+                }
+                bodyParts.push('');
+                bodyParts.push('</details>');
                 bodyParts.push('');
               }
             }
@@ -1002,19 +984,16 @@ jobs:
             // Footer
             bodyParts.push('---');
             if (hasFailed) {
-              if (failureReason) {
-                bodyParts.push(`:no_entry: **Validation failed due to:** ${failureReason}`);
-                bodyParts.push('');
-              }
-              bodyParts.push(':bulb: **Tip:** Fix the issues above and push again.');
+              bodyParts.push(':bulb: **Tip:** Fix the blocking issues above and push again.');
               bodyParts.push('');
             }
+            bodyParts.push(`:link: **[View full workflow logs](${workflowUrl})**`);
+            bodyParts.push('');
             bodyParts.push(':robot: *solt-pre-commit*');
 
             const body = bodyParts.join('\n');
 
-            console.log(`Posting comment to PR #${prNumber}`);
-
+            // Post or update comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -1023,7 +1002,7 @@ jobs:
 
             const botComment = comments.find(c =>
               c.user.type === 'Bot' &&
-              (c.body.includes('Validation Failed') || c.body.includes('Validation Passed') || c.body.includes('Validation Report'))
+              (c.body.includes('Validation Report') || c.body.includes('Validation Failed') || c.body.includes('Validation Passed'))
             );
 
             if (botComment) {
@@ -1044,9 +1023,7 @@ jobs:
               console.log('Created new comment');
             }
 
-      # This step determines the final job status
-      # It runs AFTER all other steps and will FAIL the job if there are blocking issues
-      # Note: For push events, validation may fail but update-badges will still run (uses always())
+      # Final validation check - determines job pass/fail
       - name: Final validation check
         id: final-check
         if: always()
@@ -1062,44 +1039,32 @@ jobs:
           WARNINGS="${{ steps.summary.outputs.warnings }}"
           WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' || echo 0)
 
-          # Ruff issues in CHANGED files only
           RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
           RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           if [ -z "$RUFF_CHANGED" ]; then RUFF_CHANGED=0; fi
 
-          # Pylint-Odoo issues in CHANGED files only
           PYLINT_CHANGED="${{ steps.pylint.outputs.changed }}"
           PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | grep -oE '^[0-9]+' || echo 0)
           if [ -z "$PYLINT_CHANGED" ]; then PYLINT_CHANGED=0; fi
 
-          RUFF_MODE="info"
-          if [ "$RUFF_BLOCKING" = "true" ]; then
-            RUFF_MODE="blocking"
-          fi
+          echo "::notice::Final check - Exit=$EXIT_CODE, Warnings=$WARNINGS, Pylint=$PYLINT_CHANGED (blocking=$PYLINT_BLOCKING), Ruff=$RUFF_CHANGED (blocking=$RUFF_BLOCKING)"
 
-          PYLINT_MODE="info"
-          if [ "$PYLINT_BLOCKING" = "true" ]; then
-            PYLINT_MODE="blocking"
-          fi
-
-          echo "::notice::Final check - Event: $EVENT_NAME, Exit code: $EXIT_CODE, Warnings: $WARNINGS, Pylint (changed): $PYLINT_CHANGED ($PYLINT_MODE), Ruff (changed): $RUFF_CHANGED ($RUFF_MODE), Fail on warnings: $FAIL_ON_WARNINGS"
-
-          # Determine final result (same logic for PR and push)
+          # Determine final result
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED with blocking issues (exit code: $EXIT_CODE)"
+            echo "::error::Validation FAILED - solt-check-odoo blocking errors"
             exit 1
           elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$WARNINGS" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED due to warnings (fail-on-warnings enabled)"
+            echo "::error::Validation FAILED - warnings with fail-on-warnings enabled"
             exit 1
           elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$PYLINT_BLOCKING" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED due to Pylint-Odoo issues in changed files ($PYLINT_CHANGED issues, pylint-blocking enabled)"
+            echo "::error::Validation FAILED - $PYLINT_CHANGED Pylint-Odoo issues (pylint-blocking enabled)"
             exit 1
           elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$RUFF_BLOCKING" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED due to Ruff issues in changed files ($RUFF_CHANGED issues, ruff-blocking enabled)"
+            echo "::error::Validation FAILED - $RUFF_CHANGED Ruff issues (ruff-blocking enabled)"
             exit 1
           else
             echo "result=success" >> $GITHUB_OUTPUT
