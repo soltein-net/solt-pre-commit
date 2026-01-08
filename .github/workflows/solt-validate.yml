@@ -840,89 +840,6 @@ jobs:
 
             const MAX_DISPLAY = 10;
 
-            // Show blocking errors section
-            if (hasFailed) {
-              // Solt-check-odoo errors
-              const hasExtractedErrors = extractedIssues.errors && extractedIssues.errors.length > 0;
-              if (hasExtractedErrors) {
-                bodyParts.push(`### :no_entry: Solt Validation Errors (${totalErrors})`);
-                bodyParts.push('');
-                bodyParts.push('| File | Line | Error |');
-                bodyParts.push('|------|------|-------|');
-                for (const err of extractedIssues.errors.slice(0, MAX_DISPLAY)) {
-                  const file = err.file ? `\`${err.file}\`` : '-';
-                  bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                }
-                bodyParts.push('');
-                if (totalErrors > MAX_DISPLAY) {
-                  bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${totalErrors} errors. **[View all in workflow logs](${workflowUrl})**`);
-                  bodyParts.push('');
-                }
-              }
-
-              // Pylint-Odoo errors (when blocking)
-              const pylintErrors = extractedIssues.pylint_errors || [];
-              if (pylintBlocking && pylintChanged > 0) {
-                bodyParts.push(`### :no_entry: Pylint-Odoo Issues (${pylintChanged})`);
-                bodyParts.push('');
-                if (pylintErrors.length > 0) {
-                  bodyParts.push('| File | Line | Issue |');
-                  bodyParts.push('|------|------|-------|');
-                  for (const err of pylintErrors.slice(0, MAX_DISPLAY)) {
-                    const file = err.file ? `\`${err.file}\`` : '-';
-                    bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                  }
-                  bodyParts.push('');
-                  if (pylintChanged > MAX_DISPLAY) {
-                    bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${pylintChanged} issues. **[View all in workflow logs](${workflowUrl})**`);
-                    bodyParts.push('');
-                  }
-                } else {
-                  bodyParts.push(`> :warning: ${pylintChanged} issues found but details not available. **[View in workflow logs](${workflowUrl})**`);
-                  bodyParts.push('');
-                }
-              }
-
-              // Ruff errors (when blocking)
-              const ruffErrors = extractedIssues.ruff_errors || [];
-              if (ruffBlocking && ruffChanged > 0) {
-                bodyParts.push(`### :no_entry: Ruff Issues (${ruffChanged})`);
-                bodyParts.push('');
-                if (ruffErrors.length > 0) {
-                  bodyParts.push('| File | Line | Issue |');
-                  bodyParts.push('|------|------|-------|');
-                  for (const err of ruffErrors.slice(0, MAX_DISPLAY)) {
-                    const file = err.file ? `\`${err.file}\`` : '-';
-                    bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                  }
-                  bodyParts.push('');
-                  if (ruffChanged > MAX_DISPLAY) {
-                    bodyParts.push(`> :mag: Showing ${MAX_DISPLAY} of ${ruffChanged} issues. **[View all in workflow logs](${workflowUrl})**`);
-                    bodyParts.push('');
-                  }
-                } else {
-                  bodyParts.push(`> :warning: ${ruffChanged} issues found but details not available. **[View in workflow logs](${workflowUrl})**`);
-                  bodyParts.push('');
-                }
-              }
-
-              // Warnings (when fail-on-warnings)
-              const hasExtractedWarnings = extractedIssues.warnings && extractedIssues.warnings.length > 0;
-              if (failOnWarnings && hasExtractedWarnings) {
-                bodyParts.push(`### :warning: Blocking Warnings (${totalWarnings})`);
-                bodyParts.push('');
-                bodyParts.push('> **Note:** `fail-on-warnings` is enabled.');
-                bodyParts.push('');
-                bodyParts.push('| File | Line | Warning |');
-                bodyParts.push('|------|------|---------|');
-                for (const warn of extractedIssues.warnings.slice(0, MAX_DISPLAY)) {
-                  const file = warn.file ? `\`${warn.file}\`` : '-';
-                  bodyParts.push(`| ${file} | ${warn.line || '-'} | ${warn.message || 'Unknown'} |`);
-                }
-                bodyParts.push('');
-              }
-            }
-
             // Summary section
             bodyParts.push('### :clipboard: Summary');
             bodyParts.push('');
@@ -954,7 +871,7 @@ jobs:
             bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
             bodyParts.push('');
 
-            // Code Quality summary
+            // Code Quality summary table
             const ruffMode = ruffBlocking ? 'blocking' : 'info';
             const pylintMode = pylintBlocking ? 'blocking' : 'info';
             bodyParts.push('### :mag: Code Quality');
@@ -965,13 +882,66 @@ jobs:
             bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintFull} | ${pylintMode} | ${icon(pylintChanged, 0, true)} |`);
             bodyParts.push('');
 
-            // Show non-blocking tool details (info mode)
-            if (!hasFailed) {
-              // Show Pylint details even when passing (if there are issues)
-              const pylintErrors = extractedIssues.pylint_errors || [];
-              if (pylintChanged > 0 && pylintErrors.length > 0 && !pylintBlocking) {
-                bodyParts.push(`<details><summary>Pylint-Odoo details (${pylintChanged} issues - info only)</summary>`);
-                bodyParts.push('');
+            // =================================================================
+            // DETAILED ISSUES TABLES
+            // =================================================================
+
+            // Get all issue arrays
+            const soltErrors = extractedIssues.errors || [];
+            const soltWarnings = extractedIssues.warnings || [];
+            const pylintErrors = extractedIssues.pylint_errors || [];
+            const ruffErrors = extractedIssues.ruff_errors || [];
+
+            // Helper to show pagination info
+            const showPagination = (displayed, total, type) => {
+              if (total > 0) {
+                return `> Showing ${Math.min(displayed, total)} of ${total} ${type}. **[View all in workflow logs](${workflowUrl})**`;
+              }
+              return '';
+            };
+
+            // Solt Validation Errors (blocking)
+            if (totalErrors > 0 && soltErrors.length > 0) {
+              bodyParts.push(`### :no_entry: Blocking Errors (${totalErrors})`);
+              bodyParts.push('');
+              bodyParts.push('| File | Line | Error |');
+              bodyParts.push('|------|------|-------|');
+              for (const err of soltErrors.slice(0, MAX_DISPLAY)) {
+                const file = err.file ? `\`${err.file}\`` : '-';
+                bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
+              }
+              bodyParts.push('');
+              bodyParts.push(showPagination(soltErrors.length, totalErrors, 'errors'));
+              bodyParts.push('');
+            }
+
+            // Blocking Warnings (when fail-on-warnings is enabled)
+            if (failOnWarnings && totalWarnings > 0 && soltWarnings.length > 0) {
+              bodyParts.push(`### :warning: Blocking Warnings (${totalWarnings})`);
+              bodyParts.push('');
+              bodyParts.push('> **Note:** `fail-on-warnings` is enabled.');
+              bodyParts.push('');
+              bodyParts.push('| File | Line | Warning |');
+              bodyParts.push('|------|------|---------|');
+              for (const warn of soltWarnings.slice(0, MAX_DISPLAY)) {
+                const file = warn.file ? `\`${warn.file}\`` : '-';
+                bodyParts.push(`| ${file} | ${warn.line || '-'} | ${warn.message || 'Unknown'} |`);
+              }
+              bodyParts.push('');
+              bodyParts.push(showPagination(soltWarnings.length, totalWarnings, 'warnings'));
+              bodyParts.push('');
+            }
+
+            // Pylint-Odoo Issues
+            if (pylintChanged > 0) {
+              const isBlocking = pylintBlocking && failOnWarnings;
+              const headerIcon = isBlocking ? ':no_entry:' : ':information_source:';
+              const modeLabel = isBlocking ? 'blocking' : 'info';
+
+              bodyParts.push(`### ${headerIcon} Pylint-Odoo Issues (${modeLabel})`);
+              bodyParts.push('');
+
+              if (pylintErrors.length > 0) {
                 bodyParts.push('| File | Line | Issue |');
                 bodyParts.push('|------|------|-------|');
                 for (const err of pylintErrors.slice(0, MAX_DISPLAY)) {
@@ -979,15 +949,24 @@ jobs:
                   bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
                 }
                 bodyParts.push('');
-                bodyParts.push('</details>');
+                bodyParts.push(showPagination(pylintErrors.length, pylintChanged, 'issues'));
+                bodyParts.push('');
+              } else {
+                bodyParts.push(`> ${pylintChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
                 bodyParts.push('');
               }
+            }
 
-              // Show Ruff details even when passing
-              const ruffErrors = extractedIssues.ruff_errors || [];
-              if (ruffChanged > 0 && ruffErrors.length > 0 && !ruffBlocking) {
-                bodyParts.push(`<details><summary>Ruff details (${ruffChanged} issues - info only)</summary>`);
-                bodyParts.push('');
+            // Ruff Issues
+            if (ruffChanged > 0) {
+              const isBlocking = ruffBlocking && failOnWarnings;
+              const headerIcon = isBlocking ? ':no_entry:' : ':information_source:';
+              const modeLabel = isBlocking ? 'blocking' : 'info';
+
+              bodyParts.push(`### ${headerIcon} Ruff Issues (${modeLabel})`);
+              bodyParts.push('');
+
+              if (ruffErrors.length > 0) {
                 bodyParts.push('| File | Line | Issue |');
                 bodyParts.push('|------|------|-------|');
                 for (const err of ruffErrors.slice(0, MAX_DISPLAY)) {
@@ -995,7 +974,10 @@ jobs:
                   bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
                 }
                 bodyParts.push('');
-                bodyParts.push('</details>');
+                bodyParts.push(showPagination(ruffErrors.length, ruffChanged, 'issues'));
+                bodyParts.push('');
+              } else {
+                bodyParts.push(`> ${ruffChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
                 bodyParts.push('');
               }
             }
