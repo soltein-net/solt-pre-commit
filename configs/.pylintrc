@@ -92,8 +92,8 @@ enable=
     external-request-timeout,
     no-raise-unlink,
     no-write-in-compute,
+    context-overridden,
     # invalid-commit,
-    # context-overridden,
 
     # -------------------------------------------------------------------------
     # TRANSLATION CHECKS (optional - uncomment if needed)
