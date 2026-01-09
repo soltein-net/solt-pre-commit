@@ -883,7 +883,7 @@ jobs:
             bodyParts.push('');
 
             // =================================================================
-            // DETAILED ISSUES TABLES
+            // DETAILED ISSUES TABLES (after Code Quality)
             // =================================================================
 
             // Get all issue arrays
@@ -893,9 +893,10 @@ jobs:
             const ruffErrors = extractedIssues.ruff_errors || [];
 
             // Helper to show pagination info
-            const showPagination = (displayed, total, type) => {
+            const showPagination = (total, type) => {
               if (total > 0) {
-                return `> Showing ${Math.min(displayed, total)} of ${total} ${type}. **[View all in workflow logs](${workflowUrl})**`;
+                const displayed = Math.min(MAX_DISPLAY, total);
+                return `> Showing ${displayed} of ${total} ${type}. **[View all in workflow logs](${workflowUrl})**`;
               }
               return '';
             };
@@ -911,7 +912,7 @@ jobs:
                 bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
               }
               bodyParts.push('');
-              bodyParts.push(showPagination(soltErrors.length, totalErrors, 'errors'));
+              bodyParts.push(showPagination(totalErrors, 'errors'));
               bodyParts.push('');
             }
 
@@ -928,7 +929,7 @@ jobs:
                 bodyParts.push(`| ${file} | ${warn.line || '-'} | ${warn.message || 'Unknown'} |`);
               }
               bodyParts.push('');
-              bodyParts.push(showPagination(soltWarnings.length, totalWarnings, 'warnings'));
+              bodyParts.push(showPagination(totalWarnings, 'warnings'));
               bodyParts.push('');
             }
 
@@ -949,7 +950,7 @@ jobs:
                   bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
                 }
                 bodyParts.push('');
-                bodyParts.push(showPagination(pylintErrors.length, pylintChanged, 'issues'));
+                bodyParts.push(showPagination(pylintChanged, 'issues'));
                 bodyParts.push('');
               } else {
                 bodyParts.push(`> ${pylintChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
@@ -974,7 +975,7 @@ jobs:
                   bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
                 }
                 bodyParts.push('');
-                bodyParts.push(showPagination(ruffErrors.length, ruffChanged, 'issues'));
+                bodyParts.push(showPagination(ruffChanged, 'issues'));
                 bodyParts.push('');
               } else {
                 bodyParts.push(`> ${ruffChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
