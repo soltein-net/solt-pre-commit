@@ -4,6 +4,8 @@
 
 """Main orchestrator for Odoo module validations with severity support."""
 
+from __future__ import annotations
+
 import argparse
 import ast
 import glob
