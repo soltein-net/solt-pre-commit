@@ -31,11 +31,9 @@
     - "full": Validate entire repository
   entry: solt-check-odoo
   language: python
-  files: \.py$
+  files: (__manifest__|__openerp__)\.py$
   pass_filenames: true
   types: [ python ]
-  args: [ --scope, changed ]
-  verbose: true
 
 # -----------------------------------------------------------------------------
 # XML ONLY - Basic and advanced XML validations
