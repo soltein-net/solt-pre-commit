@@ -33,6 +33,101 @@ DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "upda
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
 
 
+def find_odoo_module_path(file_path: str, max_depth: int = 10) -> str | None:
+    """Find the Odoo module root directory from any file path.
+
+    Walks up the directory tree looking for __manifest__.py or __openerp__.py.
+
+    Args:
+        file_path: Path to a file or directory
+        max_depth: Maximum number of parent directories to search
+
+    Returns:
+        Path to the module root directory, or None if not found
+
+    Examples:
+        >>> find_odoo_module_path("/repo/solt_queue_job/models/sale.py")
+        "/repo/solt_queue_job"
+        >>> find_odoo_module_path("/repo/solt_queue_job/__manifest__.py")
+        "/repo/solt_queue_job"
+        >>> find_odoo_module_path("/repo/solt_queue_job")
+        "/repo/solt_queue_job"
+    """
+    path = os.path.realpath(file_path)
+
+    # If it's a file, start from its parent directory
+    if os.path.isfile(path):
+        path = os.path.dirname(path)
+
+    # Walk up the tree looking for manifest
+    for _ in range(max_depth):
+        for manifest_name in MANIFEST_NAMES:
+            manifest_path = os.path.join(path, manifest_name)
+            if os.path.isfile(manifest_path):
+                return path
+
+        # Move to parent directory
+        parent = os.path.dirname(path)
+        if parent == path:  # Reached root
+            break
+        path = parent
+
+    return None
+
+
+def resolve_paths_to_modules(paths: list[str]) -> list[str]:
+    """Convert a list of file/directory paths to unique module paths.
+
+    Takes any mix of:
+    - Module directories (containing __manifest__.py)
+    - Individual files within modules
+    - Directories containing multiple modules
+
+    Returns a deduplicated list of module root directories.
+
+    Args:
+        paths: List of file or directory paths
+
+    Returns:
+        List of unique module root directories
+    """
+    module_paths = set()
+
+    for path in paths:
+        real_path = os.path.realpath(path)
+
+        # Case 1: Path is a file - find its parent module
+        if os.path.isfile(real_path):
+            module_path = find_odoo_module_path(real_path)
+            if module_path:
+                module_paths.add(module_path)
+            continue
+
+        # Case 2: Path is a directory
+        if os.path.isdir(real_path):
+            # Check if this directory IS a module
+            is_module = any(
+                os.path.isfile(os.path.join(real_path, m))
+                for m in MANIFEST_NAMES
+            )
+
+            if is_module:
+                module_paths.add(real_path)
+            else:
+                # Check if this directory CONTAINS modules (one level deep)
+                for entry in os.listdir(real_path):
+                    entry_path = os.path.join(real_path, entry)
+                    if os.path.isdir(entry_path):
+                        is_submodule = any(
+                            os.path.isfile(os.path.join(entry_path, m))
+                            for m in MANIFEST_NAMES
+                        )
+                        if is_submodule:
+                            module_paths.add(entry_path)
+
+    return sorted(module_paths)
+
+
 class CheckResult:
     """Container for check results with severity."""
 
@@ -769,7 +864,7 @@ def run(
 def main():
     """Console entry point."""
     parser = argparse.ArgumentParser(description="Solt Pre-commit: Odoo module validation hooks")
-    parser.add_argument("paths", nargs="*", help="Paths to Odoo modules to validate")
+    parser.add_argument("paths", nargs="*", help="Paths to Odoo modules or files to validate")
     parser.add_argument("--check-xml-only", action="store_true", help="Run only XML checks")
     parser.add_argument("--check-csv-only", action="store_true", help="Run only CSV checks")
     parser.add_argument("--check-po-only", action="store_true", help="Run only PO/POT checks")
@@ -806,10 +901,19 @@ def main():
     elif args.check_python_only:
         check_mode = "python"
 
-    paths = args.paths or ["."]
+    # Resolve input paths to module directories
+    # This handles both direct module paths AND individual files within modules
+    input_paths = args.paths or ["."]
+    module_paths = resolve_paths_to_modules(input_paths)
+
+    if not module_paths:
+        if not args.quiet:
+            print("No Odoo modules found in the specified paths.")
+            print("Paths searched:", input_paths)
+        sys.exit(0)
 
     return run(
-        manifest_paths=paths,
+        manifest_paths=module_paths,
         verbose=not args.quiet,
         check_mode=check_mode,
         config_path=args.config,
