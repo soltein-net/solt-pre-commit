@@ -7,7 +7,7 @@
 # BRANCH NAME - Branch naming policy validation
 # -----------------------------------------------------------------------------
 - id: solt-check-branch
-  name: Solt - Validate Branch Name
+  name: Soltein - Validate Branch Name
   description: |
     Validate branch naming convention.
     Configure in .solt-hooks.yaml:
@@ -23,7 +23,7 @@
 # FULL VALIDATION - All checks (XML, CSV, PO, Python, Manifest)
 # -----------------------------------------------------------------------------
 - id: solt-check-odoo
-  name: Solt - Validate Odoo Module (Full)
+  name: Soltein - Validate Odoo Module
   description: |
     Run all validations on Odoo modules.
     Respects validation_scope in .solt-hooks.yaml:
@@ -31,15 +31,16 @@
     - "full": Validate entire repository
   entry: solt-check-odoo
   language: python
-  files: (__manifest__|__openerp__)\.py$
-  pass_filenames: true
-  types: [ python ]
+  always_run: true
+  pass_filenames: false
+  args: [ --scope, changed ]
+  verbose: true
 
 # -----------------------------------------------------------------------------
 # XML ONLY - Basic and advanced XML validations
 # -----------------------------------------------------------------------------
 - id: solt-check-xml
-  name: Solt - Validate Odoo XML
+  name: Soltein - Validate Odoo XML
   description: Validate XML files (syntax, duplicates, deprecations, etc.)
   entry: solt-check-odoo
   language: python
@@ -51,7 +52,7 @@
 # CSV ONLY - CSV data file validations
 # -----------------------------------------------------------------------------
 - id: solt-check-csv
-  name: Solt - Validate Odoo CSV
+  name: Soltein - Validate Odoo CSV
   description: Validate CSV files (syntax, duplicate IDs)
   entry: solt-check-odoo
   language: python
@@ -63,7 +64,7 @@
 # PO/POT ONLY - Translation file validations
 # -----------------------------------------------------------------------------
 - id: solt-check-po
-  name: Solt - Validate Odoo PO/POT
+  name: Soltein - Validate Odoo PO/POT
   description: Validate translation files (syntax, duplicates, variables)
   entry: solt-check-odoo
   language: python
@@ -75,7 +76,7 @@
 # PYTHON ONLY - Python code validations
 # -----------------------------------------------------------------------------
 - id: solt-check-python
-  name: Solt - Validate Odoo Python
+  name: Soltein - Validate Odoo Python
   description: |
     Validate Python files:
     - Fields: string, help attributes
