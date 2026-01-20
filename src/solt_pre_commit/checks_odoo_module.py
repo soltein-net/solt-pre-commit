@@ -38,6 +38,7 @@ MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
 # HELPER FUNCTIONS - Detect modules from files (for pre-commit compatibility)
 # =============================================================================
 
+
 def _find_module_from_file(filepath):
     """Find the Odoo module directory from a file path.
 
@@ -123,7 +124,7 @@ def _is_file_list(paths):
         return False
 
     # File extensions that pre-commit might pass
-    file_extensions = {'.py', '.xml', '.csv', '.po', '.pot', '.yml', '.yaml', '.json', '.md', '.rst', '.txt'}
+    file_extensions = {".py", ".xml", ".csv", ".po", ".pot", ".yml", ".yaml", ".json", ".md", ".rst", ".txt"}
 
     for path in paths:
         # If it has a known file extension
