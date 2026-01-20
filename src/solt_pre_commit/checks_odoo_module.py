@@ -108,10 +108,7 @@ def resolve_paths_to_modules(paths: list[str]) -> list[str]:
         # Case 2: Path is a directory
         if os.path.isdir(real_path):
             # Check if this directory IS a module
-            is_module = any(
-                os.path.isfile(os.path.join(real_path, m))
-                for m in MANIFEST_NAMES
-            )
+            is_module = any(os.path.isfile(os.path.join(real_path, m)) for m in MANIFEST_NAMES)
 
             if is_module:
                 module_paths.add(real_path)
@@ -120,10 +117,7 @@ def resolve_paths_to_modules(paths: list[str]) -> list[str]:
                 for entry in os.listdir(real_path):
                     entry_path = os.path.join(real_path, entry)
                     if os.path.isdir(entry_path):
-                        is_submodule = any(
-                            os.path.isfile(os.path.join(entry_path, m))
-                            for m in MANIFEST_NAMES
-                        )
+                        is_submodule = any(os.path.isfile(os.path.join(entry_path, m)) for m in MANIFEST_NAMES)
                         if is_submodule:
                             module_paths.add(entry_path)
 
