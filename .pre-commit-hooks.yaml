@@ -22,18 +22,25 @@
 # -----------------------------------------------------------------------------
 # FULL VALIDATION - All checks (XML, CSV, PO, Python, Manifest)
 # -----------------------------------------------------------------------------
+# This hook now automatically detects Odoo modules from individual files
+# passed by pre-commit. No configuration needed.
+# -----------------------------------------------------------------------------
 - id: solt-check-odoo
   name: Soltein - Validate Odoo Module
   description: |
     Run all validations on Odoo modules.
+    Automatically detects modules from staged files.
     Respects validation_scope in .solt-hooks.yaml:
     - "changed": Only validate files changed in PR/commit
     - "full": Validate entire repository
   entry: solt-check-odoo
   language: python
-  files: (__manifest__|__openerp__)\.py$
+  # Match any file that could be part of an Odoo module
+  files: (__manifest__|__openerp__|\.py|\.xml|\.csv|\.po|\.pot)$
+  # Pass filenames so the hook can detect which modules to validate
   pass_filenames: true
-  types: [ python ]
+  # Show output
+  verbose: true
 
 # -----------------------------------------------------------------------------
 # XML ONLY - Basic and advanced XML validations
@@ -44,8 +51,9 @@
   entry: solt-check-odoo
   language: python
   files: \.xml$
-  pass_filenames: false
+  pass_filenames: true
   args: [ --check-xml-only ]
+  verbose: true
 
 # -----------------------------------------------------------------------------
 # CSV ONLY - CSV data file validations
@@ -56,8 +64,9 @@
   entry: solt-check-odoo
   language: python
   files: \.csv$
-  pass_filenames: false
+  pass_filenames: true
   args: [ --check-csv-only ]
+  verbose: true
 
 # -----------------------------------------------------------------------------
 # PO/POT ONLY - Translation file validations
@@ -68,8 +77,9 @@
   entry: solt-check-odoo
   language: python
   files: \.(po|pot)$
-  pass_filenames: false
+  pass_filenames: true
   args: [ --check-po-only ]
+  verbose: true
 
 # -----------------------------------------------------------------------------
 # PYTHON ONLY - Python code validations
@@ -84,5 +94,6 @@
   entry: solt-check-odoo
   language: python
   files: \.py$
-  pass_filenames: false
+  pass_filenames: true
   args: [ --check-python-only ]
+  verbose: true

@@ -11,6 +11,7 @@ import os
 import re
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 from . import (
     checks_odoo_module_csv,
@@ -31,6 +32,115 @@ DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/17.0
 DFTL_README_FILES = ["README.md", "README.txt", "README.rst"]
 DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "update_xml"]
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
+
+
+# =============================================================================
+# HELPER FUNCTIONS - Detect modules from files (for pre-commit compatibility)
+# =============================================================================
+
+def _find_module_from_file(filepath):
+    """Find the Odoo module directory from a file path.
+
+    Walks up the directory tree until it finds __manifest__.py or __openerp__.py.
+
+    Args:
+        filepath: Path to a file (e.g., solt_module/models/my_model.py)
+
+    Returns:
+        Path to the module directory, or None if not found
+    """
+    path = Path(filepath).resolve()
+
+    # If it's a file, start from its parent directory
+    if path.is_file():
+        path = path.parent
+
+    # Walk up to 10 levels (avoid infinite loops)
+    for _ in range(10):
+        for manifest_name in MANIFEST_NAMES:
+            manifest_path = path / manifest_name
+            if manifest_path.exists():
+                return str(path)
+
+        parent = path.parent
+        if parent == path:  # Reached root
+            break
+        path = parent
+
+    return None
+
+
+def _detect_modules_from_paths(paths):
+    """Detect unique Odoo modules from a list of paths.
+
+    If paths are individual files (as when pre-commit passes them),
+    detects the parent modules. If they are already module directories, uses them directly.
+
+    Args:
+        paths: List of paths (can be files or directories)
+
+    Returns:
+        List of unique paths to Odoo modules
+    """
+    modules = set()
+    direct_modules = []
+
+    for path in paths:
+        if not path:
+            continue
+
+        path_obj = Path(path)
+
+        # Check if it's directly a module (has __manifest__.py)
+        if path_obj.is_dir():
+            has_manifest = any((path_obj / m).exists() for m in MANIFEST_NAMES)
+            if has_manifest:
+                direct_modules.append(str(path_obj.resolve()))
+                continue
+
+        # It's a file or directory without manifest - look for parent module
+        module_path = _find_module_from_file(path)
+        if module_path:
+            modules.add(module_path)
+
+    # If there are direct modules, use them
+    if direct_modules:
+        return direct_modules
+
+    return sorted(modules) if modules else ["."]
+
+
+def _is_file_list(paths):
+    """Check if paths are individual files (from pre-commit) or module directories.
+
+    Args:
+        paths: List of paths to check
+
+    Returns:
+        True if paths appear to be individual files, False if they are module directories
+    """
+    if not paths:
+        return False
+
+    # File extensions that pre-commit might pass
+    file_extensions = {'.py', '.xml', '.csv', '.po', '.pot', '.yml', '.yaml', '.json', '.md', '.rst', '.txt'}
+
+    for path in paths:
+        # If it has a known file extension
+        ext = Path(path).suffix.lower()
+        if ext in file_extensions:
+            return True
+
+        # If it exists as a file (not directory)
+        if Path(path).is_file():
+            return True
+
+    return False
+
+
+# =============================================================================
+# END HELPER FUNCTIONS
+# =============================================================================
 
 
 class CheckResult:
@@ -769,7 +879,7 @@ def run(
 def main():
     """Console entry point."""
     parser = argparse.ArgumentParser(description="Solt Pre-commit: Odoo module validation hooks")
-    parser.add_argument("paths", nargs="*", help="Paths to Odoo modules to validate")
+    parser.add_argument("paths", nargs="*", help="Paths to Odoo modules or files to validate")
     parser.add_argument("--check-xml-only", action="store_true", help="Run only XML checks")
     parser.add_argument("--check-csv-only", action="store_true", help="Run only CSV checks")
     parser.add_argument("--check-po-only", action="store_true", help="Run only PO/POT checks")
@@ -807,6 +917,24 @@ def main():
         check_mode = "python"
 
     paths = args.paths or ["."]
+
+    # =========================================================================
+    # DETECT MODULES AUTOMATICALLY IF PRE-COMMIT PASSED INDIVIDUAL FILES
+    # =========================================================================
+    if _is_file_list(paths):
+        detected_modules = _detect_modules_from_paths(paths)
+        if detected_modules and detected_modules != ["."]:
+            if not args.quiet:
+                print(f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {len(paths)} file(s)")
+                for mod in detected_modules:
+                    print(f"  → {Path(mod).name}")
+            paths = detected_modules
+        else:
+            # No modules found, exit silently (not an Odoo repository)
+            if not args.quiet:
+                print("[solt-check-odoo] No Odoo modules detected from provided files")
+            sys.exit(0)
+    # =========================================================================
 
     return run(
         manifest_paths=paths,
