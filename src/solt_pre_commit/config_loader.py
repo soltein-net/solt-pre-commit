@@ -6,6 +6,10 @@
 
 Loads configuration from .solt-hooks.yaml with fallback to defaults.
 Supports validation_scope for changed-only or full repository validation.
+
+Context Detection:
+- LOCAL (pre-commit): Uses staged files (git diff --cached)
+- CI (GitHub Actions): Uses PR diff (base...HEAD)
 """
 
 from __future__ import annotations
@@ -140,17 +144,74 @@ DEFAULT_EXCLUDE_PATHS: list[str] = [
 ]
 
 
+class ExecutionContext:
+    """Determines execution context: local pre-commit or CI."""
+
+    LOCAL = "local"
+    CI = "ci"
+    UNKNOWN = "unknown"
+
+    @staticmethod
+    def detect() -> str:
+        """Detect current execution context.
+
+        Returns:
+            'local' - Running locally (pre-commit hook)
+            'ci' - Running in CI environment
+            'unknown' - Cannot determine
+        """
+        # Check for CI environment variables
+        if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+            return ExecutionContext.CI
+
+        # Check for GitHub PR context
+        if os.environ.get("GITHUB_BASE_REF") or os.environ.get("SOLT_BASE_BRANCH"):
+            return ExecutionContext.CI
+
+        # Check if we have staged files (indicates local pre-commit)
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            if result.stdout.strip():
+                return ExecutionContext.LOCAL
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+        return ExecutionContext.UNKNOWN
+
+    @staticmethod
+    def is_local() -> bool:
+        """Check if running locally (not in CI)."""
+        return ExecutionContext.detect() == ExecutionContext.LOCAL
+
+    @staticmethod
+    def is_ci() -> bool:
+        """Check if running in CI environment."""
+        return ExecutionContext.detect() == ExecutionContext.CI
+
+
 class ChangedFilesDetector:
-    """Detects which files have changed for PR/commit validation."""
+    """Detects which files have changed for PR/commit validation.
+
+    Context-aware detection:
+    - LOCAL: Uses staged files (git diff --cached)
+    - CI: Uses PR diff against base branch (base...HEAD)
+    """
 
     def __init__(self, base_branch: str | None = None):
+        self._context = ExecutionContext.detect()
         self.base_branch = base_branch or self._detect_base_branch()
         self._changed_files: set[str] | None = None
-        self._is_ci = bool(os.environ.get("CI"))
+        self._is_ci = self._context == ExecutionContext.CI
 
     def _log(self, message: str) -> None:
-        """Log debug message in CI environment."""
-        if self._is_ci:
+        """Log debug message."""
+        # Log in CI or when SOLT_DEBUG is set
+        if self._is_ci or os.environ.get("SOLT_DEBUG"):
             print(f"[ChangedFilesDetector] {message}")
 
     def _detect_base_branch(self) -> str:
@@ -220,22 +281,38 @@ class ChangedFilesDetector:
                 self._log(f"Failed to fetch {branch_name}: {e}")
                 return False
 
-    def get_changed_files(self) -> set[str]:
-        """Get set of changed files compared to base branch.
+    def _get_staged_files(self) -> set[str]:
+        """Get staged files for local pre-commit.
 
-        Uses three-dot diff (base...HEAD) for PRs to get only the changes
-        introduced by the PR, not all differences between branches.
+        Returns:
+            Set of absolute file paths that are staged for commit
         """
-        if self._changed_files is not None:
-            return self._changed_files
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            files = result.stdout.strip().split("\n")
+            staged = {os.path.realpath(f) for f in files if f.strip()}
+            self._log(f"Staged files: {len(staged)} files")
+            return staged
+        except subprocess.CalledProcessError:
+            self._log("Failed to get staged files")
+            return set()
 
-        self._changed_files = set()
-        self._log(f"Detecting changed files vs {self.base_branch}")
+    def _get_ci_changed_files(self) -> set[str]:
+        """Get changed files for CI (PR diff).
+
+        Uses three-dot diff to get only changes introduced by PR.
+        """
+        self._log(f"Detecting CI changed files vs {self.base_branch}")
 
         # Ensure base branch is available
         if not self._ensure_base_branch_available():
             self._log("Base branch not available, returning empty set")
-            return self._changed_files
+            return set()
 
         # Try three-dot diff first (PR changes only - from merge base)
         try:
@@ -246,9 +323,9 @@ class ChangedFilesDetector:
                 check=True,
             )
             files = result.stdout.strip().split("\n")
-            self._changed_files = {os.path.realpath(f) for f in files if f}
-            self._log(f"Three-dot diff found {len(self._changed_files)} changed files")
-            return self._changed_files
+            changed = {os.path.realpath(f) for f in files if f}
+            self._log(f"Three-dot diff found {len(changed)} changed files")
+            return changed
         except subprocess.CalledProcessError:
             pass
 
@@ -261,25 +338,38 @@ class ChangedFilesDetector:
                 check=True,
             )
             files = result.stdout.strip().split("\n")
-            self._changed_files = {os.path.realpath(f) for f in files if f}
-            self._log(f"Two-dot diff found {len(self._changed_files)} changed files")
-            return self._changed_files
+            changed = {os.path.realpath(f) for f in files if f}
+            self._log(f"Two-dot diff found {len(changed)} changed files")
+            return changed
         except subprocess.CalledProcessError:
-            pass
+            self._log("All CI diff methods failed")
+            return set()
 
-        # Final fallback: staged files
-        try:
-            result = subprocess.run(
-                ["git", "diff", "--name-only", "--cached", "--diff-filter=ACMR"],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            files = result.stdout.strip().split("\n")
-            self._changed_files = {os.path.realpath(f) for f in files if f}
-            self._log(f"Staged files fallback found {len(self._changed_files)} files")
-        except subprocess.CalledProcessError:
-            self._log("All diff methods failed")
+    def get_changed_files(self) -> set[str]:
+        """Get set of changed files based on context.
+
+        - LOCAL: Returns staged files (git diff --cached)
+        - CI: Returns PR diff (base...HEAD)
+
+        Returns:
+            Set of absolute file paths that have changed
+        """
+        if self._changed_files is not None:
+            return self._changed_files
+
+        self._log(f"Context: {self._context}")
+
+        if self._context == ExecutionContext.LOCAL:
+            # LOCAL: Use staged files
+            self._changed_files = self._get_staged_files()
+        elif self._context == ExecutionContext.CI:
+            # CI: Use PR diff
+            self._changed_files = self._get_ci_changed_files()
+        else:
+            # UNKNOWN: Try staged first, then CI diff
+            self._changed_files = self._get_staged_files()
+            if not self._changed_files:
+                self._changed_files = self._get_ci_changed_files()
 
         return self._changed_files
 
@@ -291,6 +381,11 @@ class ChangedFilesDetector:
         """Filter a list of file dicts to only those that changed."""
         changed = self.get_changed_files()
         return [f for f in files if os.path.realpath(f["filename"]) in changed]
+
+    @property
+    def context(self) -> str:
+        """Get the detected execution context."""
+        return self._context
 
 
 class SoltConfig:
@@ -401,3 +496,7 @@ class SoltConfig:
         if not self.use_changed_files_only():
             return files
         return self.changed_detector.filter_changed_files(files)
+
+    def get_execution_context(self) -> str:
+        """Get the detected execution context (local/ci/unknown)."""
+        return self.changed_detector.context

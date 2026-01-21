@@ -22,24 +22,23 @@
 # -----------------------------------------------------------------------------
 # FULL VALIDATION - All checks (XML, CSV, PO, Python, Manifest)
 # -----------------------------------------------------------------------------
-# This hook now automatically detects Odoo modules from individual files
-# passed by pre-commit. No configuration needed.
+# IMPORTANT: This hook runs ONCE and detects staged files internally
 # -----------------------------------------------------------------------------
 - id: solt-check-odoo
   name: Soltein - Validate Odoo Module
   description: |
     Run all validations on Odoo modules.
     Automatically detects modules from staged files.
-    Respects validation_scope in .solt-hooks.yaml:
-    - "changed": Only validate files changed in PR/commit
-    - "full": Validate entire repository
+    Respects validation_scope in .solt-hooks.yaml.
   entry: solt-check-odoo
   language: python
-  # Match any file that could be part of an Odoo module
+  # Only trigger when these files change, but don't pass them
   files: (__manifest__|__openerp__|\.py|\.xml|\.csv|\.po|\.pot)$
-  # Pass filenames so the hook can detect which modules to validate
-  pass_filenames: true
-  # Show output
+  # Don't pass filenames - detect staged files internally
+  pass_filenames: false
+  # Run only once, not per-file
+  require_serial: true
+  # Always show output
   verbose: true
 
 # -----------------------------------------------------------------------------
@@ -51,7 +50,8 @@
   entry: solt-check-odoo
   language: python
   files: \.xml$
-  pass_filenames: true
+  pass_filenames: false
+  require_serial: true
   args: [ --check-xml-only ]
   verbose: true
 
@@ -64,7 +64,8 @@
   entry: solt-check-odoo
   language: python
   files: \.csv$
-  pass_filenames: true
+  pass_filenames: false
+  require_serial: true
   args: [ --check-csv-only ]
   verbose: true
 
@@ -77,7 +78,8 @@
   entry: solt-check-odoo
   language: python
   files: \.(po|pot)$
-  pass_filenames: true
+  pass_filenames: false
+  require_serial: true
   args: [ --check-po-only ]
   verbose: true
 
@@ -94,6 +96,7 @@
   entry: solt-check-odoo
   language: python
   files: \.py$
-  pass_filenames: true
+  pass_filenames: false
+  require_serial: true
   args: [ --check-python-only ]
   verbose: true

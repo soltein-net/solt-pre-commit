@@ -9,6 +9,7 @@ import ast
 import glob
 import os
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -39,108 +40,100 @@ MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
 # =============================================================================
 
 
-def _find_module_from_file(filepath):
-    """Find the Odoo module directory from a file path.
-
-    Walks up the directory tree until it finds __manifest__.py or __openerp__.py.
-
-    Args:
-        filepath: Path to a file (e.g., solt_module/models/my_model.py)
+def _get_staged_files():
+    """Get list of staged files from git.
 
     Returns:
-        Path to the module directory, or None if not found
+        List of staged file paths, or empty list if not in a git repo
     """
-    path = Path(filepath).resolve()
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        files = [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
+        return files
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
 
-    # If it's a file, start from its parent directory
+
+def _find_module_from_file(filepath):
+    """Find the Odoo module directory from a file path."""
+    path = Path(filepath).resolve()
     if path.is_file():
         path = path.parent
 
-    # Walk up to 10 levels (avoid infinite loops)
     for _ in range(10):
         for manifest_name in MANIFEST_NAMES:
-            manifest_path = path / manifest_name
-            if manifest_path.exists():
+            if (path / manifest_name).exists():
                 return str(path)
-
         parent = path.parent
-        if parent == path:  # Reached root
+        if parent == path:
             break
         path = parent
-
     return None
 
 
 def _detect_modules_from_paths(paths):
-    """Detect unique Odoo modules from a list of paths.
-
-    If paths are individual files (as when pre-commit passes them),
-    detects the parent modules. If they are already module directories, uses them directly.
-
-    Args:
-        paths: List of paths (can be files or directories)
-
-    Returns:
-        List of unique paths to Odoo modules
-    """
+    """Detect unique Odoo modules from a list of paths."""
     modules = set()
     direct_modules = []
 
     for path in paths:
         if not path:
             continue
-
         path_obj = Path(path)
 
-        # Check if it's directly a module (has __manifest__.py)
         if path_obj.is_dir():
-            has_manifest = any((path_obj / m).exists() for m in MANIFEST_NAMES)
-            if has_manifest:
+            if any((path_obj / m).exists() for m in MANIFEST_NAMES):
                 direct_modules.append(str(path_obj.resolve()))
                 continue
 
-        # It's a file or directory without manifest - look for parent module
         module_path = _find_module_from_file(path)
         if module_path:
             modules.add(module_path)
 
-    # If there are direct modules, use them
     if direct_modules:
         return direct_modules
-
-    return sorted(modules) if modules else ["."]
+    return sorted(modules) if modules else []
 
 
 def _is_file_list(paths):
-    """Check if paths are individual files (from pre-commit) or module directories.
-
-    Args:
-        paths: List of paths to check
-
-    Returns:
-        True if paths appear to be individual files, False if they are module directories
-    """
+    """Check if paths are individual files or module directories."""
     if not paths:
         return False
 
-    # File extensions that pre-commit might pass
     file_extensions = {".py", ".xml", ".csv", ".po", ".pot", ".yml", ".yaml", ".json", ".md", ".rst", ".txt"}
-
     for path in paths:
-        # If it has a known file extension
         ext = Path(path).suffix.lower()
         if ext in file_extensions:
             return True
-
-        # If it exists as a file (not directory)
         if Path(path).is_file():
             return True
-
     return False
 
 
-# =============================================================================
-# END HELPER FUNCTIONS
+def _detect_modules_from_staged_files():
+    """Detect Odoo modules from git staged files."""
+    staged_files = _get_staged_files()
+    if not staged_files:
+        return None
+
+    relevant_extensions = {".py", ".xml", ".csv", ".po", ".pot"}
+    relevant_files = [
+        f
+        for f in staged_files
+        if Path(f).suffix.lower() in relevant_extensions or "__manifest__" in f or "__openerp__" in f
+    ]
+
+    if not relevant_files:
+        return None
+
+    return _detect_modules_from_paths(relevant_files)
+
+
 # =============================================================================
 
 
@@ -152,22 +145,12 @@ class CheckResult:
         self.results = defaultdict(list)
 
     def _shorten_path(self, message):
-        """Remove CI runner path prefix from error messages.
-
-        Converts:
-          /home/runner/work/solt-budget/solt-budget/module/file.py:25 Error
-        To:
-          solt-budget/module/file.py:25 Error
-        """
-        # Pattern matches: /home/runner/work/REPO_NAME/
-        # This removes the CI runner prefix but keeps REPO_NAME/rest/of/path
         return re.sub(r"/home/runner/work/[^/]+/", "", message)
 
     def add(self, check_name, messages):
         if not messages:
             return
         if self.severity_config.should_report(check_name):
-            # Shorten paths in all messages
             shortened_messages = [self._shorten_path(msg) for msg in messages]
             self.results[check_name].extend(shortened_messages)
 
@@ -199,7 +182,6 @@ class CheckResult:
         return counts
 
     def has_errors_or_warnings(self):
-        """Check if there are any errors or warnings (ignoring info)."""
         counts = self.get_counts()
         return counts[Severity.ERROR] > 0 or counts[Severity.WARNING] > 0
 
@@ -210,26 +192,21 @@ class CheckResult:
 class ResultPrinter:
     """Pretty printer for check results."""
 
-    # Maximum message length before truncation (increased from 120)
     MAX_MESSAGE_LENGTH = 200
 
     def __init__(self, use_colors=True, verbose=False, use_unicode=None, max_messages=None):
         self.use_colors = use_colors and sys.stdout.isatty()
         self.verbose = verbose
-        # Auto-detect unicode support: use ASCII in CI, unicode in terminal
         if use_unicode is None:
             self.use_unicode = sys.stdout.isatty() and os.environ.get("CI") is None
         else:
             self.use_unicode = use_unicode
-        # Max messages per check type (None = show all, useful for CI)
-        # Default: 10 for terminal, unlimited for CI
         if max_messages is None:
             self.max_messages = None if os.environ.get("CI") else 10
         else:
             self.max_messages = max_messages
 
     def _get_icon(self, severity):
-        """Get the appropriate icon based on environment."""
         if self.use_unicode:
             return Severity.ICONS_UNICODE.get(severity, "")
         return Severity.ICONS.get(severity, "")
@@ -289,10 +266,8 @@ class ResultPrinter:
                 check_display = self._format_check_name(check_name)
                 print(f"\n  {self._bold(check_display)} ({len(messages)})")
 
-                # Show all messages if max_messages is None, otherwise limit
                 display_messages = messages if self.max_messages is None else messages[: self.max_messages]
                 for msg in display_messages:
-                    # Truncate long messages but preserve readability
                     if len(msg) > self.MAX_MESSAGE_LENGTH:
                         msg = msg[: self.MAX_MESSAGE_LENGTH - 3] + "..."
                     print(f"    - {msg}")
@@ -367,22 +342,14 @@ class ChecksOdooModule:
         self.manifest_referenced_files = self._referenced_files_by_extension()
         self.check_result = CheckResult(self.severity_config)
 
-        # Use shared detector from config (avoids repeated git calls and logs)
         self._changed_detector = None
         if self.severity_config.use_changed_files_only():
             self._changed_detector = self.severity_config.changed_detector
 
     def has_changed_files(self) -> bool:
-        """Check if this module has any changed files.
-
-        Returns True if:
-        - validation_scope is 'full' (all modules are considered to have changes)
-        - validation_scope is 'changed' and there are modified files in this module
-        """
         if not self._changed_detector:
-            return True  # Full scope - consider all modules as having changes
+            return True
 
-        # Check if any file type has changed files
         for ext in self.manifest_referenced_files:
             files = self._get_files_to_validate(ext)
             if files:
@@ -574,7 +541,6 @@ class ChecksOdooModule:
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
 
-        # Store analysis data for coverage report
         for file_data in self.manifest_referenced_files.get(".py", []):
             filename = file_data["filename"]
             for manifest_data in manifest_datas:
@@ -585,26 +551,18 @@ class ChecksOdooModule:
                     break
 
     def collect_coverage_data(self):
-        """Collect coverage data from ALL Python files (ignores validation_scope).
-
-        This method is for generating global repository metrics without blocking.
-        It does NOT add errors to check_result, only collects metadata.
-        """
+        """Collect coverage data from ALL Python files (ignores validation_scope)."""
         all_py_files = self.manifest_referenced_files.get(".py", [])
         if not all_py_files:
             return
 
-        # Parse all files for coverage data only (no error reporting)
-        # The constructor already parses files and populates models/fields/methods
         _parser = checks_odoo_module_python.ChecksOdooModulePython(
             all_py_files,
             self.odoo_addon_name,
             config=self.severity_config,
         )
-        # _parser is used only for side effects (populating all_py_files dicts)
-        del _parser  # Explicitly delete to avoid unused variable warning
+        del _parser
 
-        # Store coverage data in ALL files
         for file_data in all_py_files:
             filename = file_data["filename"]
             for manifest_data in all_py_files:
@@ -630,11 +588,7 @@ class ChecksOdooModule:
 
 
 def _print_global_coverage_metrics(checks_objects, severity_config):
-    """Print global coverage metrics for the repository.
-
-    These metrics are informational and do NOT affect the exit code.
-    They show coverage of the entire repository, not just changed files.
-    """
+    """Print global coverage metrics for the repository."""
     total_models = 0
     total_fields = 0
     total_methods = 0
@@ -643,12 +597,10 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     methods_with_docstring = 0
     public_methods = 0
 
-    # Skip list from config
     skip_string = severity_config.skip_string_fields
     skip_help = severity_config.skip_help_fields
     skip_docstring = severity_config.skip_docstring_methods
 
-    # Separate counters for fields that actually need string/help
     fields_needing_string = 0
     fields_needing_help = 0
 
@@ -665,22 +617,18 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
             for _class_name, field_list in fields.items():
                 for fld in field_list:
                     field_name = fld.get("name", "")
-                    # Skip private fields
                     if field_name.startswith("_"):
                         continue
-                    # Skip related fields (they inherit attributes from source)
                     if fld.get("related"):
                         continue
 
                     total_fields += 1
 
-                    # Only count fields that NEED string (not in skip list)
                     if field_name not in skip_string:
                         fields_needing_string += 1
                         if fld.get("string"):
                             fields_with_string += 1
 
-                    # Only count fields that NEED help (not in skip list)
                     if field_name not in skip_help:
                         fields_needing_help += 1
                         if fld.get("help"):
@@ -690,7 +638,7 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
                 for meth in method_list:
                     name = meth.get("name", "")
                     if name.startswith("_") and not name.startswith("__"):
-                        continue  # Skip private
+                        continue
                     if name in skip_docstring:
                         continue
 
@@ -701,14 +649,12 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
                         methods_with_docstring += 1
 
     if fields_needing_string == 0 and fields_needing_help == 0 and public_methods == 0:
-        return  # No data to show
+        return
 
-    # Calculate percentages using fields_needing_* instead of total_fields
     string_pct = (fields_with_string / fields_needing_string * 100) if fields_needing_string > 0 else 100
     help_pct = (fields_with_help / fields_needing_help * 100) if fields_needing_help > 0 else 100
     docstring_pct = (methods_with_docstring / public_methods * 100) if public_methods > 0 else 100
 
-    # Get thresholds from config (or defaults)
     docstring_threshold = 80
     string_threshold = 90
     help_threshold = 50
@@ -735,8 +681,6 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     )
     print("-" * 60)
     print("These metrics are informational and do NOT block validation.")
-    # Machine-readable output for CI parsing (do not modify format)
-    # Output fields_needing_* as totals instead of total_fields
     print(
         f"METRICS:docstring_cov={docstring_pct:.1f},"
         f"docstring_documented={methods_with_docstring},"
@@ -794,21 +738,16 @@ def run(
         for check in checks_obj.getattr_checks():
             check(checks_obj)
 
-        # Collect coverage data from ALL files (for metrics display)
         checks_obj.collect_coverage_data()
-
         checks_objects.append((checks_obj.odoo_addon_name, checks_obj))
 
-        # Track results for summary
         if not checks_obj.check_result.is_empty():
             all_results.append((checks_obj.odoo_addon_name, checks_obj.check_result))
             if checks_obj.check_result.has_blocking_issues():
                 has_blocking = True
 
-        # Print module results
         if verbose:
             if show_all_modules:
-                # Show all modules (with issues or passed)
                 if not checks_obj.check_result.is_empty():
                     printer.print_results(
                         checks_obj.check_result,
@@ -818,17 +757,15 @@ def run(
                 else:
                     printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
             elif not checks_obj.check_result.is_empty():
-                # Show modules with any issues (errors, warnings, or info)
                 printer.print_results(
                     checks_obj.check_result,
                     checks_obj.odoo_addon_name,
                     severity_config.validation_scope,
                 )
 
-    # Show global coverage metrics
     if verbose and show_coverage:
         _print_global_coverage_metrics(checks_objects, severity_config)
-    # Calculate elapsed time
+
     elapsed_time = time.time() - start_time
 
     if len(manifest_paths) > 1 and verbose:
@@ -856,7 +793,6 @@ def run(
         if all_results:
             printer.print_blocking_notice(all_results[0][1])
 
-    # Generate JSON coverage report if requested
     if json_report:
         try:
             from . import doc_coverage
@@ -902,7 +838,7 @@ def main():
     parser.add_argument(
         "--show-all-modules",
         action="store_true",
-        help="Show all modules even if they have no issues (default: only show modules with issues)",
+        help="Show all modules even if they have no issues",
     )
 
     args = parser.parse_args()
@@ -917,24 +853,39 @@ def main():
     elif args.check_python_only:
         check_mode = "python"
 
-    paths = args.paths or ["."]
+    paths = args.paths or []
 
     # =========================================================================
-    # DETECT MODULES AUTOMATICALLY IF PRE-COMMIT PASSED INDIVIDUAL FILES
+    # DETECT MODULES AUTOMATICALLY
     # =========================================================================
-    if _is_file_list(paths):
-        detected_modules = _detect_modules_from_paths(paths)
-        if detected_modules and detected_modules != ["."]:
+    if paths:
+        if _is_file_list(paths):
+            detected_modules = _detect_modules_from_paths(paths)
+            if detected_modules:
+                if not args.quiet:
+                    print(f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {len(paths)} file(s)")
+                    for mod in detected_modules:
+                        print(f"  → {Path(mod).name}")
+                paths = detected_modules
+            else:
+                if not args.quiet:
+                    print("[solt-check-odoo] No Odoo modules detected from provided files")
+                sys.exit(0)
+    else:
+        # No paths - detect from staged files (pre-commit with pass_filenames: false)
+        detected_modules = _detect_modules_from_staged_files()
+        if detected_modules:
             if not args.quiet:
-                print(f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {len(paths)} file(s)")
+                staged_count = len(_get_staged_files())
+                print(
+                    f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {staged_count} staged file(s)"
+                )
                 for mod in detected_modules:
                     print(f"  → {Path(mod).name}")
             paths = detected_modules
         else:
-            # No modules found, exit silently (not an Odoo repository)
-            if not args.quiet:
-                print("[solt-check-odoo] No Odoo modules detected from provided files")
-            sys.exit(0)
+            # Fallback to current directory
+            paths = ["."]
     # =========================================================================
 
     return run(
