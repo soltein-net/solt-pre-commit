@@ -1,0 +1,126 @@
+# =============================================================================
+# SOLT PRE-COMMIT - Weekly Badge Update (Reusable)
+# =============================================================================
+# Runs weekly to update documentation coverage badges
+# Should be called from each repository's workflow
+# =============================================================================
+name: Update Badges (Weekly)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version to use'
+        required: false
+        type: string
+        default: '3.11'
+      gist-id:
+        description: 'Gist ID for badge storage'
+        required: true
+        type: string
+      badge-filename-prefix:
+        description: 'Prefix for badge filenames in gist'
+        required: true
+        type: string
+      docstring-threshold:
+        description: 'Minimum docstring coverage to pass'
+        required: false
+        type: number
+        default: 80
+      branch:
+        description: 'Branch to analyze (default: main)'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      GIST_SECRET:
+        description: 'GitHub token for updating gist badges'
+        required: true
+
+jobs:
+  update-badges:
+    name: Update Documentation Badges
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: 'pip'
+
+      - name: Collect metrics
+        id: metrics
+        run: |
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
+
+          # Find all modules
+          MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
+          MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
+
+          echo "Found $MODULE_COUNT modules"
+
+          # Run with full scope for metrics
+          solt-check-odoo $MODULES --scope full 2>&1 | tee output.txt || true
+
+          # Extract metrics from METRICS line
+          DOC_COV=$(grep -oP "docstring_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
+          STRING_COV=$(grep -oP "string_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
+          HELP_COV=$(grep -oP "help_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
+
+          # Remove decimals
+          DOC_COV=${DOC_COV%.*}
+          STRING_COV=${STRING_COV%.*}
+          HELP_COV=${HELP_COV%.*}
+
+          # Determine status
+          THRESHOLD=${{ inputs.docstring-threshold }}
+          if [ "${DOC_COV:-0}" -ge "$THRESHOLD" ]; then
+            STATUS="passing"
+          else
+            STATUS="failing"
+          fi
+
+          echo "docstring_cov=${DOC_COV:-0}" >> $GITHUB_OUTPUT
+          echo "string_cov=${STRING_COV:-0}" >> $GITHUB_OUTPUT
+          echo "help_cov=${HELP_COV:-0}" >> $GITHUB_OUTPUT
+          echo "docs_status=$STATUS" >> $GITHUB_OUTPUT
+          echo "module_count=$MODULE_COUNT" >> $GITHUB_OUTPUT
+
+          echo "## Badge Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Modules | $MODULE_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docstrings | ${DOC_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Field strings | ${STRING_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Field help | ${HELP_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | $STATUS |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Update docstrings badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ inputs.gist-id }}
+          filename: ${{ inputs.badge-filename-prefix }}-docstrings.json
+          label: docstrings
+          message: "${{ steps.metrics.outputs.docstring_cov }}%"
+          valColorRange: ${{ steps.metrics.outputs.docstring_cov }}
+          minColorRange: 0
+          maxColorRange: 100
+          namedLogo: python
+          logoColor: white
+
+      - name: Update docs status badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ inputs.gist-id }}
+          filename: ${{ inputs.badge-filename-prefix }}-docs-status.json
+          label: Documentation Standards
+          message: ${{ steps.metrics.outputs.docs_status }}
+          color: ${{ steps.metrics.outputs.docs_status == 'passing' && 'brightgreen' || 'red' }}
+          namedLogo: github
+          logoColor: white

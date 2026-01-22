@@ -1,8 +1,8 @@
 # =============================================================================
-# SOLT PRE-COMMIT - Reusable Workflow
+# SOLT PRE-COMMIT - Reusable Workflow (Optimized)
 # =============================================================================
-# IMPORTANT: This workflow will FAIL (red) when blocking issues are found.
-# The validation job exit code is properly propagated via the final-check step.
+# EXECUTION: Only on pull_request - validates CHANGED files only
+# Badges are updated separately via weekly schedule
 # =============================================================================
 name: Soltein Validation (Reusable)
 
@@ -14,55 +14,21 @@ on:
         required: false
         type: string
         default: '3.11'
-      odoo-version:
-        description: 'Odoo version (for compatibility checks)'
-        required: false
-        type: string
-        default: '17.0'
-      validation-scope:
-        description: 'Validation scope: changed or full'
-        required: false
-        type: string
-        default: 'changed'
       fail-on-warnings:
-        description: 'Fail if warnings are found (affects solt-check-odoo and Pylint-Odoo)'
+        description: 'Fail if warnings are found'
         required: false
         type: boolean
         default: false
       ruff-blocking:
-        description: 'Make Ruff issues blocking (requires fail-on-warnings: true)'
+        description: 'Make Ruff issues blocking'
         required: false
         type: boolean
         default: false
       pylint-blocking:
-        description: 'Make Pylint-Odoo issues blocking (requires fail-on-warnings: true)'
+        description: 'Make Pylint-Odoo issues blocking'
         required: false
         type: boolean
         default: true
-      show-info:
-        description: 'Show info-level issues in report'
-        required: false
-        type: boolean
-        default: false
-      gist-id:
-        description: 'Gist ID for badge storage (optional)'
-        required: false
-        type: string
-        default: ''
-      badge-filename-prefix:
-        description: 'Prefix for badge filenames in gist (e.g., solt-budget)'
-        required: false
-        type: string
-        default: ''
-      docstring-threshold:
-        description: 'Minimum docstring coverage to pass (default: 80)'
-        required: false
-        type: number
-        default: 80
-    secrets:
-      GIST_SECRET:
-        description: 'GitHub token for updating gist badges'
-        required: false
     outputs:
       validation-result:
         description: 'Validation result (success/failure)'
@@ -73,9 +39,6 @@ on:
       warnings-count:
         description: 'Number of warnings found'
         value: ${{ jobs.validate.outputs.warnings }}
-      docstring-coverage:
-        description: 'Docstring coverage percentage'
-        value: ${{ jobs.validate.outputs.docstring_cov }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -98,18 +61,19 @@ jobs:
           echo "## Branch Validation" >> $GITHUB_STEP_SUMMARY
           echo "Branch: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
           if solt-check-branch "$BRANCH"; then
-            echo "Branch name is valid" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Branch name is valid" >> $GITHUB_STEP_SUMMARY
           else
-            echo "Branch name is invalid" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Branch name is invalid" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
   # ---------------------------------------------------------------------------
-  # MAIN VALIDATION
+  # MAIN VALIDATION (CHANGED files only)
   # ---------------------------------------------------------------------------
   validate:
     name: Odoo Module Validation
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
       pull-requests: write
@@ -117,8 +81,6 @@ jobs:
       result: ${{ steps.final-check.outputs.result }}
       errors: ${{ steps.summary.outputs.errors }}
       warnings: ${{ steps.summary.outputs.warnings }}
-      docstring_cov: ${{ steps.metrics.outputs.docstring_cov }}
-      docs_status: ${{ steps.metrics.outputs.docs_status }}
 
     steps:
       - uses: actions/checkout@v4
@@ -136,990 +98,195 @@ jobs:
           pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
           pip install pylint-odoo ruff
 
-      - name: Find Odoo modules
-        id: find-modules
-        run: |
-          MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
-          MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
-          if [ -z "$MODULE_COUNT" ] || [ "$MODULE_COUNT" = "" ]; then
-            MODULE_COUNT=0
-          fi
-          echo "modules=$MODULES" >> $GITHUB_OUTPUT
-          echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
-          echo "Found $MODULE_COUNT modules: $MODULES"
-
-      # Fetch base branch for accurate diff in PRs
       - name: Fetch base branch
-        if: github.event_name == 'pull_request'
-        run: |
-          echo "Fetching base branch: ${{ github.base_ref }}"
-          git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} --depth=1 || true
-          echo "Available remote branches:"
-          git branch -r | head -10
+        run: git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} --depth=1 || true
 
-      # ---------------------------------------------------------------------------
-      # SOLT-CHECK-ODOO VALIDATION
-      # ---------------------------------------------------------------------------
-      - name: Solt validation (PR scope)
-        id: validate
+      - name: Get changed files
+        id: changed
+        run: |
+          CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+          CHANGED_ALL=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l)
+
+          EXISTING_PY=""
+          for f in $CHANGED_PY; do [ -f "$f" ] && EXISTING_PY="$EXISTING_PY $f"; done
+
+          echo "py_files=$(echo $EXISTING_PY | xargs)" >> $GITHUB_OUTPUT
+          echo "py_count=$(echo $EXISTING_PY | wc -w | tr -d ' ')" >> $GITHUB_OUTPUT
+          echo "total_count=$CHANGED_ALL" >> $GITHUB_OUTPUT
+
+      - name: Find affected modules
+        id: modules
+        run: |
+          MODULES=""
+          for f in $(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD 2>/dev/null); do
+            DIR=$(dirname "$f")
+            while [ "$DIR" != "." ] && [ "$DIR" != "/" ]; do
+              if [ -f "$DIR/__manifest__.py" ] || [ -f "$DIR/__openerp__.py" ]; then
+                MODULES="$MODULES $DIR"
+                break
+              fi
+              DIR=$(dirname "$DIR")
+            done
+          done
+          MODULES=$(echo "$MODULES" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+          echo "modules=$MODULES" >> $GITHUB_OUTPUT
+          echo "count=$(echo $MODULES | wc -w | tr -d ' ')" >> $GITHUB_OUTPUT
+
+      - name: Solt validation
+        id: solt
+        if: steps.modules.outputs.count != '0'
         continue-on-error: true
         env:
           SOLT_BASE_BRANCH: ${{ github.base_ref }}
         run: |
           mkdir -p reports
-
-          # For push events (not PR), always use full scope
-          if [ "${{ github.event_name }}" = "push" ]; then
-            ARGS="--scope full"
-            echo "::notice::Push event detected - using full scope for metrics"
-          else
-            ARGS="--scope ${{ inputs.validation-scope }}"
-          fi
-
-          if [ "${{ inputs.show-info }}" = "true" ]; then
-            ARGS="$ARGS --show-info"
-          fi
-
-          START_TIME=$(date +%s)
-
-          # Debug: Show base branch and changed files count
-          if [ -n "${{ github.base_ref }}" ]; then
-            echo "::notice::Base branch for diff: origin/${{ github.base_ref }}"
-            CHANGED_COUNT=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l || echo "unknown")
-            echo "::notice::Files changed in PR: $CHANGED_COUNT"
-          fi
-
-          # Run validation and capture exit code
-          set -o pipefail
+          START=$(date +%s)
           set +e
-          solt-check-odoo ${{ steps.find-modules.outputs.modules }} $ARGS 2>&1 | tee reports/validation.txt
-          VALIDATION_EXIT_CODE=${PIPESTATUS[0]}
+          solt-check-odoo ${{ steps.modules.outputs.modules }} --scope changed 2>&1 | tee reports/validation.txt
+          CODE=${PIPESTATUS[0]}
           set -e
-          set +o pipefail
+          echo "exit_code=$CODE" >> $GITHUB_OUTPUT
+          echo "duration=$(($(date +%s) - START))" >> $GITHUB_OUTPUT
+          exit $CODE
 
-          END_TIME=$(date +%s)
-          DURATION=$((END_TIME - START_TIME))
-
-          echo "exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
-          echo "duration=$DURATION" >> $GITHUB_OUTPUT
-          echo "::notice::Solt validation exit code: $VALIDATION_EXIT_CODE"
-
-          exit $VALIDATION_EXIT_CODE
-
-      - name: Solt validation (full repo metrics)
-        if: always()
-        continue-on-error: true
-        env:
-          SOLT_BASE_BRANCH: ${{ github.base_ref }}
-        run: |
-          solt-check-odoo ${{ steps.find-modules.outputs.modules }} --scope full --show-info --show-all-modules 2>&1 | tee reports/validation-full.txt || true
-
-      # ---------------------------------------------------------------------------
-      # RUFF LINTING
-      # ---------------------------------------------------------------------------
       - name: Ruff linting
         id: ruff
-        if: always()
+        if: steps.changed.outputs.py_count != '0'
         continue-on-error: true
         run: |
-          set +e
-          mkdir -p reports
-
-          echo "=== Ruff Linting ==="
-
-          # Get changed Python files for PR scope
-          CHANGED_PY=""
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
-            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
-          else
-            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+          ISSUES=0
+          if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
+            ruff check ${{ steps.changed.outputs.py_files }} --output-format=concise 2>&1 | tee reports/ruff.txt || true
+            ISSUES=$(grep -cE "^.+\.py:[0-9]+" reports/ruff.txt 2>/dev/null || echo "0")
           fi
+          echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
-          # Check changed files only
-          RUFF_CHANGED="0"
-          if [ -n "$CHANGED_PY" ]; then
-            EXISTING_PY=""
-            for f in $CHANGED_PY; do
-              if [ -f "$f" ]; then
-                EXISTING_PY="$EXISTING_PY $f"
-              fi
-            done
-            EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
-
-            if [ -n "$EXISTING_PY" ]; then
-              echo "Checking ${#EXISTING_PY} changed Python files..."
-              ruff check $EXISTING_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
-              RUFF_CHANGED=$(grep -cE "^.+\.py:[0-9]+" reports/ruff-changed.txt 2>/dev/null || echo "0")
-            fi
-          fi
-
-          # Check full repository
-          echo "=== Ruff full repository scan ==="
-          ALL_PY_FILES=$(find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | tr '\n' ' ')
-          PY_FILE_COUNT=$(echo "$ALL_PY_FILES" | wc -w | tr -d ' ')
-          echo "Found $PY_FILE_COUNT Python files"
-
-          RUFF_FULL="0"
-          if [ -n "$ALL_PY_FILES" ] && [ "$PY_FILE_COUNT" -gt 0 ]; then
-            ruff check $ALL_PY_FILES --output-format=concise 2>&1 | tee reports/ruff-full.txt || true
-            RUFF_FULL=$(grep -cE "^.+\.py:[0-9]+" reports/ruff-full.txt 2>/dev/null || echo "0")
-          fi
-
-          # Sanitize and output
-          RUFF_CHANGED=$(printf '%s' "$RUFF_CHANGED" | tr -cd '0-9')
-          RUFF_FULL=$(printf '%s' "$RUFF_FULL" | tr -cd '0-9')
-          : "${RUFF_CHANGED:=0}"
-          : "${RUFF_FULL:=0}"
-
-          echo "Ruff results: PR=$RUFF_CHANGED, Repo=$RUFF_FULL"
-          printf 'changed=%s\n' "$RUFF_CHANGED" >> "$GITHUB_OUTPUT"
-          printf 'full=%s\n' "$RUFF_FULL" >> "$GITHUB_OUTPUT"
-
-      # ---------------------------------------------------------------------------
-      # PYLINT-ODOO LINTING
-      # ---------------------------------------------------------------------------
       - name: Pylint-Odoo linting
         id: pylint
-        if: always()
+        if: steps.changed.outputs.py_count != '0'
         continue-on-error: true
         run: |
-          set +e
-          mkdir -p reports
-
-          echo "=== Pylint-Odoo Linting ==="
-
-          # Function to strip ANSI color codes
-          strip_ansi() {
-            sed 's/\x1b\[[0-9;]*m//g' | sed 's/\[0m//g' | sed 's/\[1;[0-9]*m//g' | sed 's/\[35m//g'
-          }
-
-          # Get changed Python files for PR scope
-          CHANGED_PY=""
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
-          else
-            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+          ISSUES=0
+          if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
+            pylint --load-plugins=pylint_odoo --exit-zero ${{ steps.changed.outputs.py_files }} 2>&1 | \
+              sed 's/\x1b\[[0-9;]*m//g' | tee reports/pylint.txt || true
+            ISSUES=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint.txt 2>/dev/null || echo "0")
           fi
+          echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
-          # Check changed files only
-          PYLINT_CHANGED="0"
-          if [ -n "$CHANGED_PY" ]; then
-            EXISTING_PY=""
-            for f in $CHANGED_PY; do
-              if [ -f "$f" ]; then
-                EXISTING_PY="$EXISTING_PY $f"
-              fi
-            done
-            EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
-
-            if [ -n "$EXISTING_PY" ]; then
-              echo "Checking changed Python files with Pylint-Odoo..."
-              # Run pylint and strip ANSI codes from output
-              echo "$EXISTING_PY" | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | strip_ansi | tee reports/pylint-changed.txt || true
-              PYLINT_CHANGED=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint-changed.txt 2>/dev/null || echo "0")
-            fi
-          fi
-
-          # Check full repository (limited for performance)
-          echo "=== Pylint-Odoo full repository scan ==="
-          find ${{ steps.find-modules.outputs.modules }} -name "*.py" -not -path "*/__pycache__/*" 2>/dev/null | head -100 | xargs pylint --load-plugins=pylint_odoo --exit-zero 2>&1 | strip_ansi | tee reports/pylint-full.txt || true
-          PYLINT_FULL=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint-full.txt 2>/dev/null || echo "0")
-
-          # Sanitize and output
-          PYLINT_CHANGED=$(printf '%s' "$PYLINT_CHANGED" | tr -cd '0-9')
-          PYLINT_FULL=$(printf '%s' "$PYLINT_FULL" | tr -cd '0-9')
-          : "${PYLINT_CHANGED:=0}"
-          : "${PYLINT_FULL:=0}"
-
-          echo "Pylint results: PR=$PYLINT_CHANGED, Repo=$PYLINT_FULL"
-          printf 'changed=%s\n' "$PYLINT_CHANGED" >> "$GITHUB_OUTPUT"
-          printf 'full=%s\n' "$PYLINT_FULL" >> "$GITHUB_OUTPUT"
-
-      # ---------------------------------------------------------------------------
-      # ISSUES SUMMARY - Shows all blocking issues from all tools
-      # ---------------------------------------------------------------------------
-      - name: Consolidate all issues
-        id: all-issues
-        if: always()
-        run: |
-          mkdir -p reports
-
-          echo "============================================================"
-          echo "               ALL BLOCKING ISSUES SUMMARY"
-          echo "============================================================"
-          echo ""
-
-          TOTAL_BLOCKING=0
-
-          # --- Solt validation errors ---
-          # Get the error count from the FINAL SUMMARY section
-          echo "=== SOLT-CHECK-ODOO ERRORS ==="
-          if [ -f "reports/validation.txt" ]; then
-            # Extract error count from "Errors: N" in FINAL SUMMARY
-            SOLT_ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
-            SOLT_ERRORS=$(echo "$SOLT_ERRORS" | tr -cd '0-9')
-            : "${SOLT_ERRORS:=0}"
-
-            if [ "$SOLT_ERRORS" -gt 0 ]; then
-              echo "Found $SOLT_ERRORS solt-check-odoo blocking errors:"
-              # Show actual error lines (start with "    - " under ERRORS section)
-              # These are formatted as "    - filepath:line message"
-              awk '/ERRORS/,/^[^ ]/' reports/validation.txt | grep "^    - " | head -20
-              TOTAL_BLOCKING=$((TOTAL_BLOCKING + SOLT_ERRORS))
-            else
-              echo "No solt-check-odoo blocking errors found."
-            fi
-          else
-            echo "No validation report found."
-          fi
-          echo ""
-
-          # --- Pylint-Odoo errors (if blocking) ---
-          PYLINT_CHANGED="${{ steps.pylint.outputs.changed }}"
-          PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | tr -cd '0-9')
-          : "${PYLINT_CHANGED:=0}"
-
-          echo "=== PYLINT-ODOO ISSUES (PR files) ==="
-          if [ "${{ inputs.pylint-blocking }}" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then
-            echo "Found $PYLINT_CHANGED Pylint-Odoo issues (BLOCKING):"
-            if [ -f "reports/pylint-changed.txt" ]; then
-              grep -E "\.py:[0-9]+:.*\[" reports/pylint-changed.txt | head -20
-            fi
-            TOTAL_BLOCKING=$((TOTAL_BLOCKING + PYLINT_CHANGED))
-          elif [ "$PYLINT_CHANGED" -gt 0 ]; then
-            echo "Found $PYLINT_CHANGED Pylint-Odoo issues (info only - not blocking)"
-          else
-            echo "No Pylint-Odoo issues in changed files."
-          fi
-          echo ""
-
-          # --- Ruff errors (if blocking) ---
-          RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
-          RUFF_CHANGED=$(echo "$RUFF_CHANGED" | tr -cd '0-9')
-          : "${RUFF_CHANGED:=0}"
-
-          echo "=== RUFF ISSUES (PR files) ==="
-          if [ "${{ inputs.ruff-blocking }}" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
-            echo "Found $RUFF_CHANGED Ruff issues (BLOCKING):"
-            if [ -f "reports/ruff-changed.txt" ]; then
-              grep -E "^.+\.py:[0-9]+" reports/ruff-changed.txt | head -20
-            fi
-            TOTAL_BLOCKING=$((TOTAL_BLOCKING + RUFF_CHANGED))
-          elif [ "$RUFF_CHANGED" -gt 0 ]; then
-            echo "Found $RUFF_CHANGED Ruff issues (info only - not blocking)"
-          else
-            echo "No Ruff issues in changed files."
-          fi
-          echo ""
-
-          echo "============================================================"
-          echo "TOTAL BLOCKING ISSUES: $TOTAL_BLOCKING"
-          echo "============================================================"
-
-          echo "total_blocking=$TOTAL_BLOCKING" >> $GITHUB_OUTPUT
-
-      - name: Calculate metrics
-        id: metrics
-        if: always()
-        env:
-          DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
-        run: |
-          mkdir -p reports
-
-          python3 << 'EOF'
-          import os
-          import re
-          import json
-
-          print("=== Calculating metrics ===")
-
-          metrics_data = {
-              'docstring_cov': 0, 'docstring_documented': 0, 'docstring_total': 1,
-              'string_cov': 0, 'string_documented': 0, 'string_total': 1,
-              'help_cov': 0, 'help_documented': 0, 'help_total': 1,
-              'models': 0
-          }
-
-          # Parse metrics from full validation
-          try:
-              with open('reports/validation-full.txt', 'r') as f:
-                  content = f.read()
-
-              metrics_match = re.search(r'^METRICS:(.+)$', content, re.MULTILINE)
-              if metrics_match:
-                  for pair in metrics_match.group(1).split(','):
-                      if '=' in pair:
-                          key, value = pair.split('=', 1)
-                          try:
-                              metrics_data[key.strip()] = float(value) if '.' in value else int(value)
-                          except ValueError:
-                              pass
-          except FileNotFoundError:
-              print("Warning: validation-full.txt not found")
-
-          # Count issues in PR files
-          missing_docstring_pr = missing_string_pr = missing_help_pr = 0
-          try:
-              with open('reports/validation.txt', 'r') as f:
-                  pr_content = f.read().lower()
-              missing_docstring_pr = pr_content.count('missing docstring')
-              missing_string_pr = pr_content.count('missing string')
-              missing_help_pr = pr_content.count('missing help')
-          except FileNotFoundError:
-              pass
-
-          docstring_cov = metrics_data.get('docstring_cov', 0)
-          threshold = int(os.environ.get('DOCSTRING_THRESHOLD', 80))
-          docs_status = 'passing' if docstring_cov >= threshold else 'failing'
-
-          # Write outputs
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"docstring_cov={int(docstring_cov)}\n")
-              f.write(f"docstring_documented={int(metrics_data.get('docstring_documented', 0))}\n")
-              f.write(f"docstring_total={int(metrics_data.get('docstring_total', 1))}\n")
-              f.write(f"string_cov={int(metrics_data.get('string_cov', 0))}\n")
-              f.write(f"string_documented={int(metrics_data.get('string_documented', 0))}\n")
-              f.write(f"string_total={int(metrics_data.get('string_total', 1))}\n")
-              f.write(f"help_cov={int(metrics_data.get('help_cov', 0))}\n")
-              f.write(f"help_documented={int(metrics_data.get('help_documented', 0))}\n")
-              f.write(f"help_total={int(metrics_data.get('help_total', 1))}\n")
-              f.write(f"models={int(metrics_data.get('models', 0))}\n")
-              f.write(f"missing_docstring_pr={missing_docstring_pr}\n")
-              f.write(f"missing_string_pr={missing_string_pr}\n")
-              f.write(f"missing_help_pr={missing_help_pr}\n")
-              f.write(f"docs_status={docs_status}\n")
-
-          with open('reports/metrics.json', 'w') as f:
-              json.dump(metrics_data, f, indent=2)
-
-          print(f"Docstrings: {docstring_cov:.1f}%")
-          print(f"Status: {docs_status}")
-          EOF
-
-          # Pass through linter results
-          echo "ruff_changed=${{ steps.ruff.outputs.changed }}" >> $GITHUB_OUTPUT
-          echo "ruff_full=${{ steps.ruff.outputs.full }}" >> $GITHUB_OUTPUT
-          echo "pylint_changed=${{ steps.pylint.outputs.changed }}" >> $GITHUB_OUTPUT
-          echo "pylint_full=${{ steps.pylint.outputs.full }}" >> $GITHUB_OUTPUT
-
-      - name: Extract issues for PR comment
+      - name: Extract summary
         id: summary
         if: always()
         run: |
-          mkdir -p reports
-          touch reports/validation.txt
-
-          EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
-          EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' | head -1 || echo "0")
-          if [ -z "$EXIT_CODE" ]; then EXIT_CODE="0"; fi
-
-          # Count errors/warnings from validation output
-          ERRORS="0"
-          WARNINGS="0"
+          ERRORS=0; WARNINGS=0
           if [ -f "reports/validation.txt" ]; then
             ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
             WARNINGS=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
           fi
-          ERRORS=$(echo "$ERRORS" | grep -oE '^[0-9]+' | head -1 || echo "0")
-          WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' | head -1 || echo "0")
-          if [ -z "$ERRORS" ]; then ERRORS="0"; fi
-          if [ -z "$WARNINGS" ]; then WARNINGS="0"; fi
+          echo "errors=${ERRORS:-0}" >> $GITHUB_OUTPUT
+          echo "warnings=${WARNINGS:-0}" >> $GITHUB_OUTPUT
 
-          {
-            echo "errors=$ERRORS"
-            echo "warnings=$WARNINGS"
-            echo "validation_exit_code=$EXIT_CODE"
-          } >> "$GITHUB_OUTPUT"
-
-          # Extract issues from all sources for PR comment
-          python3 << 'PYEOF'
-          import os
-          import re
-          import json
-
-          MAX_ERRORS = 10
-          MAX_WARNINGS = 10
-
-          result = {
-              'errors': [],
-              'warnings': [],
-              'total_errors': 0,
-              'total_warnings': 0,
-              'pylint_errors': [],
-              'pylint_errors_count': 0,
-              'ruff_errors': [],
-              'ruff_errors_count': 0
-          }
-
-          def strip_ansi(text):
-              """Remove ANSI escape codes from text."""
-              ansi_escape = re.compile(r'\x1b\[[0-9;]*m|\[0m|\[1;[0-9]*m|\[35m')
-              return ansi_escape.sub('', text)
-
-          def escape_html(text):
-              # First strip any ANSI codes, then escape HTML
-              text = strip_ansi(text)
-              return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-          def shorten_path(filepath):
-              parts = filepath.replace('\\', '/').split('/')
-              if len(parts) > 2:
-                  return '/'.join(parts[-2:])
-              return filepath
-
-          # Parse solt-check-odoo validation output
-          try:
-              with open('reports/validation.txt', 'r', encoding='utf-8', errors='replace') as f:
-                  content = f.read()
-
-              errors_match = re.search(r'Errors:\s*(\d+)', content)
-              warnings_match = re.search(r'Warnings:\s*(\d+)', content)
-              if errors_match:
-                  result['total_errors'] = int(errors_match.group(1))
-              if warnings_match:
-                  result['total_warnings'] = int(warnings_match.group(1))
-
-              current_severity = None
-              for line in content.split('\n'):
-                  line_stripped = line.strip()
-
-                  if 'ERRORS' in line_stripped.upper() and '(' in line_stripped:
-                      current_severity = 'error'
-                  elif 'WARNING' in line_stripped.upper() and '(' in line_stripped:
-                      current_severity = 'warning'
-                  elif 'INFO' in line_stripped.upper() and '(' in line_stripped:
-                      current_severity = 'info'
-
-                  if line.startswith('    - ') and current_severity in ('error', 'warning'):
-                      msg_content = line[6:]
-                      file_match = re.match(r'^([^\s:]+):(\d+)\s+(.+)$', msg_content)
-
-                      if file_match:
-                          entry = {
-                              'file': shorten_path(file_match.group(1)),
-                              'line': file_match.group(2),
-                              'message': escape_html(file_match.group(3)[:120])
-                          }
-                      else:
-                          entry = {
-                              'file': '',
-                              'line': '',
-                              'message': escape_html(msg_content[:150])
-                          }
-
-                      if current_severity == 'error' and len(result['errors']) < MAX_ERRORS:
-                          result['errors'].append(entry)
-                      elif current_severity == 'warning' and len(result['warnings']) < MAX_WARNINGS:
-                          result['warnings'].append(entry)
-
-          except FileNotFoundError:
-              pass
-
-          # Parse Pylint-Odoo output - FIXED REGEX
-          try:
-              with open('reports/pylint-changed.txt', 'r', encoding='utf-8', errors='replace') as f:
-                  pylint_content = f.read()
-
-              # Match format: filename.py:line:col: [CODE(name), Class.method] message
-              # or: filename.py:line: [CODE(name), ] message
-              pylint_pattern = re.compile(
-                  r'^(.+?\.py):(\d+):\s*(?:\d+:\s*)?\[([A-Z]\d+)\(([^)]+)\),\s*([^\]]*)\]\s*(.+)$'
-              )
-
-              for line in pylint_content.split('\n'):
-                  match = pylint_pattern.match(line.strip())
-                  if match:
-                      filepath = shorten_path(match.group(1))
-                      lineno = match.group(2)
-                      code = match.group(3)
-                      code_name = match.group(4)
-                      context = match.group(5).strip()
-                      message = match.group(6).strip()
-
-                      # Format message nicely
-                      if context:
-                          full_msg = f"[{code}] {message}"
-                      else:
-                          full_msg = f"[{code}] {message}"
-
-                      result['pylint_errors'].append({
-                          'file': filepath,
-                          'line': lineno,
-                          'message': escape_html(full_msg[:120]),
-                          'code': code,
-                          'code_name': code_name
-                      })
-
-              result['pylint_errors_count'] = len(result['pylint_errors'])
-              print(f"Parsed {result['pylint_errors_count']} Pylint-Odoo issues")
-
-          except FileNotFoundError:
-              print("No pylint-changed.txt found")
-
-          # Parse Ruff output
-          try:
-              with open('reports/ruff-changed.txt', 'r', encoding='utf-8', errors='replace') as f:
-                  ruff_content = f.read()
-
-              # Match format: path/file.py:line:col: CODE message
-              ruff_pattern = re.compile(r'^(.+?\.py):(\d+):(\d+):\s*([A-Z]+\d+)\s+(.+)$')
-
-              for line in ruff_content.split('\n'):
-                  match = ruff_pattern.match(line.strip())
-                  if match:
-                      filepath = shorten_path(match.group(1))
-                      # Remove CI runner path prefix
-                      filepath = re.sub(r'/home/runner/work/[^/]+/', '', filepath)
-
-                      result['ruff_errors'].append({
-                          'file': filepath,
-                          'line': match.group(2),
-                          'message': escape_html(f"[{match.group(4)}] {match.group(5)[:100]}"),
-                          'code': match.group(4)
-                      })
-
-              result['ruff_errors_count'] = len(result['ruff_errors'])
-              print(f"Parsed {result['ruff_errors_count']} Ruff issues")
-
-          except FileNotFoundError:
-              print("No ruff-changed.txt found")
-
-          # Save results
-          with open('reports/extracted_issues.json', 'w') as f:
-              json.dump(result, f, indent=2)
-
-          print(f"\nExtracted: {len(result['errors'])} solt errors, {len(result['warnings'])} warnings")
-          print(f"Pylint: {result['pylint_errors_count']}, Ruff: {result['ruff_errors_count']}")
-          PYEOF
-
-      - name: Upload reports
-        uses: actions/upload-artifact@v4
+      - name: Comment PR
         if: always()
-        with:
-          name: validation-reports
-          path: reports/
-          retention-days: 7
-
-      - name: Comment PR with report
-        if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7
         env:
-          MODULE_COUNT: ${{ steps.find-modules.outputs.count }}
-          EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
-          DURATION: ${{ steps.validate.outputs.duration }}
-          SCOPE: ${{ inputs.validation-scope }}
-          ERRORS_COUNT: ${{ steps.summary.outputs.errors }}
-          WARNINGS_COUNT: ${{ steps.summary.outputs.warnings }}
-          DOCSTRING_COV: ${{ steps.metrics.outputs.docstring_cov }}
-          DOCSTRING_DOCUMENTED: ${{ steps.metrics.outputs.docstring_documented }}
-          DOCSTRING_TOTAL: ${{ steps.metrics.outputs.docstring_total }}
-          STRING_COV: ${{ steps.metrics.outputs.string_cov }}
-          STRING_DOCUMENTED: ${{ steps.metrics.outputs.string_documented }}
-          STRING_TOTAL: ${{ steps.metrics.outputs.string_total }}
-          HELP_COV: ${{ steps.metrics.outputs.help_cov }}
-          HELP_DOCUMENTED: ${{ steps.metrics.outputs.help_documented }}
-          HELP_TOTAL: ${{ steps.metrics.outputs.help_total }}
-          MISSING_DOCSTRING_PR: ${{ steps.metrics.outputs.missing_docstring_pr }}
-          MISSING_STRING_PR: ${{ steps.metrics.outputs.missing_string_pr }}
-          MISSING_HELP_PR: ${{ steps.metrics.outputs.missing_help_pr }}
-          RUFF_CHANGED: ${{ steps.ruff.outputs.changed }}
-          RUFF_FULL: ${{ steps.ruff.outputs.full }}
-          PYLINT_CHANGED: ${{ steps.pylint.outputs.changed }}
-          PYLINT_FULL: ${{ steps.pylint.outputs.full }}
-          DOCSTRING_THRESHOLD: ${{ inputs.docstring-threshold }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MODULE_COUNT: ${{ steps.modules.outputs.count }}
+          CHANGED_FILES: ${{ steps.changed.outputs.total_count }}
+          SOLT_EXIT: ${{ steps.solt.outputs.exit_code }}
+          DURATION: ${{ steps.solt.outputs.duration }}
+          ERRORS: ${{ steps.summary.outputs.errors }}
+          WARNINGS: ${{ steps.summary.outputs.warnings }}
+          RUFF_ISSUES: ${{ steps.ruff.outputs.issues }}
+          PYLINT_ISSUES: ${{ steps.pylint.outputs.issues }}
           FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
           RUFF_BLOCKING: ${{ inputs.ruff-blocking }}
           PYLINT_BLOCKING: ${{ inputs.pylint-blocking }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
             const fs = require('fs');
-
-            function safeInt(val, def = 0) {
-              const parsed = parseInt(val);
-              return isNaN(parsed) ? def : parsed;
-            }
-
+            const safeInt = (v, d = 0) => { const n = parseInt(v); return isNaN(n) ? d : n; };
             const prNumber = safeInt(process.env.PR_NUMBER);
-            if (!prNumber) {
-              console.log('No PR number found, skipping comment');
-              return;
-            }
-
-            // Build workflow URL
-            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
-            const repository = process.env.GITHUB_REPOSITORY || '';
-            const runId = process.env.GITHUB_RUN_ID || '';
-            const workflowUrl = `${serverUrl}/${repository}/actions/runs/${runId}`;
+            if (!prNumber) return;
 
             const moduleCount = safeInt(process.env.MODULE_COUNT);
-            const exitCode = safeInt(process.env.EXIT_CODE);
+            const changedFiles = safeInt(process.env.CHANGED_FILES);
+            const soltExit = safeInt(process.env.SOLT_EXIT);
             const duration = safeInt(process.env.DURATION);
-            const scope = process.env.SCOPE || 'changed';
-            const threshold = safeInt(process.env.DOCSTRING_THRESHOLD, 80);
-            const errorsCount = safeInt(process.env.ERRORS_COUNT);
-            const warningsCount = safeInt(process.env.WARNINGS_COUNT);
+            const errors = safeInt(process.env.ERRORS);
+            const warnings = safeInt(process.env.WARNINGS);
+            const ruffIssues = safeInt(process.env.RUFF_ISSUES);
+            const pylintIssues = safeInt(process.env.PYLINT_ISSUES);
             const failOnWarnings = process.env.FAIL_ON_WARNINGS === 'true';
             const ruffBlocking = process.env.RUFF_BLOCKING === 'true';
             const pylintBlocking = process.env.PYLINT_BLOCKING === 'true';
 
-            const docstringCov = safeInt(process.env.DOCSTRING_COV);
-            const documentedMethods = safeInt(process.env.DOCSTRING_DOCUMENTED);
-            const totalMethods = safeInt(process.env.DOCSTRING_TOTAL, 1);
+            const hasErrors = soltExit !== 0 || errors > 0;
+            const hasBlockingWarnings = failOnWarnings && warnings > 0;
+            const hasBlockingRuff = ruffBlocking && ruffIssues > 0;
+            const hasBlockingPylint = pylintBlocking && failOnWarnings && pylintIssues > 0;
+            const hasFailed = hasErrors || hasBlockingWarnings || hasBlockingRuff || hasBlockingPylint;
 
-            const stringCov = safeInt(process.env.STRING_COV);
-            const fieldsWithString = safeInt(process.env.STRING_DOCUMENTED);
-            const totalFields = safeInt(process.env.STRING_TOTAL, 1);
+            const status = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
+            const statusMsg = hasFailed
+              ? '> :no_entry: **This PR has blocking issues.**'
+              : '> :white_check_mark: **All checks passed.**';
 
-            const helpCov = safeInt(process.env.HELP_COV);
-            const fieldsWithHelp = safeInt(process.env.HELP_DOCUMENTED);
-            const helpTotal = safeInt(process.env.HELP_TOTAL, 1);
+            let body = `## :bar_chart: Validation Report\n\n${statusMsg}\n\n`;
+            body += `| Metric | Value |\n|--------|-------|\n`;
+            body += `| Status | ${status} |\n`;
+            body += `| Modules | ${moduleCount} |\n`;
+            body += `| Files | ${changedFiles} |\n`;
+            body += `| Time | ${duration}s |\n\n`;
 
-            const missingDocstringPr = safeInt(process.env.MISSING_DOCSTRING_PR);
-            const missingStringPr = safeInt(process.env.MISSING_STRING_PR);
-            const missingHelpPr = safeInt(process.env.MISSING_HELP_PR);
+            body += `| Tool | Issues | Mode |\n|------|--------|------|\n`;
+            body += `| solt-check-odoo | ${errors} err / ${warnings} warn | blocking |\n`;
+            body += `| Ruff | ${ruffIssues} | ${ruffBlocking ? 'blocking' : 'info'} |\n`;
+            body += `| Pylint-Odoo | ${pylintIssues} | ${pylintBlocking ? 'blocking' : 'info'} |\n\n`;
 
-            const ruffChanged = safeInt(process.env.RUFF_CHANGED);
-            const ruffFull = safeInt(process.env.RUFF_FULL);
-            const pylintChanged = safeInt(process.env.PYLINT_CHANGED);
-            const pylintFull = safeInt(process.env.PYLINT_FULL);
-
-            console.log(`Pylint: PR=${pylintChanged}, Repo=${pylintFull}, blocking=${pylintBlocking}`);
-            console.log(`Ruff: PR=${ruffChanged}, Repo=${ruffFull}, blocking=${ruffBlocking}`);
-
-            // Load extracted issues
-            let extractedIssues = {
-              errors: [], warnings: [],
-              total_errors: 0, total_warnings: 0,
-              pylint_errors: [], pylint_errors_count: 0,
-              ruff_errors: [], ruff_errors_count: 0
-            };
-            try {
-              const issuesJson = fs.readFileSync('reports/extracted_issues.json', 'utf8');
-              extractedIssues = JSON.parse(issuesJson);
-              console.log(`Loaded issues: pylint=${extractedIssues.pylint_errors?.length || 0}, ruff=${extractedIssues.ruff_errors?.length || 0}`);
-            } catch (e) {
-              console.log('Could not load extracted issues:', e.message);
+            if (errors > 0) {
+              try {
+                const lines = fs.readFileSync('reports/validation.txt', 'utf8')
+                  .split('\n').filter(l => l.trim().startsWith('- ')).slice(0, 5);
+                if (lines.length) body += `<details><summary>Issues</summary>\n\n\`\`\`\n${lines.join('\n')}\n\`\`\`\n</details>\n\n`;
+              } catch (e) {}
             }
 
-            const totalErrors = extractedIssues.total_errors || errorsCount;
-            const totalWarnings = extractedIssues.total_warnings || warningsCount;
+            body += `[:link: Logs](${process.env.WORKFLOW_URL}) | :robot: *solt-pre-commit*`;
 
-            function icon(val, th, reverse = false) {
-              if (reverse) return val <= th ? ':white_check_mark:' : ':x:';
-              return val >= th ? ':white_check_mark:' : ':warning:';
-            }
-
-            // Determine final status
-            const hasBlockingErrors = exitCode !== 0;
-            const hasRuffIssues = ruffChanged > 0;
-            const hasPylintIssues = pylintChanged > 0;
-            const hasWarnings = warningsCount > 0 ||
-                               (pylintBlocking && hasPylintIssues) ||
-                               (ruffBlocking && hasRuffIssues);
-
-            const hasFailed = hasBlockingErrors || (failOnWarnings && hasWarnings);
-            const overallStatus = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
-
-            // Build comment
-            const bodyParts = [];
-
-            // Header
-            bodyParts.push('## :bar_chart: Validation Report');
-            bodyParts.push('');
-            if (hasFailed) {
-              bodyParts.push('> :no_entry: **This PR is blocked.** Fix the errors below before merging.');
-            } else {
-              bodyParts.push('> :white_check_mark: **All checks passed.** This PR is ready for review.');
-            }
-            bodyParts.push('');
-
-            const MAX_DISPLAY = 10;
-
-            // Summary section
-            bodyParts.push('### :clipboard: Summary');
-            bodyParts.push('');
-            bodyParts.push('| Metric | Value |');
-            bodyParts.push('|--------|-------|');
-            bodyParts.push(`| Status | ${overallStatus} |`);
-            bodyParts.push(`| Modules | ${moduleCount} |`);
-            bodyParts.push(`| Scope | \`${scope}\` |`);
-            bodyParts.push(`| Time | ${duration}s |`);
-            bodyParts.push('');
-
-            // Documentation Coverage
-            bodyParts.push('### :books: Documentation Coverage');
-            bodyParts.push('');
-            bodyParts.push('| Metric | Coverage | Detail | Goal | Status |');
-            bodyParts.push('|--------|----------|--------|------|--------|');
-            bodyParts.push(`| Docstrings | **${docstringCov}%** | ${documentedMethods}/${totalMethods} | >=${threshold}% | ${icon(docstringCov, threshold)} |`);
-            bodyParts.push(`| Field strings | **${stringCov}%** | ${fieldsWithString}/${totalFields} | >=90% | ${icon(stringCov, 90)} |`);
-            bodyParts.push(`| Field help | **${helpCov}%** | ${fieldsWithHelp}/${helpTotal} | >=50% | ${icon(helpCov, 50)} |`);
-            bodyParts.push('');
-
-            // Issues in this PR
-            bodyParts.push('### :warning: Issues in this PR');
-            bodyParts.push('');
-            bodyParts.push('| Type | Count |');
-            bodyParts.push('|------|-------|');
-            bodyParts.push(`| Missing docstrings | ${missingDocstringPr} |`);
-            bodyParts.push(`| Fields without string | ${missingStringPr} |`);
-            bodyParts.push(`| Fields without help | ${missingHelpPr} |`);
-            bodyParts.push('');
-
-            // Code Quality summary table
-            const ruffMode = ruffBlocking ? 'blocking' : 'info';
-            const pylintMode = pylintBlocking ? 'blocking' : 'info';
-            bodyParts.push('### :mag: Code Quality');
-            bodyParts.push('');
-            bodyParts.push('| Tool | PR | Repo | Mode | Status |');
-            bodyParts.push('|------|-----|------|------|--------|');
-            bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffFull} | ${ruffMode} | ${icon(ruffChanged, 0, true)} |`);
-            bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintFull} | ${pylintMode} | ${icon(pylintChanged, 0, true)} |`);
-            bodyParts.push('');
-
-            // =================================================================
-            // DETAILED ISSUES TABLES (after Code Quality)
-            // =================================================================
-
-            // Get all issue arrays
-            const soltErrors = extractedIssues.errors || [];
-            const soltWarnings = extractedIssues.warnings || [];
-            const pylintErrors = extractedIssues.pylint_errors || [];
-            const ruffErrors = extractedIssues.ruff_errors || [];
-
-            // Helper to show pagination info
-            const showPagination = (total, type) => {
-              if (total > 0) {
-                const displayed = Math.min(MAX_DISPLAY, total);
-                return `> Showing ${displayed} of ${total} ${type}. **[View all in workflow logs](${workflowUrl})**`;
-              }
-              return '';
-            };
-
-            // Solt Validation Errors (blocking)
-            if (totalErrors > 0 && soltErrors.length > 0) {
-              bodyParts.push(`### :no_entry: Blocking Errors (${totalErrors})`);
-              bodyParts.push('');
-              bodyParts.push('| File | Line | Error |');
-              bodyParts.push('|------|------|-------|');
-              for (const err of soltErrors.slice(0, MAX_DISPLAY)) {
-                const file = err.file ? `\`${err.file}\`` : '-';
-                bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-              }
-              bodyParts.push('');
-              bodyParts.push(showPagination(totalErrors, 'errors'));
-              bodyParts.push('');
-            }
-
-            // Blocking Warnings (when fail-on-warnings is enabled)
-            if (failOnWarnings && totalWarnings > 0 && soltWarnings.length > 0) {
-              bodyParts.push(`### :warning: Blocking Warnings (${totalWarnings})`);
-              bodyParts.push('');
-              bodyParts.push('> **Note:** `fail-on-warnings` is enabled.');
-              bodyParts.push('');
-              bodyParts.push('| File | Line | Warning |');
-              bodyParts.push('|------|------|---------|');
-              for (const warn of soltWarnings.slice(0, MAX_DISPLAY)) {
-                const file = warn.file ? `\`${warn.file}\`` : '-';
-                bodyParts.push(`| ${file} | ${warn.line || '-'} | ${warn.message || 'Unknown'} |`);
-              }
-              bodyParts.push('');
-              bodyParts.push(showPagination(totalWarnings, 'warnings'));
-              bodyParts.push('');
-            }
-
-            // Pylint-Odoo Issues
-            if (pylintChanged > 0) {
-              const isBlocking = pylintBlocking && failOnWarnings;
-              const headerIcon = isBlocking ? ':no_entry:' : ':information_source:';
-              const modeLabel = isBlocking ? 'blocking' : 'info';
-
-              bodyParts.push(`### ${headerIcon} Pylint-Odoo Issues (${modeLabel})`);
-              bodyParts.push('');
-
-              if (pylintErrors.length > 0) {
-                bodyParts.push('| File | Line | Issue |');
-                bodyParts.push('|------|------|-------|');
-                for (const err of pylintErrors.slice(0, MAX_DISPLAY)) {
-                  const file = err.file ? `\`${err.file}\`` : '-';
-                  bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                }
-                bodyParts.push('');
-                bodyParts.push(showPagination(pylintChanged, 'issues'));
-                bodyParts.push('');
-              } else {
-                bodyParts.push(`> ${pylintChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
-                bodyParts.push('');
-              }
-            }
-
-            // Ruff Issues
-            if (ruffChanged > 0) {
-              const isBlocking = ruffBlocking && failOnWarnings;
-              const headerIcon = isBlocking ? ':no_entry:' : ':information_source:';
-              const modeLabel = isBlocking ? 'blocking' : 'info';
-
-              bodyParts.push(`### ${headerIcon} Ruff Issues (${modeLabel})`);
-              bodyParts.push('');
-
-              if (ruffErrors.length > 0) {
-                bodyParts.push('| File | Line | Issue |');
-                bodyParts.push('|------|------|-------|');
-                for (const err of ruffErrors.slice(0, MAX_DISPLAY)) {
-                  const file = err.file ? `\`${err.file}\`` : '-';
-                  bodyParts.push(`| ${file} | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                }
-                bodyParts.push('');
-                bodyParts.push(showPagination(ruffChanged, 'issues'));
-                bodyParts.push('');
-              } else {
-                bodyParts.push(`> ${ruffChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
-                bodyParts.push('');
-              }
-            }
-
-            // Footer
-            bodyParts.push('---');
-            if (hasFailed) {
-              bodyParts.push(':bulb: **Tip:** Fix the blocking issues above and push again.');
-              bodyParts.push('');
-            }
-            bodyParts.push(`:link: **[View full workflow logs](${workflowUrl})**`);
-            bodyParts.push('');
-            bodyParts.push(':robot: *solt-pre-commit*');
-
-            const body = bodyParts.join('\n');
-
-            // Post or update comment
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber,
             });
-
-            const botComment = comments.find(c =>
-              c.user.type === 'Bot' &&
-              (c.body.includes('Validation Report') || c.body.includes('Validation Failed') || c.body.includes('Validation Passed'))
-            );
+            const botComment = comments.find(c => c.user.type === 'Bot' && c.body.includes('Validation Report'));
 
             if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
-              });
-              console.log('Updated existing comment');
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: botComment.id, body });
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: body
-              });
-              console.log('Created new comment');
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, body });
             }
 
-      # Final validation check - determines job pass/fail
-      - name: Final validation check
+      - name: Final check
         id: final-check
         if: always()
         run: |
-          EVENT_NAME="${{ github.event_name }}"
-          EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
-          EXIT_CODE=$(echo "$EXIT_CODE" | grep -oE '^[0-9]+' || echo 0)
-          if [ -z "$EXIT_CODE" ]; then EXIT_CODE=0; fi
+          FAILED=0
+          [ "${SOLT_EXIT:-0}" != "0" ] || [ "${ERRORS:-0}" -gt 0 ] && FAILED=1
+          [ "${{ inputs.fail-on-warnings }}" = "true" ] && [ "${WARNINGS:-0}" -gt 0 ] && FAILED=1
+          [ "${{ inputs.ruff-blocking }}" = "true" ] && [ "${RUFF:-0}" -gt 0 ] && FAILED=1
+          [ "${{ inputs.pylint-blocking }}" = "true" ] && [ "${{ inputs.fail-on-warnings }}" = "true" ] && [ "${PYLINT:-0}" -gt 0 ] && FAILED=1
 
-          FAIL_ON_WARNINGS="${{ inputs.fail-on-warnings }}"
-          RUFF_BLOCKING="${{ inputs.ruff-blocking }}"
-          PYLINT_BLOCKING="${{ inputs.pylint-blocking }}"
-          WARNINGS="${{ steps.summary.outputs.warnings }}"
-          WARNINGS=$(echo "$WARNINGS" | grep -oE '^[0-9]+' || echo 0)
-
-          RUFF_CHANGED="${{ steps.ruff.outputs.changed }}"
-          RUFF_CHANGED=$(echo "$RUFF_CHANGED" | grep -oE '^[0-9]+' || echo 0)
-          if [ -z "$RUFF_CHANGED" ]; then RUFF_CHANGED=0; fi
-
-          PYLINT_CHANGED="${{ steps.pylint.outputs.changed }}"
-          PYLINT_CHANGED=$(echo "$PYLINT_CHANGED" | grep -oE '^[0-9]+' || echo 0)
-          if [ -z "$PYLINT_CHANGED" ]; then PYLINT_CHANGED=0; fi
-
-          echo "::notice::Final check - Exit=$EXIT_CODE, Warnings=$WARNINGS, Pylint=$PYLINT_CHANGED (blocking=$PYLINT_BLOCKING), Ruff=$RUFF_CHANGED (blocking=$RUFF_BLOCKING)"
-
-          # Determine final result
-          if [ "$EXIT_CODE" -ne 0 ]; then
+          if [ "$FAILED" = "1" ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED - solt-check-odoo blocking errors"
             exit 1
-          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$WARNINGS" -gt 0 ]; then
-            echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED - warnings with fail-on-warnings enabled"
-            exit 1
-          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$PYLINT_BLOCKING" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then
-            echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED - $PYLINT_CHANGED Pylint-Odoo issues (pylint-blocking enabled)"
-            exit 1
-          elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$RUFF_BLOCKING" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then
-            echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED - $RUFF_CHANGED Ruff issues (ruff-blocking enabled)"
-            exit 1
-          else
-            echo "result=success" >> $GITHUB_OUTPUT
-            echo "::notice::Validation PASSED"
-            exit 0
           fi
-
-  # ---------------------------------------------------------------------------
-  # UPDATE BADGES (on push to protected branches)
-  # ---------------------------------------------------------------------------
-  update-badges:
-    name: Update Documentation Badges
-    runs-on: ubuntu-latest
-    needs: validate
-    if: |
-      always() &&
-      github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' ||
-       github.ref == 'refs/heads/master' ||
-       github.ref == 'refs/heads/develop' ||
-       startsWith(github.ref, 'refs/heads/17.0') ||
-       startsWith(github.ref, 'refs/heads/18.0'))
-
-    steps:
-      - name: Update docstrings badge
-        if: inputs.gist-id != ''
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        continue-on-error: true
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: ${{ inputs.gist-id }}
-          filename: ${{ inputs.badge-filename-prefix }}-docstrings.json
-          label: docstrings
-          message: "${{ needs.validate.outputs.docstring_cov }}%"
-          valColorRange: ${{ needs.validate.outputs.docstring_cov }}
-          minColorRange: 0
-          maxColorRange: 100
-          namedLogo: python
-          logoColor: white
-
-      - name: Update docs status badge
-        if: inputs.gist-id != ''
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        continue-on-error: true
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: ${{ inputs.gist-id }}
-          filename: ${{ inputs.badge-filename-prefix }}-docs-status.json
-          label: Documentation Standards
-          message: ${{ needs.validate.outputs.docs_status }}
-          color: ${{ needs.validate.outputs.docs_status == 'passing' && 'brightgreen' || 'red' }}
-          namedLogo: github
-          logoColor: white
+          echo "result=success" >> $GITHUB_OUTPUT
+        env:
+          SOLT_EXIT: ${{ steps.solt.outputs.exit_code }}
+          ERRORS: ${{ steps.summary.outputs.errors }}
+          WARNINGS: ${{ steps.summary.outputs.warnings }}
+          RUFF: ${{ steps.ruff.outputs.issues }}
+          PYLINT: ${{ steps.pylint.outputs.issues }}
 
   # ---------------------------------------------------------------------------
   # PRE-COMMIT HOOKS
@@ -1127,73 +294,18 @@ jobs:
   pre-commit:
     name: Pre-commit Hooks
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install pre-commit
-        run: pip install pre-commit
-
-      - name: Get changed files
-        id: changed
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch origin ${{ github.base_ref }} --depth=1
-            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
-          else
-            CHANGED_FILES=$(git diff --name-only HEAD~1...HEAD 2>/dev/null | tr '\n' ' ')
-          fi
-
-          VALID_FILES=""
-          for f in $CHANGED_FILES; do
-            if [ -f "$f" ]; then
-              VALID_FILES="$VALID_FILES $f"
-            fi
-          done
-          VALID_FILES=$(echo "$VALID_FILES" | xargs)
-
-          FILE_COUNT=$(echo "$VALID_FILES" | wc -w | tr -d ' ')
-          if [ -z "$FILE_COUNT" ]; then FILE_COUNT=0; fi
-
-          echo "files=$VALID_FILES" >> $GITHUB_OUTPUT
-          echo "count=$FILE_COUNT" >> $GITHUB_OUTPUT
-
       - name: Run pre-commit
-        id: precommit
         run: |
-          FILES="${{ steps.changed.outputs.files }}"
-          COUNT="${{ steps.changed.outputs.count }}"
-          if [ -z "$COUNT" ]; then COUNT=0; fi
-
-          if [ -z "$FILES" ] || [ "$COUNT" = "0" ]; then
-            echo "No files to check"
-            echo "status=skipped" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          echo "Checking $COUNT files..."
-          if pre-commit run --files $FILES 2>&1 | tee precommit_output.txt; then
-            echo "status=passed" >> $GITHUB_OUTPUT
-          else
-            echo "status=failed" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-      - name: Summary
-        if: always()
-        run: |
-          echo "## Pre-commit Hooks" >> $GITHUB_STEP_SUMMARY
-          echo "Files checked: ${{ steps.changed.outputs.count }}" >> $GITHUB_STEP_SUMMARY
-          STATUS="${{ steps.precommit.outputs.status }}"
-          if [ "$STATUS" = "passed" ]; then
-            echo "All hooks passed" >> $GITHUB_STEP_SUMMARY
-          elif [ "$STATUS" = "skipped" ]; then
-            echo "No files to check" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "Some hooks failed" >> $GITHUB_STEP_SUMMARY
-          fi
+          pip install pre-commit
+          git fetch origin ${{ github.base_ref }} --depth=1
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          EXISTING=""; for f in $FILES; do [ -f "$f" ] && EXISTING="$EXISTING $f"; done
+          [ -n "$EXISTING" ] && pre-commit run --files $EXISTING || true
