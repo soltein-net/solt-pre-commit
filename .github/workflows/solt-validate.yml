@@ -153,8 +153,12 @@ jobs:
         run: |
           ISSUES=0
           if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
-            ruff check ${{ steps.changed.outputs.py_files }} --output-format=concise 2>&1 | tee reports/ruff.txt || true
+            set +e
+            ruff check ${{ steps.changed.outputs.py_files }} --output-format=concise > reports/ruff.txt 2>&1
+            set -e
             ISSUES=$(grep -cE "^.+\.py:[0-9]+" reports/ruff.txt 2>/dev/null || echo 0)
+          else
+            echo "No Python files changed" > reports/ruff.txt
           fi
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
@@ -165,9 +169,13 @@ jobs:
         run: |
           ISSUES=0
           if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
+            set +e
             pylint --load-plugins=pylint_odoo --exit-zero ${{ steps.changed.outputs.py_files }} 2>&1 | \
-              sed 's/\x1b\[[0-9;]*m//g' | tee reports/pylint.txt || true
+              sed 's/\x1b\[[0-9;]*m//g' > reports/pylint.txt
+            set -e
             ISSUES=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint.txt 2>/dev/null || echo 0)
+          else
+            echo "No Python files changed" > reports/pylint.txt
           fi
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
@@ -202,6 +210,7 @@ jobs:
           WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
+            const fs = require('fs');
             const safeInt = (v, d = 0) => parseInt(v) || d;
             const prNumber = safeInt(process.env.PR_NUMBER);
             if (!prNumber) return;
@@ -233,7 +242,69 @@ jobs:
             body += `| solt-check-odoo | ${errors} err / ${warnings} warn | blocking |\n`;
             body += `| Ruff | ${ruff} | ${ruffBlocking ? 'blocking' : 'info'} |\n`;
             body += `| Pylint-Odoo | ${pylint} | ${pylintBlocking ? 'blocking' : 'info'} |\n\n`;
-            body += `[:link: Logs](${process.env.WORKFLOW_URL})`;
+
+            // Function to extract first 10 errors from a report file
+            function extractErrors(filepath, pattern, limit = 10) {
+              try {
+                if (!fs.existsSync(filepath)) return [];
+                const content = fs.readFileSync(filepath, 'utf8');
+                const lines = content.split('\n');
+                const errorLines = [];
+
+                for (const line of lines) {
+                  if (pattern.test(line) && errorLines.length < limit) {
+                    errorLines.push(line.trim());
+                  }
+                }
+                return errorLines;
+              } catch (e) {
+                return [];
+              }
+            }
+
+            // Solt-check-odoo errors
+            if (errors > 0 || warnings > 0) {
+              const soltErrors = extractErrors('reports/validation.txt', /^\s*-\s+.+\.py:\d+|^\s*-\s+.+\.xml:\d+|^\s*-\s+.+\.csv:\d+/);
+              if (soltErrors.length > 0) {
+                body += `### :warning: Solt-check-odoo Issues (showing ${Math.min(soltErrors.length, 10)} of ${errors + warnings})\n\n`;
+                body += `| # | Issue |\n|---|-------|\n`;
+                soltErrors.forEach((err, idx) => {
+                  const cleaned = err.replace(/^-\s*/, '').substring(0, 120);
+                  body += `| ${idx + 1} | \`${cleaned}\` |\n`;
+                });
+                body += `\n`;
+              }
+            }
+
+            // Ruff errors
+            if (ruff > 0) {
+              const ruffErrors = extractErrors('reports/ruff.txt', /\.py:\d+:\d+:/);
+              if (ruffErrors.length > 0) {
+                body += `### :warning: Ruff Issues (showing ${Math.min(ruffErrors.length, 10)} of ${ruff})\n\n`;
+                body += `| # | Issue |\n|---|-------|\n`;
+                ruffErrors.forEach((err, idx) => {
+                  const cleaned = err.substring(0, 120);
+                  body += `| ${idx + 1} | \`${cleaned}\` |\n`;
+                });
+                body += `\n`;
+              }
+            }
+
+            // Pylint-Odoo errors
+            if (pylint > 0) {
+              const pylintErrors = extractErrors('reports/pylint.txt', /\.py:\d+:\d+:.*\[/);
+              if (pylintErrors.length > 0) {
+                body += `### :warning: Pylint-Odoo Issues (showing ${Math.min(pylintErrors.length, 10)} of ${pylint})\n\n`;
+                body += `| # | Issue |\n|---|-------|\n`;
+                pylintErrors.forEach((err, idx) => {
+                  const cleaned = err.substring(0, 120);
+                  body += `| ${idx + 1} | \`${cleaned}\` |\n`;
+                });
+                body += `\n`;
+              }
+            }
+
+            body += `[:link: Full Logs](${process.env.WORKFLOW_URL})`;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber,
