@@ -31,13 +31,10 @@ on:
         default: true
     outputs:
       validation-result:
-        description: 'Validation result (success/failure)'
         value: ${{ jobs.validate.outputs.result }}
       errors-count:
-        description: 'Number of errors found'
         value: ${{ jobs.validate.outputs.errors }}
       warnings-count:
-        description: 'Number of warnings found'
         value: ${{ jobs.validate.outputs.warnings }}
 
 jobs:
@@ -53,25 +50,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
-      - name: Install solt-pre-commit
-        run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
-      - name: Validate branch name
+      - run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
+      - name: Validate branch
         run: |
-          BRANCH="${{ github.head_ref }}"
-          echo "## Branch Validation" >> $GITHUB_STEP_SUMMARY
-          echo "Branch: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
-          if solt-check-branch "$BRANCH"; then
-            echo "✅ Branch name is valid" >> $GITHUB_STEP_SUMMARY
+          if solt-check-branch "${{ github.head_ref }}"; then
+            echo "✅ Branch name valid" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ Branch name is invalid" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Branch name invalid" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
   # ---------------------------------------------------------------------------
-  # MAIN VALIDATION (CHANGED files only)
+  # MAIN VALIDATION
   # ---------------------------------------------------------------------------
   validate:
-    name: Odoo Module Validation
+    name: Soltein Odoo Validation
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
@@ -95,30 +88,31 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
-          pip install pylint-odoo ruff
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0" pylint-odoo ruff
 
       - name: Fetch base branch
-        run: git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} --depth=1 || true
+        run: git fetch origin ${{ github.base_ref }} --depth=1 || true
 
       - name: Get changed files
         id: changed
         run: |
-          CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
-          CHANGED_ALL=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l)
+          CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null || true)
+          CHANGED_ALL=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD 2>/dev/null | wc -l || echo 0)
 
+          # Filter existing files
           EXISTING_PY=""
           for f in $CHANGED_PY; do [ -f "$f" ] && EXISTING_PY="$EXISTING_PY $f"; done
+          EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
 
-          echo "py_files=$(echo $EXISTING_PY | xargs)" >> $GITHUB_OUTPUT
-          echo "py_count=$(echo $EXISTING_PY | wc -w | tr -d ' ')" >> $GITHUB_OUTPUT
+          echo "py_files=$EXISTING_PY" >> $GITHUB_OUTPUT
+          echo "py_count=$(echo "$EXISTING_PY" | wc -w | tr -d ' ')" >> $GITHUB_OUTPUT
           echo "total_count=$CHANGED_ALL" >> $GITHUB_OUTPUT
 
       - name: Find affected modules
         id: modules
         run: |
           MODULES=""
-          for f in $(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD 2>/dev/null); do
+          for f in $(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD 2>/dev/null || true); do
             DIR=$(dirname "$f")
             while [ "$DIR" != "." ] && [ "$DIR" != "/" ]; do
               if [ -f "$DIR/__manifest__.py" ] || [ -f "$DIR/__openerp__.py" ]; then
@@ -129,8 +123,11 @@ jobs:
             done
           done
           MODULES=$(echo "$MODULES" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+          MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
+
           echo "modules=$MODULES" >> $GITHUB_OUTPUT
-          echo "count=$(echo $MODULES | wc -w | tr -d ' ')" >> $GITHUB_OUTPUT
+          echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
+          echo "::notice::Modules: $MODULES (count: $MODULE_COUNT)"
 
       - name: Solt validation
         id: solt
@@ -143,7 +140,7 @@ jobs:
           START=$(date +%s)
           set +e
           solt-check-odoo ${{ steps.modules.outputs.modules }} --scope changed 2>&1 | tee reports/validation.txt
-          CODE=${PIPESTATUS[0]}
+          CODE=$?
           set -e
           echo "exit_code=$CODE" >> $GITHUB_OUTPUT
           echo "duration=$(($(date +%s) - START))" >> $GITHUB_OUTPUT
@@ -157,7 +154,7 @@ jobs:
           ISSUES=0
           if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
             ruff check ${{ steps.changed.outputs.py_files }} --output-format=concise 2>&1 | tee reports/ruff.txt || true
-            ISSUES=$(grep -cE "^.+\.py:[0-9]+" reports/ruff.txt 2>/dev/null || echo "0")
+            ISSUES=$(grep -cE "^.+\.py:[0-9]+" reports/ruff.txt 2>/dev/null || echo 0)
           fi
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
@@ -170,18 +167,18 @@ jobs:
           if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
             pylint --load-plugins=pylint_odoo --exit-zero ${{ steps.changed.outputs.py_files }} 2>&1 | \
               sed 's/\x1b\[[0-9;]*m//g' | tee reports/pylint.txt || true
-            ISSUES=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint.txt 2>/dev/null || echo "0")
+            ISSUES=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint.txt 2>/dev/null || echo 0)
           fi
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
-      - name: Extract summary
+      - name: Summary
         id: summary
         if: always()
         run: |
           ERRORS=0; WARNINGS=0
           if [ -f "reports/validation.txt" ]; then
-            ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
-            WARNINGS=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo "0")
+            ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo 0)
+            WARNINGS=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo 0)
           fi
           echo "errors=${ERRORS:-0}" >> $GITHUB_OUTPUT
           echo "warnings=${WARNINGS:-0}" >> $GITHUB_OUTPUT
@@ -205,63 +202,46 @@ jobs:
           WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
-            const fs = require('fs');
-            const safeInt = (v, d = 0) => { const n = parseInt(v); return isNaN(n) ? d : n; };
+            const safeInt = (v, d = 0) => parseInt(v) || d;
             const prNumber = safeInt(process.env.PR_NUMBER);
             if (!prNumber) return;
 
-            const moduleCount = safeInt(process.env.MODULE_COUNT);
-            const changedFiles = safeInt(process.env.CHANGED_FILES);
-            const soltExit = safeInt(process.env.SOLT_EXIT);
-            const duration = safeInt(process.env.DURATION);
             const errors = safeInt(process.env.ERRORS);
             const warnings = safeInt(process.env.WARNINGS);
-            const ruffIssues = safeInt(process.env.RUFF_ISSUES);
-            const pylintIssues = safeInt(process.env.PYLINT_ISSUES);
+            const ruff = safeInt(process.env.RUFF_ISSUES);
+            const pylint = safeInt(process.env.PYLINT_ISSUES);
+            const soltExit = safeInt(process.env.SOLT_EXIT);
             const failOnWarnings = process.env.FAIL_ON_WARNINGS === 'true';
             const ruffBlocking = process.env.RUFF_BLOCKING === 'true';
             const pylintBlocking = process.env.PYLINT_BLOCKING === 'true';
 
-            const hasErrors = soltExit !== 0 || errors > 0;
-            const hasBlockingWarnings = failOnWarnings && warnings > 0;
-            const hasBlockingRuff = ruffBlocking && ruffIssues > 0;
-            const hasBlockingPylint = pylintBlocking && failOnWarnings && pylintIssues > 0;
-            const hasFailed = hasErrors || hasBlockingWarnings || hasBlockingRuff || hasBlockingPylint;
+            const hasFailed = soltExit !== 0 || errors > 0 ||
+              (failOnWarnings && warnings > 0) ||
+              (ruffBlocking && ruff > 0) ||
+              (pylintBlocking && failOnWarnings && pylint > 0);
 
             const status = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
-            const statusMsg = hasFailed
-              ? '> :no_entry: **This PR has blocking issues.**'
-              : '> :white_check_mark: **All checks passed.**';
+            const msg = hasFailed ? '**Blocking issues found.**' : '**All checks passed.**';
 
-            let body = `## :bar_chart: Validation Report\n\n${statusMsg}\n\n`;
+            let body = `## :bar_chart: Validation Report\n\n> ${status} ${msg}\n\n`;
             body += `| Metric | Value |\n|--------|-------|\n`;
-            body += `| Status | ${status} |\n`;
-            body += `| Modules | ${moduleCount} |\n`;
-            body += `| Files | ${changedFiles} |\n`;
-            body += `| Time | ${duration}s |\n\n`;
+            body += `| Modules | ${process.env.MODULE_COUNT} |\n`;
+            body += `| Files | ${process.env.CHANGED_FILES} |\n`;
+            body += `| Time | ${process.env.DURATION}s |\n\n`;
 
             body += `| Tool | Issues | Mode |\n|------|--------|------|\n`;
             body += `| solt-check-odoo | ${errors} err / ${warnings} warn | blocking |\n`;
-            body += `| Ruff | ${ruffIssues} | ${ruffBlocking ? 'blocking' : 'info'} |\n`;
-            body += `| Pylint-Odoo | ${pylintIssues} | ${pylintBlocking ? 'blocking' : 'info'} |\n\n`;
-
-            if (errors > 0) {
-              try {
-                const lines = fs.readFileSync('reports/validation.txt', 'utf8')
-                  .split('\n').filter(l => l.trim().startsWith('- ')).slice(0, 5);
-                if (lines.length) body += `<details><summary>Issues</summary>\n\n\`\`\`\n${lines.join('\n')}\n\`\`\`\n</details>\n\n`;
-              } catch (e) {}
-            }
-
-            body += `[:link: Logs](${process.env.WORKFLOW_URL}) | :robot: *solt-pre-commit*`;
+            body += `| Ruff | ${ruff} | ${ruffBlocking ? 'blocking' : 'info'} |\n`;
+            body += `| Pylint-Odoo | ${pylint} | ${pylintBlocking ? 'blocking' : 'info'} |\n\n`;
+            body += `[:link: Logs](${process.env.WORKFLOW_URL})`;
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber,
             });
-            const botComment = comments.find(c => c.user.type === 'Bot' && c.body.includes('Validation Report'));
+            const bot = comments.find(c => c.user.type === 'Bot' && c.body.includes('Validation Report'));
 
-            if (botComment) {
-              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: botComment.id, body });
+            if (bot) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: bot.id, body });
             } else {
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, body });
             }
@@ -269,43 +249,19 @@ jobs:
       - name: Final check
         id: final-check
         if: always()
-        run: |
-          FAILED=0
-          [ "${SOLT_EXIT:-0}" != "0" ] || [ "${ERRORS:-0}" -gt 0 ] && FAILED=1
-          [ "${{ inputs.fail-on-warnings }}" = "true" ] && [ "${WARNINGS:-0}" -gt 0 ] && FAILED=1
-          [ "${{ inputs.ruff-blocking }}" = "true" ] && [ "${RUFF:-0}" -gt 0 ] && FAILED=1
-          [ "${{ inputs.pylint-blocking }}" = "true" ] && [ "${{ inputs.fail-on-warnings }}" = "true" ] && [ "${PYLINT:-0}" -gt 0 ] && FAILED=1
-
-          if [ "$FAILED" = "1" ]; then
-            echo "result=failure" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-          echo "result=success" >> $GITHUB_OUTPUT
         env:
           SOLT_EXIT: ${{ steps.solt.outputs.exit_code }}
           ERRORS: ${{ steps.summary.outputs.errors }}
           WARNINGS: ${{ steps.summary.outputs.warnings }}
           RUFF: ${{ steps.ruff.outputs.issues }}
           PYLINT: ${{ steps.pylint.outputs.issues }}
-
-  # ---------------------------------------------------------------------------
-  # PRE-COMMIT HOOKS
-  # ---------------------------------------------------------------------------
-  pre-commit:
-    name: Pre-commit Hooks
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ inputs.python-version }}
-      - name: Run pre-commit
         run: |
-          pip install pre-commit
-          git fetch origin ${{ github.base_ref }} --depth=1
-          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
-          EXISTING=""; for f in $FILES; do [ -f "$f" ] && EXISTING="$EXISTING $f"; done
-          [ -n "$EXISTING" ] && pre-commit run --files $EXISTING || true
+          FAILED=0
+          [ "${SOLT_EXIT:-0}" != "0" ] && FAILED=1
+          [ "${ERRORS:-0}" -gt 0 ] && FAILED=1
+          [ "${{ inputs.fail-on-warnings }}" = "true" ] && [ "${WARNINGS:-0}" -gt 0 ] && FAILED=1
+          [ "${{ inputs.ruff-blocking }}" = "true" ] && [ "${RUFF:-0}" -gt 0 ] && FAILED=1
+          [ "${{ inputs.pylint-blocking }}" = "true" ] && [ "${{ inputs.fail-on-warnings }}" = "true" ] && [ "${PYLINT:-0}" -gt 0 ] && FAILED=1
+
+          echo "result=$( [ $FAILED = 1 ] && echo failure || echo success )" >> $GITHUB_OUTPUT
+          exit $FAILED
