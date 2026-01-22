@@ -13,7 +13,7 @@ on:
         description: 'Python version to use'
         required: false
         type: string
-        default: '3.10'
+        default: '3.11'
       gist-id:
         description: 'Gist ID for badge storage'
         required: true
