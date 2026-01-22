@@ -138,10 +138,26 @@ jobs:
         run: |
           mkdir -p reports
           START=$(date +%s)
+
+          echo "::group::🔍 Soltein Odoo Validation"
           set +e
-          solt-check-odoo ${{ steps.modules.outputs.modules }} --scope changed 2>&1 | tee reports/validation.txt
+          Soltein Validation ${{ steps.modules.outputs.modules }} --scope changed 2>&1 | tee reports/validation.txt
           CODE=$?
           set -e
+          echo "::endgroup::"
+
+          # Extract error and warning counts
+          ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo 0)
+          WARNINGS=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo 0)
+
+          if [ "$CODE" -ne 0 ] || [ "${ERRORS:-0}" -gt 0 ]; then
+            echo "::error::Soltein validation failed with ${ERRORS:-0} errors and ${WARNINGS:-0} warnings"
+          elif [ "${WARNINGS:-0}" -gt 0 ]; then
+            echo "::warning::Found ${WARNINGS:-0} warnings"
+          else
+            echo "✅ All Soltein checks passed"
+          fi
+
           echo "exit_code=$CODE" >> $GITHUB_OUTPUT
           echo "duration=$(($(date +%s) - START))" >> $GITHUB_OUTPUT
           exit $CODE
@@ -153,12 +169,26 @@ jobs:
         run: |
           ISSUES=0
           if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
+            echo "::group::🔍 Ruff Linting Results"
             set +e
-            ruff check ${{ steps.changed.outputs.py_files }} --output-format=concise > reports/ruff.txt 2>&1
+            ruff check ${{ steps.changed.outputs.py_files }} --output-format=concise 2>&1 | tee reports/ruff.txt
+            RUFF_EXIT=$?
             set -e
-            ISSUES=$(grep -cE "^.+\.py:[0-9]+" reports/ruff.txt 2>/dev/null || echo 0)
+            echo "::endgroup::"
+
+            # Count issues - use grep with || true to avoid failures
+            ISSUES=$(grep -cE "^.+\.py:[0-9]+" reports/ruff.txt 2>/dev/null || true)
+            # Ensure ISSUES is a valid number
+            ISSUES=${ISSUES:-0}
+
+            if [ "$ISSUES" -gt 0 ]; then
+              echo "::warning::Found $ISSUES Ruff issues"
+            else
+              echo "✅ No Ruff issues found"
+            fi
           else
             echo "No Python files changed" > reports/ruff.txt
+            echo "ℹ️ No Python files to check"
           fi
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
@@ -169,13 +199,28 @@ jobs:
         run: |
           ISSUES=0
           if [ -n "${{ steps.changed.outputs.py_files }}" ]; then
+            echo "::group::🔍 Pylint-Odoo Linting Results"
             set +e
-            pylint --load-plugins=pylint_odoo --exit-zero ${{ steps.changed.outputs.py_files }} 2>&1 | \
-              sed 's/\x1b\[[0-9;]*m//g' > reports/pylint.txt
+            pylint --load-plugins=pylint_odoo --exit-zero ${{ steps.changed.outputs.py_files }} 2>&1 | tee reports/pylint-color.txt
+            PYLINT_EXIT=$?
+            # Remove color codes for counting
+            sed 's/\x1b\[[0-9;]*m//g' reports/pylint-color.txt > reports/pylint.txt
             set -e
-            ISSUES=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint.txt 2>/dev/null || echo 0)
+            echo "::endgroup::"
+
+            # Count issues - use grep with || true to avoid failures
+            ISSUES=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint.txt 2>/dev/null || true)
+            # Ensure ISSUES is a valid number
+            ISSUES=${ISSUES:-0}
+
+            if [ "$ISSUES" -gt 0 ]; then
+              echo "::warning::Found $ISSUES Pylint-Odoo issues"
+            else
+              echo "✅ No Pylint-Odoo issues found"
+            fi
           else
             echo "No Python files changed" > reports/pylint.txt
+            echo "ℹ️ No Python files to check"
           fi
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
 
@@ -183,11 +228,17 @@ jobs:
         id: summary
         if: always()
         run: |
-          ERRORS=0; WARNINGS=0
+          ERRORS=0
+          WARNINGS=0
           if [ -f "reports/validation.txt" ]; then
-            ERRORS=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo 0)
-            WARNINGS=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || echo 0)
+            # Extract errors count - use || true to avoid grep failures
+            ERRORS_RAW=$(grep -oP "Errors:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || true)
+            ERRORS=${ERRORS_RAW:-0}
+            # Extract warnings count - use || true to avoid grep failures
+            WARNINGS_RAW=$(grep -oP "Warnings:\s*\K\d+" reports/validation.txt 2>/dev/null | tail -1 || true)
+            WARNINGS=${WARNINGS_RAW:-0}
           fi
+          # Ensure we always have valid numbers
           echo "errors=${ERRORS:-0}" >> $GITHUB_OUTPUT
           echo "warnings=${WARNINGS:-0}" >> $GITHUB_OUTPUT
 
@@ -239,7 +290,7 @@ jobs:
             body += `| Time | ${process.env.DURATION}s |\n\n`;
 
             body += `| Tool | Issues | Mode |\n|------|--------|------|\n`;
-            body += `| solt-check-odoo | ${errors} err / ${warnings} warn | blocking |\n`;
+            body += `| Soltein Validation | ${errors} err / ${warnings} warn | blocking |\n`;
             body += `| Ruff | ${ruff} | ${ruffBlocking ? 'blocking' : 'info'} |\n`;
             body += `| Pylint-Odoo | ${pylint} | ${pylintBlocking ? 'blocking' : 'info'} |\n\n`;
 
@@ -262,11 +313,13 @@ jobs:
               }
             }
 
-            // Solt-check-odoo errors
+            // Soltein validation errors
             if (errors > 0 || warnings > 0) {
               const soltErrors = extractErrors('reports/validation.txt', /^\s*-\s+.+\.py:\d+|^\s*-\s+.+\.xml:\d+|^\s*-\s+.+\.csv:\d+/);
               if (soltErrors.length > 0) {
-                body += `### :warning: Solt-check-odoo Issues (showing ${Math.min(soltErrors.length, 10)} of ${errors + warnings})\n\n`;
+                const total = errors + warnings;
+                const showing = Math.min(soltErrors.length, 10);
+                body += `### :warning: Soltein Validation Issues (showing ${showing} of ${total})\n\n`;
                 body += `| # | Issue |\n|---|-------|\n`;
                 soltErrors.forEach((err, idx) => {
                   const cleaned = err.replace(/^-\s*/, '').substring(0, 120);
@@ -280,7 +333,8 @@ jobs:
             if (ruff > 0) {
               const ruffErrors = extractErrors('reports/ruff.txt', /\.py:\d+:\d+:/);
               if (ruffErrors.length > 0) {
-                body += `### :warning: Ruff Issues (showing ${Math.min(ruffErrors.length, 10)} of ${ruff})\n\n`;
+                const showing = Math.min(ruffErrors.length, 10);
+                body += `### :warning: Ruff Issues (showing ${showing} of ${ruff})\n\n`;
                 body += `| # | Issue |\n|---|-------|\n`;
                 ruffErrors.forEach((err, idx) => {
                   const cleaned = err.substring(0, 120);
@@ -294,7 +348,8 @@ jobs:
             if (pylint > 0) {
               const pylintErrors = extractErrors('reports/pylint.txt', /\.py:\d+:\d+:.*\[/);
               if (pylintErrors.length > 0) {
-                body += `### :warning: Pylint-Odoo Issues (showing ${Math.min(pylintErrors.length, 10)} of ${pylint})\n\n`;
+                const showing = Math.min(pylintErrors.length, 10);
+                body += `### :warning: Pylint-Odoo Issues (showing ${showing} of ${pylint})\n\n`;
                 body += `| # | Issue |\n|---|-------|\n`;
                 pylintErrors.forEach((err, idx) => {
                   const cleaned = err.substring(0, 120);
