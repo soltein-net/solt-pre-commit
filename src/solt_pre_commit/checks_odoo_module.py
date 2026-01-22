@@ -707,6 +707,7 @@ def run(
     json_report=None,
     show_coverage=True,
     show_all_modules=False,
+    no_limit=False,
 ):
     """Main entry point."""
     import time
@@ -721,7 +722,7 @@ def run(
     if force_scope:
         severity_config.validation_scope = force_scope
 
-    printer = ResultPrinter(use_colors=True, verbose=show_info)
+    printer = ResultPrinter(use_colors=True, verbose=show_info, max_messages=None if no_limit else None)
 
     all_results = []
     checks_objects = []
@@ -840,6 +841,11 @@ def main():
         action="store_true",
         help="Show all modules even if they have no issues",
     )
+    parser.add_argument(
+        "--no-limit",
+        action="store_true",
+        help="Show all errors without truncating (default: shows 10 per check locally)",
+    )
 
     args = parser.parse_args()
 
@@ -865,7 +871,7 @@ def main():
                 if not args.quiet:
                     print(f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {len(paths)} file(s)")
                     for mod in detected_modules:
-                        print(f"  → {Path(mod).name}")
+                        print(f"  â†’ {Path(mod).name}")
                 paths = detected_modules
             else:
                 if not args.quiet:
@@ -881,7 +887,7 @@ def main():
                     f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {staged_count} staged file(s)"
                 )
                 for mod in detected_modules:
-                    print(f"  → {Path(mod).name}")
+                    print(f"  â†’ {Path(mod).name}")
             paths = detected_modules
         else:
             # Fallback to current directory
@@ -897,6 +903,7 @@ def main():
         force_scope=args.scope,
         json_report=args.json_report,
         show_all_modules=args.show_all_modules,
+        no_limit=args.no_limit,
     )
 
 
