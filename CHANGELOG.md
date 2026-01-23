@@ -7,12 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Simplified project structure (flat layout, no src/ directory)
-- Removed utility scripts (`generate-badges.py`, `sync-configs.py`) from core package
-- Updated MANIFEST.in to reflect new structure
-
-## [1.0.0] - 2025-01-XX
+## [1.0.1] - 2025-01-23
 
 ### Added
 - Multi-version Odoo support (17.0, 18.0, 19.0+)
@@ -23,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Migrated to flat project structure
-- Renamed template files with underscore prefix (`_pre-commit-config.yaml`)
 - Improved GitHub Actions workflow with better error handling
 - Enhanced PR comments with detailed validation reports
 - Centralized `pyproject.toml` configuration for client repos (replaces separate `ruff.toml`)
@@ -43,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - `configs/ruff.toml` (consolidated into `pyproject-base.toml`)
 
-## [0.1.0] - 2024-12-15
+## [1.0.0] - 2024-12-15
 
 ### Added
 - Initial release

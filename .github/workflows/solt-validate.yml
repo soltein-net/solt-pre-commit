@@ -264,7 +264,7 @@ jobs:
           python-version: ${{ needs.detect-version.outputs.python_version }}
 
       - name: Install solt-pre-commit
-        run: uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
+        run: uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1"
 
       - name: Validate branch name
         run: |
@@ -313,7 +313,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0" pylint-odoo ruff
+          uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.gi@v1.0.1" pylint-odoo ruff
           echo "::notice::Installed for Odoo $ODOO_VERSION with Python $PYTHON_VERSION"
 
       - name: Find Odoo modules

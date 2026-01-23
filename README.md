@@ -102,7 +102,7 @@ Use our reusable GitHub Actions workflow:
 # .github/workflows/validate.yml
 jobs:
   validate:
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.0
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.1
     with:
       validation-scope: 'changed'
       fail-on-warnings: false

@@ -34,7 +34,7 @@ jobs:
   # ---------------------------------------------------------------------------
   validate:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.0
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.1
     with:
       validation-scope: 'changed'
       fail-on-warnings: false
@@ -52,7 +52,7 @@ jobs:
   # ---------------------------------------------------------------------------
   update-badges:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-badges.yml@v1.0.0
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-badges.yml@v1.0.1
     with:
       gist-id: ${{ vars.SOLTEIN_GIST_ID }}
       badge-filename-prefix: ${{ github.event.repository.name }}
