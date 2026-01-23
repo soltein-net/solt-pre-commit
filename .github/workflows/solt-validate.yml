@@ -55,9 +55,8 @@ on:
         required: false
         type: boolean
         default: false
-    secrets:
-      # Note: Badge updates have been moved to solt-update-badges.yml (weekly workflow)
-      # Configure GIST_SECRET there instead for badge functionality
+    # Note: Badge updates have been moved to solt-update-badges.yml (weekly workflow)
+    # Configure GIST_SECRET there instead for badge functionality
     outputs:
       validation-result:
         description: 'Validation result (success/failure)'
@@ -183,9 +182,9 @@ jobs:
           # =================================================================
           # PYTHON VERSION MAPPING
           # =================================================================
-          # Odoo 17.0 â†’ Python 3.10 (min 3.10, recommended 3.10-3.11)
-          # Odoo 18.0 â†’ Python 3.11 (min 3.10, recommended 3.11-3.12)
-          # Odoo 19.0 â†’ Python 3.12 (future)
+          # Odoo 17.0 -> Python 3.10 (min 3.10, recommended 3.10-3.11)
+          # Odoo 18.0 -> Python 3.11 (min 3.10, recommended 3.11-3.12)
+          # Odoo 19.0 -> Python 3.12 (future)
           # =================================================================
 
           if [ -n "$INPUT_PYTHON" ]; then
@@ -235,7 +234,7 @@ jobs:
           echo "============================================================"
 
           # Add to job summary
-          echo "## ðŸ” Version Detection" >> $GITHUB_STEP_SUMMARY
+          echo "## Version Detection" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -272,9 +271,9 @@ jobs:
           echo "## Branch Validation" >> $GITHUB_STEP_SUMMARY
           echo "Branch: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
           if solt-check-branch "$BRANCH"; then
-            echo "âœ… Branch name is valid" >> $GITHUB_STEP_SUMMARY
+            echo "Branch name is valid" >> $GITHUB_STEP_SUMMARY
           else
-            echo "âŒ Branch name is invalid" >> $GITHUB_STEP_SUMMARY
+            echo "Branch name is invalid" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
@@ -313,7 +312,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.gi@v1.0.1" pylint-odoo ruff
+          uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1" pylint-odoo ruff
           echo "::notice::Installed for Odoo $ODOO_VERSION with Python $PYTHON_VERSION"
 
       - name: Find Odoo modules
