@@ -30,7 +30,14 @@ from .checks_odoo_module_po import ChecksOdooModulePO
 from .checks_odoo_module_python import ChecksOdooModulePython
 from .checks_odoo_module_xml import ChecksOdooModuleXML
 from .checks_odoo_module_xml_advanced import ChecksOdooModuleXMLAdvanced
-from .config_loader import ChangedFilesDetector, Severity, SoltConfig
+from .config_loader import (
+    DEFAULT_ODOO_VERSION,
+    SUPPORTED_ODOO_VERSIONS,
+    ChangedFilesDetector,
+    OdooVersionDetector,
+    Severity,
+    SoltConfig,
+)
 from .doc_coverage import CoverageReport, build_coverage_report
 
 __all__ = [
@@ -46,6 +53,10 @@ __all__ = [
     "SoltConfig",
     "Severity",
     "ChangedFilesDetector",
+    "OdooVersionDetector",
+    # Constants
+    "SUPPORTED_ODOO_VERSIONS",
+    "DEFAULT_ODOO_VERSION",
     # Doc coverage
     "CoverageReport",
     "build_coverage_report",
