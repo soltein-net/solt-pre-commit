@@ -1,95 +1,97 @@
 # =============================================================================
-# SOLT PRE-COMMIT HOOKS - Configuration
+# SOLT PRE-COMMIT HOOKS - Default Configuration
 # =============================================================================
-# Place this file in your repository root
+# These are the system defaults. Users can override in their .solt-hooks.yaml
+# Supports Odoo versions: 17.0, 18.0, 19.0
 # =============================================================================
 
 # =============================================================================
-# VALIDATION SCOPE
+# ODOO VERSION
 # =============================================================================
-# Controls which files are validated:
-#   - "changed": Only validate files changed in PR/commit (recommended for legacy)
-#   - "full": Validate entire repository (for clean repos)
+# Specify Odoo version or use 'auto' for automatic detection from manifest
+# Options: auto, 17.0, 18.0, 19.0
+odoo_version: auto
 
+# Validation scope: 'changed' or 'full'
+# - changed: Only validate files modified in PR/commit (recommended for legacy repos)
+# - full: Validate entire repository
 validation_scope: changed
 
 # Base branch for detecting changed files (auto-detected if not set)
 # base_branch: main
 
 # =============================================================================
-# BRANCH NAMING POLICY
-# =============================================================================
-# Supports Odoo multi-version branch patterns:
-#   - Direct version: 17.0, 18.0 (protected)
-#   - Version-prefixed: feature/17.0-description, hotfix/18.0-fix
-#   - Standard: feature/description, fix/TICKET-123-description
-#   - Release: release/17.0.1.0
-# =============================================================================
-branch_naming:
-  strict: false  # true = requires ticket OR version (feature/SOLT-123-desc OR feature/17.0-desc)
-
-  # Ticket prefixes (used when strict: true)
-  ticket_prefixes:
-    - SOLT
-    - PROJ
-
-  # Allowed branch types with pattern: <type>/<description>
-  # All types support version prefix: <type>/<odoo-version>-<description>
-  allowed_types:
-    - feature    # feature/add-invoice OR feature/17.0-add-invoice
-    - fix        # fix/bug-name OR fix/18.0-critical-fix
-    - hotfix     # hotfix/urgent OR hotfix/17.0-urgent
-    - bugfix
-    - release    # release/17.0.1.0
-    - refactor
-    - docs
-    - test
-    - chore
-
-  # Protected branches (skip validation entirely)
-  protected_branches:
-    - main
-    - master
-    - develop
-    - staging
-    - production
-
-  # Protected patterns (regex) - branches matching these skip validation
-  # Odoo version branches are protected by default
-  protected_patterns:
-    # Direct version branches (17.0, 18.0, etc.)
-    - "^\\d+\\.0$"
-    # Version with patch (17.0.1.0, 17.0-stable, etc.)
-    - "^\\d+\\.0\\.\\d+.*$"
-    # Custom patterns (add your own)
-    # - "^feature/17\\.0-.*$"  # Uncomment to also protect feature branches
-
-# =============================================================================
 # DISABLED CHECKS
 # =============================================================================
-# Completely disable specific checks
 disabled_checks: [ ]
   # - missing_readme
-# - po_requires_module
+  # - po_requires_module
 
 # =============================================================================
 # SEVERITY LEVELS
 # =============================================================================
-# Override default severities: error, warning, info
+# Levels: error, warning, info
+#   - error:   Always blocks commit/PR
+#   - warning: Blocks if in blocking_severities
+#   - info:    Never blocks
+
 severity:
-  # Code quality - adjust as needed
+  # Syntax errors
+  xml_syntax_error: error
+  csv_syntax_error: error
+  python_syntax_error: error
+  manifest_syntax_error: error
+  po_syntax_error: error
+
+  # Duplicates
+  xml_duplicate_record_id: error
+  csv_duplicate_record_id: error
+  po_duplicate_message_definition: error
+  xml_duplicate_fields: error
+
+  # Odoo runtime warnings
+  python_duplicate_field_label: error
+  python_inconsistent_compute_sudo: error
+  python_tracking_without_mail_thread: error
+  python_selection_on_related: error
+  xml_deprecated_active_id_usage: error
+  xml_alert_missing_role: error
+
+  # Dangerous patterns
+  xml_create_user_wo_reset_password: warning
+  xml_dangerous_filter_wo_user: warning
+  xml_hardcoded_id: warning
+  xml_duplicate_view_priority: warning
+
+  # Deprecations
+  xml_deprecated_tree_attribute: warning
+  xml_deprecated_data_node: warning
+  xml_deprecated_openerp_xml_node: warning
+  xml_deprecated_t_raw: warning
+  xml_deprecated_qweb_directive: warning
+
+  # Code quality
   python_field_missing_string: warning
   python_field_missing_help: warning
   python_method_missing_docstring: warning
   python_docstring_too_short: info
   python_docstring_uninformative: info
 
+  # PO quality
+  po_requires_module: warning
+  po_python_parse_printf: warning
+  po_python_parse_format: warning
+
+  # Other
+  xml_redundant_module_name: info
+  xml_not_valid_char_link: warning
+  missing_readme: info
+
 # =============================================================================
 # BLOCKING SEVERITIES
 # =============================================================================
 blocking_severities:
   - error
-  - warning
 
 # =============================================================================
 # SKIP LISTS
@@ -97,7 +99,6 @@ blocking_severities:
 skip_string_fields:
   - active
   - name
-  - display_name
   - sequence
   - company_id
   - currency_id
@@ -108,6 +109,7 @@ skip_string_fields:
   - message_ids
   - message_follower_ids
   - activity_ids
+  - display_name
 
 skip_help_fields:
   - active
@@ -129,7 +131,7 @@ skip_docstring_methods: [ ]
   # - default_get
   # - create
   # - write
-# - unlink
+  # - unlink
 
 min_docstring_length: 10
 
@@ -142,3 +144,24 @@ exclude_paths:
   - "**/static/**"
   - "**/__pycache__/**"
   - "**/node_modules/**"
+
+# =============================================================================
+# BRANCH NAMING
+# =============================================================================
+branch_naming:
+  strict: false
+  ticket_prefixes:
+    - SOLT
+    - PROJ
+  allowed_types:
+    - feature
+    - fix
+    - hotfix
+    - bugfix
+    - release
+    - refactor
+    - docs
+    - test
+    - chore
+  protected_branches: [ ]
+  protected_patterns: [ ]

@@ -13,13 +13,13 @@ Custom pre-commit hooks for Odoo module validation with comprehensive documentat
 
 ---
 
-## 📋 Supported Versions
+## ðŸ“‹ Supported Versions
 
 | Odoo Version | Python | Status |
 |--------------|--------|--------|
-| 17.0 | 3.10+ | ✅ Fully Supported |
-| 18.0 | 3.10+ | ✅ Fully Supported |
-| 19.0 | 3.11+ | ✅ Fully Supported |
+| 17.0 | 3.10+ | âœ… Fully Supported |
+| 18.0 | 3.10+ | âœ… Fully Supported |
+| 19.0 | 3.11+ | âœ… Fully Supported |
 
 ---
 
@@ -32,10 +32,13 @@ Custom pre-commit hooks for Odoo module validation with comprehensive documentat
 git clone https://github.com/soltein-net/solt-pre-commit.git
 
 # Setup your Odoo repository (auto-detects version)
-python solt-pre-commit/setup-repo.py /path/to/your-odoo-repo
+python solt-pre-commit/scripts/setup-repo.py /path/to/your-odoo-repo
 
 # Or specify version explicitly
-python solt-pre-commit/setup-repo.py /path/to/your-odoo-repo --odoo-version 18.0
+python solt-pre-commit/scripts/setup-repo.py /path/to/your-odoo-repo --odoo-version 18.0
+
+# Batch setup multiple repos
+python solt-pre-commit/scripts/setup-repo.py --batch solt-pre-commit/scripts/repos.txt
 
 # Done! The script creates all necessary files
 ```
@@ -63,20 +66,20 @@ pre-commit run --all-files
 
 ---
 
-## ✨ Features
+## âœ¨ Features
 
-### 🔍 Comprehensive Validation
+### ðŸ” Comprehensive Validation
 
 | Check Type | Description | Blocks PR |
 |------------|-------------|-----------|
-| **Branch Names** | Enforces naming conventions | ✅ |
-| **Odoo Runtime Warnings** | Detects issues before server start | ✅ |
-| **XML Validations** | Syntax, duplicates, deprecations | ✅ |
+| **Branch Names** | Enforces naming conventions | âœ… |
+| **Odoo Runtime Warnings** | Detects issues before server start | âœ… |
+| **XML Validations** | Syntax, duplicates, deprecations | âœ… |
 | **Python Quality** | Docstrings, field attributes | Configurable |
-| **CSV/PO Files** | Duplicate IDs, translation errors | ✅ |
-| **Documentation Coverage** | Detailed reports with trends | ℹ️ Informative |
+| **CSV/PO Files** | Duplicate IDs, translation errors | âœ… |
+| **Documentation Coverage** | Detailed reports with trends | â„¹ï¸ Informative |
 
-### ⚙️ Configuration
+### âš™ï¸ Configuration
 
 ```yaml
 # .solt-hooks.yaml
@@ -91,7 +94,7 @@ skip_docstring_methods:
   - write
 ```
 
-### 🔄 Centralized Workflows
+### ðŸ”„ Centralized Workflows
 
 Use our reusable GitHub Actions workflow:
 
@@ -107,7 +110,7 @@ jobs:
 
 ---
 
-## 📦 Available Hooks
+## ðŸ“¦ Available Hooks
 
 | Hook ID | Description | Use Case |
 |---------|-------------|----------|
@@ -120,7 +123,7 @@ jobs:
 
 ---
 
-## 🛡️ Odoo Runtime Warnings Detected
+## ðŸ›¡ï¸ Odoo Runtime Warnings Detected
 
 Catches these Odoo warnings **before** they appear in your logs:
 
@@ -135,10 +138,10 @@ Catches these Odoo warnings **before** they appear in your logs:
 
 ---
 
-## 📋 All Validation Checks
+## ðŸ“‹ All Validation Checks
 
 <details>
-<summary><strong>🐍 Python Checks</strong></summary>
+<summary><strong>ðŸ Python Checks</strong></summary>
 
 ### Runtime Errors (Block)
 - `python_duplicate_field_label` - Same label on multiple fields
@@ -156,7 +159,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 </details>
 
 <details>
-<summary><strong>📝 XML Checks</strong></summary>
+<summary><strong>ðŸ“ XML Checks</strong></summary>
 
 ### Errors (Block)
 - `xml_syntax_error` - XML parse errors
@@ -174,7 +177,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 </details>
 
 <details>
-<summary><strong>📊 CSV Checks</strong></summary>
+<summary><strong>ðŸ“Š CSV Checks</strong></summary>
 
 - `csv_syntax_error` - CSV parse errors
 - `csv_duplicate_record_id` - Duplicate XML IDs
@@ -182,7 +185,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 </details>
 
 <details>
-<summary><strong>🌐 PO/POT Checks</strong></summary>
+<summary><strong>ðŸŒ PO/POT Checks</strong></summary>
 
 - `po_syntax_error` - Translation file errors
 - `po_duplicate_message_definition` - Duplicate translations
@@ -194,7 +197,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 
 ---
 
-## ⚙️ Configuration
+## âš™ï¸ Configuration
 
 ### Odoo Version
 
@@ -281,7 +284,7 @@ branch_naming:
 
 ---
 
-## 🔧 CLI Usage
+## ðŸ”§ CLI Usage
 
 ```bash
 # Validate module
@@ -297,32 +300,50 @@ solt-check-odoo /path/to/module --show-info
 solt-check-branch feature/SOLT-123-my-feature
 ```
 
+
 ---
 
-## 📁 Repository Structure
+## 📂 Repository Structure
 
 ```
 solt-pre-commit/
-├── checks_odoo_module.py           # Main orchestrator
-├── checks_odoo_module_csv.py       # CSV validations
-├── checks_odoo_module_po.py        # PO/POT validations
-├── checks_odoo_module_python.py    # Python validations
-├── checks_odoo_module_xml.py       # Basic XML validations
-├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
-├── checks_branch_name.py           # Branch naming validation
-├── config_loader.py                # Configuration management
-├── doc_coverage.py                 # Documentation coverage analysis
-├── setup-repo.py                   # Initialize hooks in client repos
-├── _pylintrc                       # Pylint config for Odoo
-├── _pre-commit-config.yaml         # Pre-commit hooks template
-├── _pre-commit-hooks.yaml          # Hook definitions
-├── _solt-hooks.yaml                # Soltein validation settings
-├── _solt-hooks-defaults.yaml       # Default hook settings
-├── pyproject-base.toml             # Base Python tools config
-├── ci.yml                          # Internal CI workflow
-├── solt-validate.yml               # Reusable workflow for clients
-├── pyproject.toml                  # Package configuration
-├── setup.py                        # Package setup
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                    # Internal CI pipeline
+│       ├── solt-update-badges.yml    # Weekly badge updates
+│       └── solt-validate.yml         # Reusable workflow for clients
+├── configs/
+│   ├── .pylintrc                     # Pylint configuration for Odoo
+│   ├── .solt-hooks-defaults.yaml     # Default hook settings
+│   └── pyproject-base.toml           # Base Python tools config (Ruff, etc.)
+├── docs/
+│   └── RUFF_LEVELS.md                # Ruff configuration levels guide
+├── scripts/
+│   ├── generate-badges.py            # Badge generation utility
+│   ├── repos.txt                     # Batch setup repository list
+│   └── setup-repo.py                 # Initialize hooks in client repos
+├── src/
+│   └── solt_pre_commit/
+│       ├── __init__.py               # Package exports
+│       ├── checks_branch_name.py     # Branch naming validation
+│       ├── checks_odoo_module.py     # Main orchestrator
+│       ├── checks_odoo_module_csv.py # CSV validations
+│       ├── checks_odoo_module_po.py  # PO/POT validations
+│       ├── checks_odoo_module_python.py  # Python validations
+│       ├── checks_odoo_module_xml.py     # Basic XML validations
+│       ├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
+│       ├── config_loader.py          # Configuration management
+│       └── doc_coverage.py           # Documentation coverage analysis
+├── templates/
+│   ├── .pre-commit-config.yaml       # Pre-commit template (GitHub)
+│   └── .pre-commit-config-local.yaml # Pre-commit template (local/monorepo)
+├── .pre-commit-config.yaml           # This repo's pre-commit config
+├── .pre-commit-hooks.yaml            # Hook definitions for consumers
+├── pyproject.toml                    # Package configuration
+├── setup.py                          # Package setup
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LICENSE
 └── README.md
 ```
 
@@ -334,10 +355,13 @@ solt-pre-commit/
 
 ```bash
 # From solt-pre-commit directory
-python setup-repo.py ../your-repo
+python scripts/setup-repo.py ../your-repo
 
 # With options
-python setup-repo.py ../your-repo --scope full --dry-run
+python scripts/setup-repo.py ../your-repo --scope full --dry-run
+
+# Batch setup multiple repos
+python scripts/setup-repo.py --batch scripts/repos.txt
 ```
 
 This creates:
@@ -345,12 +369,12 @@ This creates:
 - `.solt-hooks.yaml` - Validation settings
 - `.pylintrc` - Pylint rules
 - `pyproject.toml` - Python tools config (Ruff, etc.)
-- `.github/workflows/validate.yml` - CI workflow
+- `.github/workflows/solt-validate.yml` - CI workflow
 
 ### For Monorepo
 
 ```bash
-python setup-repo.py ../solt-addons --local
+python scripts/setup-repo.py ../solt-addons --local
 ```
 
 Uses local Python paths instead of GitHub URLs.

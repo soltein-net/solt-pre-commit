@@ -3,20 +3,17 @@
 # Copyright 2025 Soltein SA. de CV.
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
-"""Setup script to initialize solt-pre-commit in a client repository.
+"""Setup script to initialize solt-pre-commit in client repositories.
 
-Usage:
+Usage (single repo):
     python setup-repo.py /path/to/odoo-repo
     python setup-repo.py /path/to/odoo-repo --scope full
     python setup-repo.py /path/to/odoo-repo --dry-run
     python setup-repo.py /path/to/odoo-repo --local  # For monorepo
 
-Example:
-    python scripts/setup-repo.py ../solt-budget --scope changed
-
-Workflows installed:
-    - solt-validate.yml: PR/push validation (runs on every PR)
-    - Includes weekly badge updates using centralized Soltein Gist
+Usage (batch mode):
+    python setup-repo.py --batch repos.txt
+    python setup-repo.py --batch repos.txt --dry-run
 """
 
 from __future__ import annotations
@@ -30,113 +27,35 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────────────────────
 # PATH CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
+# Script location: /solt-pre-commit/scripts/setup-repo.py
+# Config files:    /solt-pre-commit/configs/
+# Template files:  /solt-pre-commit/templates/
 SCRIPT_DIR = Path(__file__).parent.absolute()
-REPO_ROOT = SCRIPT_DIR.parent
-TEMPLATES_DIR = REPO_ROOT / "templates"
-CONFIGS_DIR = REPO_ROOT / "configs"
+PROJECT_ROOT = SCRIPT_DIR.parent  # Go up one level from scripts/ to solt-pre-commit/
+CONFIGS_DIR = PROJECT_ROOT / "configs"
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CENTRALIZED GIST CONFIGURATION
+# FILE MAPPINGS (source -> destination)
 # ─────────────────────────────────────────────────────────────────────────────
-SOLTEIN_GIST_ID = "147d543a086f6735d1ffa02172766e86"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FILE MAPPINGS
-# ─────────────────────────────────────────────────────────────────────────────
-# (source_path, destination_relative_path, description)
+# Source files use dot prefix (.pylintrc, .solt-hooks-defaults.yaml)
+# Destination files also use dot prefix
 FILES_TO_COPY = [
-    # Config files (root level)
+    # (source_path, destination_relative_path, description)
     (CONFIGS_DIR / ".pylintrc", ".pylintrc", "Pylint configuration"),
     (CONFIGS_DIR / "pyproject-base.toml", "pyproject.toml", "Python project configuration"),
-    (TEMPLATES_DIR / ".solt-hooks.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
+    (CONFIGS_DIR / ".solt-hooks-defaults.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
 ]
 
 # Pre-commit config (depends on --local flag)
-PRECOMMIT_REMOTE = (
-    TEMPLATES_DIR / ".pre-commit-config.yaml",
-    ".pre-commit-config.yaml",
-    "Pre-commit config (GitHub)",
-)
-PRECOMMIT_LOCAL = (
-    TEMPLATES_DIR / ".pre-commit-config-local.yaml",
-    ".pre-commit-config.yaml",
-    "Pre-commit config (local/monorepo)",
-)
+PRECOMMIT_REMOTE = (TEMPLATES_DIR / ".pre-commit-config.yaml", ".pre-commit-config.yaml", "Pre-commit config (GitHub)")
+PRECOMMIT_LOCAL = (TEMPLATES_DIR / ".pre-commit-config-local.yaml", ".pre-commit-config.yaml", "Pre-commit config (local/monorepo)")
 
-# GitHub workflow (combined validation + weekly badges)
-WORKFLOW_FILE = (
-    TEMPLATES_DIR / "github-workflows" / "solt-validate.yml",
-    ".github/workflows/solt-validate.yml",
-    "GitHub Actions workflow (validation + badges)",
-)
+# GitHub workflow
+WORKFLOW_FILE = (TEMPLATES_DIR / "github-workflows" / "solt-validate.yml", ".github/workflows/solt-validate.yml", "GitHub Actions workflow")
 
-# Client workflow content (generated, not from template)
-CLIENT_WORKFLOW_CONTENT = """# =============================================================================
-# SOLT VALIDATION + WEEKLY BADGES
-# =============================================================================
-# This workflow runs:
-# 1. Validation on every PR/push (solt-validate.yml)
-# 2. Badge updates weekly (solt-update-badges.yml)
-#
-# CENTRALIZED BADGES:
-# - All badges stored in Soltein's central Gist
-# - No configuration needed - uses repository name automatically
-# =============================================================================
-name: Solt Validation
-
-on:
-  push:
-    branches:
-      - main
-      - master
-      - develop
-      - '17.0'
-      - '18.0'
-      - '19.0'
-      - '*.0'
-  pull_request:
-    branches:
-      - main
-      - master
-      - develop
-      - '17.0'
-      - '18.0'
-      - '19.0'
-      - '*.0'
-
-  # Weekly badge updates - Every Monday at 6:00 AM UTC
-  schedule:
-    - cron: '0 6 * * 1'
-
-  # Allow manual trigger
-  workflow_dispatch:
-
-jobs:
-  # ---------------------------------------------------------------------------
-  # PR/PUSH VALIDATION
-  # ---------------------------------------------------------------------------
-  validate:
-    if: github.event_name != 'schedule'
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.0
-    with:
-      validation-scope: 'changed'
-      fail-on-warnings: false
-      pylint-blocking: true
-      ruff-blocking: false
-      docstring-threshold: 80
-
-  # ---------------------------------------------------------------------------
-  # WEEKLY BADGE UPDATES
-  # ---------------------------------------------------------------------------
-  update-badges:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-badges.yml@v1.0.0
-    # No inputs needed - uses defaults:
-    # - gist-id: Soltein central gist ({gist_id})
-    # - badge-filename-prefix: repository name (automatic)
-    secrets:
-      GIST_SECRET: ${{{{ secrets.GIST_SECRET }}}}
-"""
+# Files to remove (consolidated into pyproject.toml)
+FILES_TO_REMOVE = ["ruff.toml"]
 
 
 def print_header(text: str) -> None:
@@ -152,63 +71,33 @@ def print_step(icon: str, text: str) -> None:
 
 
 def copy_file(src: Path, dest: Path, dry_run: bool = False, force: bool = True) -> bool:
-    """Copy a file to destination, creating directories as needed.
-
-    Args:
-        src: Source file path
-        dest: Destination file path
-        dry_run: If True, only show what would be done
-        force: If True, overwrite existing files
-
-    Returns:
-        True if file was copied/would be copied, False otherwise
-    """
-    # Check source exists
+    """Copy a file to destination, creating directories as needed."""
     if not src.exists():
         print_step("⚠️ ", f"Source not found: {src}")
         return False
 
-    # Determine action
-    if dest.exists():
-        if not force:
-            print_step("⏭️ ", f"Skipped (exists): {dest.name}")
-            return False
-        action = "overwrite"
-    else:
-        action = "create"
+    if dest.exists() and not force:
+        print_step("⏭️ ", f"Skipped (exists): {dest.name}")
+        return False
 
-    # Dry run - just show what would happen
+    action = "overwrite" if dest.exists() else "create"
+
     if dry_run:
         print_step("📄", f"Would {action}: {dest}")
         return True
 
-    # Actually copy the file
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
-
-        if action == "overwrite":
-            print_step("🔄", f"Updated: {dest}")
-        else:
-            print_step("✅", f"Created: {dest}")
-
-        # Verify the copy worked
-        if not dest.exists():
-            print_step("❌", f"Failed to create: {dest}")
-            return False
-
+        icon = "🔄" if action == "overwrite" else "✅"
+        print_step(icon, f"{'Updated' if action == 'overwrite' else 'Created'}: {dest}")
         return True
-
     except Exception as e:
         print_step("❌", f"Error copying {src.name}: {e}")
         return False
 
 
-def update_file_content(
-    filepath: Path,
-    replacements: dict[str, str],
-    dry_run: bool = False,
-) -> bool:
+def update_file_content(filepath: Path, replacements: dict[str, str], dry_run: bool = False) -> bool:
     """Update file content with replacements."""
     if not filepath.exists():
         return False
@@ -235,12 +124,7 @@ def install_precommit_hooks(target: Path, dry_run: bool = False) -> bool:
         return True
 
     try:
-        subprocess.run(
-            ["pre-commit", "install"],
-            cwd=target,
-            check=True,
-            capture_output=True,
-        )
+        subprocess.run(["pre-commit", "install"], cwd=target, check=True, capture_output=True)
         print_step("✅", "Pre-commit hooks installed")
         return True
     except subprocess.CalledProcessError as e:
@@ -253,95 +137,56 @@ def install_precommit_hooks(target: Path, dry_run: bool = False) -> bool:
 
 def cleanup_old_files(target: Path, dry_run: bool = False) -> None:
     """Remove old config files that are now consolidated."""
-    old_files = [
-        "ruff.toml",  # Now in pyproject.toml
-    ]
-
-    for filename in old_files:
+    for filename in FILES_TO_REMOVE:
         filepath = target / filename
         if filepath.exists():
             if dry_run:
-                print_step("🗑️ ", f"Would remove (now in pyproject.toml): {filename}")
+                print_step("🗑️ ", f"Would remove: {filename}")
             else:
                 filepath.unlink()
-                print_step("🗑️ ", f"Removed (now in pyproject.toml): {filename}")
+                print_step("🗑️ ", f"Removed: {filename}")
 
 
-def setup_repo(
+def setup_single_repo(
     target_path: str,
     scope: str = "changed",
     dry_run: bool = False,
     local: bool = False,
     force: bool = True,
     odoo_version: str = "auto",
-) -> None:
-    """Setup solt-pre-commit in a target repository.
+    quiet: bool = False,
+) -> bool:
+    """Setup solt-pre-commit in a single target repository.
 
-    Args:
-        target_path: Path to the target repository
-        scope: Validation scope ('changed' or 'full')
-        dry_run: If True, only show what would be done
-        local: If True, use local hooks config (for monorepo)
-        force: If True, overwrite existing files
-        odoo_version: Odoo version (auto, 17.0, 18.0, 19.0)
+    Returns:
+        True if setup was successful, False otherwise.
     """
     target = Path(target_path).absolute()
 
     if not target.exists():
-        print(f"❌ Target path does not exist: {target}")
-        sys.exit(1)
+        print(f"  ❌ Target path does not exist: {target}")
+        return False
 
-    # ─────────────────────────────────────────────────────────────────────
-    # HEADER
-    # ─────────────────────────────────────────────────────────────────────
-    mode_str = "DRY RUN - " if dry_run else ""
-    print(f"\n{'=' * 60}")
-    print(f"🚀 {mode_str}Setting up solt-pre-commit")
-    print(f"{'=' * 60}")
-    print(f"  Target:       {target}")
-    print(f"  Scope:        {scope}")
-    print(f"  Odoo Version: {odoo_version}")
-    print(f"  Mode:         {'local (monorepo)' if local else 'remote (GitHub)'}")
-    print(f"  Overwrite:    {'yes' if force else 'no'}")
-    print(f"{'=' * 60}")
+    if not quiet:
+        mode_str = "DRY RUN - " if dry_run else ""
+        print(f"\n{'=' * 60}")
+        print(f"🚀 {mode_str}Setting up: {target.name}")
+        print(f"{'=' * 60}")
 
-    # Show source paths for debugging
-    print("\n  Source paths:")
-    print(f"    REPO_ROOT:     {REPO_ROOT}")
-    print(f"    CONFIGS_DIR:   {CONFIGS_DIR}")
-    print(f"    TEMPLATES_DIR: {TEMPLATES_DIR}")
-
-    # ─────────────────────────────────────────────────────────────────────
-    # CLEANUP OLD FILES
-    # ─────────────────────────────────────────────────────────────────────
-    print_header("🧹 Cleanup Old Files")
+    # Cleanup old files
     cleanup_old_files(target, dry_run)
 
-    # ─────────────────────────────────────────────────────────────────────
-    # COPY CONFIG FILES
-    # ─────────────────────────────────────────────────────────────────────
-    print_header("📁 Configuration Files")
-
+    # Build file list
     files = FILES_TO_COPY.copy()
+    files.append(PRECOMMIT_LOCAL if local else PRECOMMIT_REMOTE)
+    files.append(WORKFLOW_FILE)
 
-    # Add pre-commit config based on mode
-    if local:
-        files.append(PRECOMMIT_LOCAL)
-    else:
-        files.append(PRECOMMIT_REMOTE)
-
-    # Track success/failure
+    # Copy files
     copied = 0
     failed = 0
 
-    for src, dest_rel, description in files:
+    for src, dest_rel, _description in files:
         dest = target / dest_rel
-
-        # Debug output
-        print(f"\n  [{description}]")
-        print(f"    Source: {src}")
-        print(f"    Exists: {src.exists()}")
-        print(f"    Dest:   {dest}")
 
         if src.exists():
             if copy_file(src, dest, dry_run, force):
@@ -349,155 +194,125 @@ def setup_repo(
             else:
                 failed += 1
         else:
-            print_step("❌", f"Template not found: {src}")
+            print_step("❌", f"Source not found: {src}")
             failed += 1
 
-    # ─────────────────────────────────────────────────────────────────────
-    # GENERATE CLIENT WORKFLOW (with centralized badges)
-    # ─────────────────────────────────────────────────────────────────────
-    print_header("📄 GitHub Workflow")
-
-    workflow_dest = target / ".github" / "workflows" / "solt-validate.yml"
-    workflow_content = CLIENT_WORKFLOW_CONTENT.format(gist_id=SOLTEIN_GIST_ID)
-
-    print("\n  [GitHub Actions workflow (validation + badges)]")
-    print(f"    Dest:   {workflow_dest}")
-    print(f"    Gist:   {SOLTEIN_GIST_ID}")
-
-    if dry_run:
-        print_step("📄", f"Would create: {workflow_dest}")
-        copied += 1
-    else:
-        try:
-            workflow_dest.parent.mkdir(parents=True, exist_ok=True)
-            workflow_dest.write_text(workflow_content, encoding="utf-8")
-            if workflow_dest.exists():
-                print_step("✅", f"Created: {workflow_dest}")
-                copied += 1
-            else:
-                print_step("❌", f"Failed to create: {workflow_dest}")
-                failed += 1
-        except Exception as e:
-            print_step("❌", f"Error creating workflow: {e}")
-            failed += 1
-
-    print(f"\n  Summary: {copied} copied, {failed} failed")
-
-    # ─────────────────────────────────────────────────────────────────────
-    # UPDATE CONFIGURATIONS
-    # ─────────────────────────────────────────────────────────────────────
-    print_header("⚙️  Applying Configuration")
-
-    # Update .solt-hooks.yaml settings
+    # Update configurations
     solt_hooks_file = target / ".solt-hooks.yaml"
     if solt_hooks_file.exists():
         replacements = {}
-
-        # Update validation scope
         if scope != "changed":
             replacements["validation_scope: changed"] = f"validation_scope: {scope}"
-
-        # Update Odoo version
         if odoo_version != "auto":
             replacements["odoo_version: auto"] = f"odoo_version: {odoo_version}"
-
         if replacements:
             update_file_content(solt_hooks_file, replacements, dry_run)
-            if not dry_run:
-                print_step("✅", f"Set validation_scope to: {scope}")
-                if odoo_version != "auto":
-                    print_step("✅", f"Set odoo_version to: {odoo_version}")
-            else:
-                print_step("📄", f"Would set validation_scope to: {scope}")
-                if odoo_version != "auto":
-                    print_step("📄", f"Would set odoo_version to: {odoo_version}")
-        else:
-            print_step("ℹ️ ", f"validation_scope: {scope}, odoo_version: {odoo_version}")
-    else:
-        print_step("ℹ️ ", f"validation_scope: {scope}, odoo_version: {odoo_version}")
 
-    # ─────────────────────────────────────────────────────────────────────
-    # INSTALL HOOKS
-    # ─────────────────────────────────────────────────────────────────────
-    print_header("🔧 Installing Hooks")
+    # Install hooks
     install_precommit_hooks(target, dry_run)
 
-    # ─────────────────────────────────────────────────────────────────────
-    # SUMMARY
-    # ─────────────────────────────────────────────────────────────────────
+    if not quiet:
+        print(f"\n  Summary: {copied} copied, {failed} failed")
+
+    return failed == 0
+
+
+def setup_batch(
+    repos_file: str,
+    scope: str = "changed",
+    dry_run: bool = False,
+    local: bool = False,
+    force: bool = True,
+    odoo_version: str = "auto",
+) -> None:
+    """Setup solt-pre-commit in multiple repositories from a file."""
+    repos_path = Path(repos_file)
+
+    if not repos_path.exists():
+        print(f"❌ Repos file not found: {repos_path}")
+        sys.exit(1)
+
+    repos = [
+        line.strip()
+        for line in repos_path.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+
+    mode_str = "DRY RUN - " if dry_run else ""
     print(f"\n{'=' * 60}")
-    if dry_run:
-        print("📋 DRY RUN COMPLETE - No changes made")
-    else:
-        print("✅ SETUP COMPLETE")
+    print(f"🔄 {mode_str}Batch setup for {len(repos)} repositories")
+    print(f"{'=' * 60}")
+    print(f"  Scope:        {scope}")
+    print(f"  Odoo Version: {odoo_version}")
+    print(f"  Mode:         {'local (monorepo)' if local else 'remote (GitHub)'}")
+    print(f"  Project Root: {PROJECT_ROOT}")
+    print(f"  Configs:      {CONFIGS_DIR}")
+    print(f"  Templates:    {TEMPLATES_DIR}")
     print(f"{'=' * 60}")
 
-    print("\n📂 Files created/updated:")
-    print("   pyproject.toml             → Python tools config (ruff, black, isort, pytest)")
-    print("   .pylintrc                  → Pylint-odoo configuration")
-    print("   .solt-hooks.yaml           → Soltein validation settings")
-    print("   .pre-commit-config.yaml    → Pre-commit hook configuration")
-    print("   .github/workflows/solt-validate.yml → CI workflow + weekly badges")
+    success = 0
+    failed = 0
 
-    print("\n🏷️  Badges configuration:")
-    print(f"   Gist ID: {SOLTEIN_GIST_ID}")
-    print("   Prefix:  (repository name - automatic)")
-    print("   Schedule: Weekly (Mondays 6:00 AM UTC)")
+    for repo in repos:
+        print(f"\n📂 Processing: {Path(repo).name}")
+        if setup_single_repo(repo, scope, dry_run, local, force, odoo_version, quiet=True):
+            success += 1
+            print_step("✅", "Done")
+        else:
+            failed += 1
+            print_step("❌", "Failed")
 
-    print("\n📋 Next steps:")
-    print("   1. Review .solt-hooks.yaml and adjust settings if needed")
-    print("   2. Run: pre-commit run --all-files")
-    print("   3. Commit the configuration files")
-    print("   4. (Optional) Trigger badge update: Actions → Solt Validation → Run workflow")
-
-    if local:
-        print("\n⚠️  Local mode: Ensure solt-pre-commit is in PYTHONPATH")
-        print("   Or install: pip install -e ../solt-pre-commit")
-
-    print("")
+    print(f"\n{'=' * 60}")
+    print(f"✅ Completed: {success}/{len(repos)} repositories")
+    if failed > 0:
+        print(f"❌ Failed: {failed} repositories")
+    print(f"{'=' * 60}\n")
 
 
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Setup solt-pre-commit in a client repository",
+        description="Setup solt-pre-commit in client repositories",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Setup with default options (overwrites existing files)
+  # Single repo setup
   python setup-repo.py /path/to/solt-budget
-
-  # Setup with full validation scope
   python setup-repo.py /path/to/solt-budget --scope full
-
-  # Setup for specific Odoo version
   python setup-repo.py /path/to/solt-budget --odoo-version 18.0
-
-  # Preview changes without applying
   python setup-repo.py /path/to/solt-budget --dry-run
 
-  # Setup for monorepo (local hooks)
-  python setup-repo.py /path/to/solt-addons --local
+  # Batch setup (multiple repos)
+  python setup-repo.py --batch repos.txt
+  python setup-repo.py --batch repos.txt --dry-run
+  python setup-repo.py --batch repos.txt --scope full
 
-  # Skip existing files (don't overwrite)
-  python setup-repo.py /path/to/solt-budget --no-force
+  # Monorepo setup
+  python setup-repo.py /path/to/solt-addons --local
         """,
     )
 
     parser.add_argument(
         "path",
-        help="Path to the target repository",
+        nargs="?",
+        help="Path to the target repository (single mode)",
+    )
+    parser.add_argument(
+        "--batch",
+        metavar="FILE",
+        help="File with list of repository paths (one per line)",
     )
     parser.add_argument(
         "--scope",
         choices=["changed", "full"],
         default="changed",
-        help="Validation scope: 'changed' for PR files, 'full' for entire repo (default: changed)",
+        help="Validation scope (default: changed)",
     )
     parser.add_argument(
         "--odoo-version",
+        choices=["auto", "17.0", "18.0", "19.0"],
         default="auto",
-        help="Odoo version: auto-detect or specify explicitly (e.g., 17.0, 18.0, 19.0, 20.0). Default: auto",
+        help="Odoo version (default: auto)",
     )
     parser.add_argument(
         "--dry-run",
@@ -507,7 +322,7 @@ Examples:
     parser.add_argument(
         "--local",
         action="store_true",
-        help="Use local hooks config (for soltein-4.0 monorepo)",
+        help="Use local hooks config (for monorepo)",
     )
     parser.add_argument(
         "--no-force",
@@ -517,14 +332,30 @@ Examples:
 
     args = parser.parse_args()
 
-    setup_repo(
-        target_path=args.path,
-        scope=args.scope,
-        dry_run=args.dry_run,
-        local=args.local,
-        force=not args.no_force,
-        odoo_version=args.odoo_version,
-    )
+    # Validate arguments
+    if args.batch and args.path:
+        parser.error("Cannot use both --batch and a single path")
+    if not args.batch and not args.path:
+        parser.error("Either provide a path or use --batch")
+
+    if args.batch:
+        setup_batch(
+            repos_file=args.batch,
+            scope=args.scope,
+            dry_run=args.dry_run,
+            local=args.local,
+            force=not args.no_force,
+            odoo_version=args.odoo_version,
+        )
+    else:
+        setup_single_repo(
+            target_path=args.path,
+            scope=args.scope,
+            dry_run=args.dry_run,
+            local=args.local,
+            force=not args.no_force,
+            odoo_version=args.odoo_version,
+        )
 
 
 if __name__ == "__main__":
