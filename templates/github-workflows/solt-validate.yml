@@ -19,9 +19,9 @@ on:
     branches: [ main, master, develop, '17.0', '18.0', '19.0' ]
   pull_request:
     branches: [ main, master, develop, '17.0', '18.0', '19.0' ]
-  # Weekly badge updates - uncomment schedule to enable
-  # schedule:
-  #   - cron: '0 6 * * 1'  # Mondays at 6 AM UTC
+  # Weekly badge updates
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays at 6 AM UTC
   workflow_dispatch:
 
 concurrency:
@@ -37,10 +37,10 @@ jobs:
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.1
     with:
       validation-scope: 'changed'
-      fail-on-warnings: false
+      fail-on-warnings: true
       pylint-blocking: true
       ruff-blocking: false
-      show-info: false
+      show-info: true
 
   # ---------------------------------------------------------------------------
   # WEEKLY BADGE UPDATES
