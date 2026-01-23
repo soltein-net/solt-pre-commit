@@ -17,9 +17,9 @@ Custom pre-commit hooks for Odoo module validation with comprehensive documentat
 
 | Odoo Version | Python | Status |
 |--------------|--------|--------|
-| 17.0 | 3.10+ | âœ… Fully Supported |
-| 18.0 | 3.10+ | âœ… Fully Supported |
-| 19.0 | 3.11+ | âœ… Fully Supported |
+| 17.0 | 3.10+ | Fully Supported |
+| 18.0 | 3.10+ | Fully Supported |
+| 19.0 | 3.11+ | Fully Supported |
 
 ---
 
@@ -66,9 +66,9 @@ pre-commit run --all-files
 
 ---
 
-## âœ¨ Features
+## Features
 
-### ðŸ” Comprehensive Validation
+### Comprehensive Validation
 
 | Check Type | Description | Blocks PR |
 |------------|-------------|-----------|
@@ -79,7 +79,7 @@ pre-commit run --all-files
 | **CSV/PO Files** | Duplicate IDs, translation errors | âœ… |
 | **Documentation Coverage** | Detailed reports with trends | â„¹ï¸ Informative |
 
-### âš™ï¸ Configuration
+### Configuration
 
 ```yaml
 # .solt-hooks.yaml
@@ -110,7 +110,7 @@ jobs:
 
 ---
 
-## ðŸ“¦ Available Hooks
+## Available Hooks
 
 | Hook ID | Description | Use Case |
 |---------|-------------|----------|
@@ -123,7 +123,7 @@ jobs:
 
 ---
 
-## ðŸ›¡ï¸ Odoo Runtime Warnings Detected
+## Odoo Runtime Warnings Detected
 
 Catches these Odoo warnings **before** they appear in your logs:
 
@@ -138,10 +138,10 @@ Catches these Odoo warnings **before** they appear in your logs:
 
 ---
 
-## ðŸ“‹ All Validation Checks
+## All Validation Checks
 
 <details>
-<summary><strong>ðŸ Python Checks</strong></summary>
+<summary><strong> Python Checks</strong></summary>
 
 ### Runtime Errors (Block)
 - `python_duplicate_field_label` - Same label on multiple fields
@@ -159,7 +159,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 </details>
 
 <details>
-<summary><strong>ðŸ“ XML Checks</strong></summary>
+<summary><strong> XML Checks</strong></summary>
 
 ### Errors (Block)
 - `xml_syntax_error` - XML parse errors
@@ -177,7 +177,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 </details>
 
 <details>
-<summary><strong>ðŸ“Š CSV Checks</strong></summary>
+<summary><strong> CSV Checks</strong></summary>
 
 - `csv_syntax_error` - CSV parse errors
 - `csv_duplicate_record_id` - Duplicate XML IDs
@@ -185,7 +185,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 </details>
 
 <details>
-<summary><strong>ðŸŒ PO/POT Checks</strong></summary>
+<summary><strong> PO/POT Checks</strong></summary>
 
 - `po_syntax_error` - Translation file errors
 - `po_duplicate_message_definition` - Duplicate translations
@@ -197,7 +197,7 @@ Catches these Odoo warnings **before** they appear in your logs:
 
 ---
 
-## âš™ï¸ Configuration
+## Configuration
 
 ### Odoo Version
 
@@ -284,7 +284,7 @@ branch_naming:
 
 ---
 
-## ðŸ”§ CLI Usage
+## CLI Usage
 
 ```bash
 # Validate module
