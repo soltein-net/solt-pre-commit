@@ -137,6 +137,7 @@ class BranchNameValidator:
         - With ticket: type/TICKET-123-description
         - Version-prefixed: type/17.0-description
         - Release: release/17.0.1.0
+        - Version-type: 17.0-type-description (e.g., 17.0-hotfix-something)
         """
         if self.ticket_prefixes == ["[A-Z]+"]:
             prefix_pattern = "[A-Z]+"
@@ -144,6 +145,9 @@ class BranchNameValidator:
             prefix_pattern = "(" + "|".join(re.escape(p) for p in self.ticket_prefixes) + ")"
 
         self.patterns = {}
+
+        # Build types pattern for version-type format
+        types_pattern = "|".join(self.allowed_types)
 
         for branch_type in self.allowed_types:
             if branch_type == "release":
@@ -167,6 +171,11 @@ class BranchNameValidator:
                     rf"{ODOO_VERSION_PATTERN}-.+"  # 17.0-description
                     rf")$"
                 )
+
+        # Add pattern for version-type-description format: 17.0-hotfix-something, 18.0-feature-new
+        self.patterns["version-type"] = re.compile(
+            rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$"
+        )
 
     def get_current_branch(self) -> Optional[str]:
         """Get current git branch name."""
@@ -280,6 +289,7 @@ Mode: STRICT (ticket or version required)
 Branch names must follow one of these patterns:
   <type>/<TICKET>-<number>-<description>
   <type>/<odoo-version>-<description>
+  <odoo-version>-<type>-<description>
 
 Valid types: {types_str}
 Ticket prefixes: {prefixes_str}
@@ -289,6 +299,8 @@ Examples:
   [OK] fix/{example_prefix}-456-correct-bug
   [OK] feature/17.0-add-new-feature
   [OK] hotfix/18.0-urgent-fix
+  [OK] 17.0-hotfix-urgent-fix
+  [OK] 18.0-feature-new-module
   [OK] release/17.0.1.0
 
 Common mistakes:
@@ -306,6 +318,7 @@ Branch names must follow one of these patterns:
   <type>/<description>
   <type>/<TICKET>-<number>-<description>
   <type>/<odoo-version>-<description>
+  <odoo-version>-<type>-<description>
 
 Valid types: {types_str}
 
@@ -315,6 +328,8 @@ Examples:
   [OK] fix/correct-calculation
   [OK] feature/17.0-new-feature
   [OK] hotfix/18.0-urgent-fix
+  [OK] 17.0-hotfix-urgent-fix
+  [OK] 18.0-feature-new-module
   [OK] release/17.0.1.0
 
 Common mistakes:
