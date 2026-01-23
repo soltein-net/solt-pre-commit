@@ -11,11 +11,12 @@ repos:
   # SOLT PRE-COMMIT HOOKS
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.0.0  # Supports Odoo 17.0, 18.0, 19.0
+    rev: v1.0.1  # Supports Odoo 17.0, 18.0, 19.0
     hooks:
       - id: solt-check-branch
         stages: [ pre-commit, pre-push ]
       - id: solt-check-odoo
+        verbose: true
         # args: [--show-info] # Uncomment to see info-level issues
         # args: [--scope, full]  # Uncomment to validate entire repo
         # args: [--odoo-version, 18.0]  # Uncomment to force specific version

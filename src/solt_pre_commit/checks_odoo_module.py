@@ -842,33 +842,39 @@ def run(
                     severity_config.validation_scope,
                 )
 
-    if verbose and show_coverage:
-        _print_global_coverage_metrics(checks_objects, severity_config)
+    # Always show summary for local commits (single module or when verbose)
+    if verbose and manifest_paths:
+        elapsed_time = time.time() - start_time
 
-    elapsed_time = time.time() - start_time
-
-    if len(manifest_paths) > 1 and verbose:
-        print("")
-        print("=" * 60)
-        print("FINAL SUMMARY")
-        print("=" * 60)
-        scope_label = "changed files only" if severity_config.validation_scope == "changed" else "full repository"
-        print(f"  Validation scope: {scope_label}")
-        if versions_found:
-            print(f"  Odoo version(s): {', '.join(sorted(versions_found))}")
-
+        # Calculate totals
         total_counts = {Severity.ERROR: 0, Severity.WARNING: 0, Severity.INFO: 0}
         for _module_name, result in all_results:
             counts = result.get_counts()
             for sev, count in counts.items():
                 total_counts[sev] += count
 
+        print("")
+        print("=" * 60)
+        print("SOLT PRE-COMMIT VALIDATION SUMMARY")
+        print("=" * 60)
+        scope_label = "changed files only" if severity_config.validation_scope == "changed" else "full repository"
+        print(f"  Scope: {scope_label}")
+        if versions_found:
+            print(f"  Odoo version(s): {', '.join(sorted(versions_found))}")
         print(f"  Modules checked: {len(manifest_paths)}")
         print(f"  Modules with issues: {len(all_results)}")
         print(f"  Errors: {total_counts[Severity.ERROR]}")
         print(f"  Warnings: {total_counts[Severity.WARNING]}")
         print(f"  Info: {total_counts[Severity.INFO]}")
-        print(f"  Elapsed time: {elapsed_time:.2f}s")
+        print(f"  Time: {elapsed_time:.2f}s")
+
+        if not has_blocking:
+            print("")
+            print(printer._color("  ✓ All checks passed!", "\033[92m"))
+        print("=" * 60)
+
+    if verbose and show_coverage:
+        _print_global_coverage_metrics(checks_objects, severity_config)
 
     if has_blocking and verbose:
         if all_results:

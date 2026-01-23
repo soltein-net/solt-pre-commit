@@ -253,17 +253,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ needs.detect-version.outputs.python_version }}
 
       - name: Install solt-pre-commit
-        run: uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1"
+        run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1"
 
       - name: Validate branch name
         run: |
@@ -301,18 +296,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ needs.detect-version.outputs.python_version }}
 
       - name: Install dependencies
         run: |
-          uv pip install --system "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1" pylint-odoo ruff
+          python -m pip install --upgrade pip
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1" pylint-odoo ruff
           echo "::notice::Installed for Odoo $ODOO_VERSION with Python $PYTHON_VERSION"
 
       - name: Find Odoo modules
