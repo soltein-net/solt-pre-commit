@@ -13,6 +13,10 @@ Usage:
 
 Example:
     python scripts/setup-repo.py ../solt-budget --scope changed
+
+Workflows installed:
+    - solt-validate.yml: PR/push validation (runs on every PR)
+    - Includes weekly badge updates using centralized Soltein Gist
 """
 
 from __future__ import annotations
@@ -30,6 +34,11 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 REPO_ROOT = SCRIPT_DIR.parent
 TEMPLATES_DIR = REPO_ROOT / "templates"
 CONFIGS_DIR = REPO_ROOT / "configs"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CENTRALIZED GIST CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+SOLTEIN_GIST_ID = "147d543a086f6735d1ffa02172766e86"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE MAPPINGS
@@ -54,12 +63,80 @@ PRECOMMIT_LOCAL = (
     "Pre-commit config (local/monorepo)",
 )
 
-# GitHub workflow
+# GitHub workflow (combined validation + weekly badges)
 WORKFLOW_FILE = (
     TEMPLATES_DIR / "github-workflows" / "solt-validate.yml",
     ".github/workflows/solt-validate.yml",
-    "GitHub Actions workflow",
+    "GitHub Actions workflow (validation + badges)",
 )
+
+# Client workflow content (generated, not from template)
+CLIENT_WORKFLOW_CONTENT = """# =============================================================================
+# SOLT VALIDATION + WEEKLY BADGES
+# =============================================================================
+# This workflow runs:
+# 1. Validation on every PR/push (solt-validate.yml)
+# 2. Badge updates weekly (solt-update-badges.yml)
+#
+# CENTRALIZED BADGES:
+# - All badges stored in Soltein's central Gist
+# - No configuration needed - uses repository name automatically
+# =============================================================================
+name: Solt Validation
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - '17.0'
+      - '18.0'
+      - '19.0'
+      - '*.0'
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+      - '17.0'
+      - '18.0'
+      - '19.0'
+      - '*.0'
+
+  # Weekly badge updates - Every Monday at 6:00 AM UTC
+  schedule:
+    - cron: '0 6 * * 1'
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # PR/PUSH VALIDATION
+  # ---------------------------------------------------------------------------
+  validate:
+    if: github.event_name != 'schedule'
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.0
+    with:
+      validation-scope: 'changed'
+      fail-on-warnings: false
+      pylint-blocking: true
+      ruff-blocking: false
+      docstring-threshold: 80
+
+  # ---------------------------------------------------------------------------
+  # WEEKLY BADGE UPDATES
+  # ---------------------------------------------------------------------------
+  update-badges:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-badges.yml@v1.0.0
+    # No inputs needed - uses defaults:
+    # - gist-id: Soltein central gist ({gist_id})
+    # - badge-filename-prefix: repository name (automatic)
+    secrets:
+      GIST_SECRET: ${{{{ secrets.GIST_SECRET }}}}
+"""
 
 
 def print_header(text: str) -> None:
@@ -196,6 +273,7 @@ def setup_repo(
     dry_run: bool = False,
     local: bool = False,
     force: bool = True,
+    odoo_version: str = "auto",
 ) -> None:
     """Setup solt-pre-commit in a target repository.
 
@@ -205,6 +283,7 @@ def setup_repo(
         dry_run: If True, only show what would be done
         local: If True, use local hooks config (for monorepo)
         force: If True, overwrite existing files
+        odoo_version: Odoo version (auto, 17.0, 18.0, 19.0)
     """
     target = Path(target_path).absolute()
 
@@ -219,10 +298,11 @@ def setup_repo(
     print(f"\n{'=' * 60}")
     print(f"🚀 {mode_str}Setting up solt-pre-commit")
     print(f"{'=' * 60}")
-    print(f"  Target:     {target}")
-    print(f"  Scope:      {scope}")
-    print(f"  Mode:       {'local (monorepo)' if local else 'remote (GitHub)'}")
-    print(f"  Overwrite:  {'yes' if force else 'no'}")
+    print(f"  Target:       {target}")
+    print(f"  Scope:        {scope}")
+    print(f"  Odoo Version: {odoo_version}")
+    print(f"  Mode:         {'local (monorepo)' if local else 'remote (GitHub)'}")
+    print(f"  Overwrite:    {'yes' if force else 'no'}")
     print(f"{'=' * 60}")
 
     # Show source paths for debugging
@@ -250,9 +330,6 @@ def setup_repo(
     else:
         files.append(PRECOMMIT_REMOTE)
 
-    # Add workflow file
-    files.append(WORKFLOW_FILE)
-
     # Track success/failure
     copied = 0
     failed = 0
@@ -275,6 +352,35 @@ def setup_repo(
             print_step("❌", f"Template not found: {src}")
             failed += 1
 
+    # ─────────────────────────────────────────────────────────────────────
+    # GENERATE CLIENT WORKFLOW (with centralized badges)
+    # ─────────────────────────────────────────────────────────────────────
+    print_header("📄 GitHub Workflow")
+
+    workflow_dest = target / ".github" / "workflows" / "solt-validate.yml"
+    workflow_content = CLIENT_WORKFLOW_CONTENT.format(gist_id=SOLTEIN_GIST_ID)
+
+    print("\n  [GitHub Actions workflow (validation + badges)]")
+    print(f"    Dest:   {workflow_dest}")
+    print(f"    Gist:   {SOLTEIN_GIST_ID}")
+
+    if dry_run:
+        print_step("📄", f"Would create: {workflow_dest}")
+        copied += 1
+    else:
+        try:
+            workflow_dest.parent.mkdir(parents=True, exist_ok=True)
+            workflow_dest.write_text(workflow_content, encoding="utf-8")
+            if workflow_dest.exists():
+                print_step("✅", f"Created: {workflow_dest}")
+                copied += 1
+            else:
+                print_step("❌", f"Failed to create: {workflow_dest}")
+                failed += 1
+        except Exception as e:
+            print_step("❌", f"Error creating workflow: {e}")
+            failed += 1
+
     print(f"\n  Summary: {copied} copied, {failed} failed")
 
     # ─────────────────────────────────────────────────────────────────────
@@ -282,20 +388,33 @@ def setup_repo(
     # ─────────────────────────────────────────────────────────────────────
     print_header("⚙️  Applying Configuration")
 
-    # Update validation scope in .solt-hooks.yaml
+    # Update .solt-hooks.yaml settings
     solt_hooks_file = target / ".solt-hooks.yaml"
-    if solt_hooks_file.exists() and scope != "changed":
-        update_file_content(
-            solt_hooks_file,
-            {"validation_scope: changed": f"validation_scope: {scope}"},
-            dry_run,
-        )
-        if not dry_run:
-            print_step("✅", f"Set validation_scope to: {scope}")
+    if solt_hooks_file.exists():
+        replacements = {}
+
+        # Update validation scope
+        if scope != "changed":
+            replacements["validation_scope: changed"] = f"validation_scope: {scope}"
+
+        # Update Odoo version
+        if odoo_version != "auto":
+            replacements["odoo_version: auto"] = f"odoo_version: {odoo_version}"
+
+        if replacements:
+            update_file_content(solt_hooks_file, replacements, dry_run)
+            if not dry_run:
+                print_step("✅", f"Set validation_scope to: {scope}")
+                if odoo_version != "auto":
+                    print_step("✅", f"Set odoo_version to: {odoo_version}")
+            else:
+                print_step("📄", f"Would set validation_scope to: {scope}")
+                if odoo_version != "auto":
+                    print_step("📄", f"Would set odoo_version to: {odoo_version}")
         else:
-            print_step("📄", f"Would set validation_scope to: {scope}")
+            print_step("ℹ️ ", f"validation_scope: {scope}, odoo_version: {odoo_version}")
     else:
-        print_step("ℹ️ ", f"validation_scope: {scope}")
+        print_step("ℹ️ ", f"validation_scope: {scope}, odoo_version: {odoo_version}")
 
     # ─────────────────────────────────────────────────────────────────────
     # INSTALL HOOKS
@@ -318,12 +437,18 @@ def setup_repo(
     print("   .pylintrc                  → Pylint-odoo configuration")
     print("   .solt-hooks.yaml           → Soltein validation settings")
     print("   .pre-commit-config.yaml    → Pre-commit hook configuration")
-    print("   .github/workflows/solt-validate.yml → CI workflow")
+    print("   .github/workflows/solt-validate.yml → CI workflow + weekly badges")
+
+    print("\n🏷️  Badges configuration:")
+    print(f"   Gist ID: {SOLTEIN_GIST_ID}")
+    print("   Prefix:  (repository name - automatic)")
+    print("   Schedule: Weekly (Mondays 6:00 AM UTC)")
 
     print("\n📋 Next steps:")
     print("   1. Review .solt-hooks.yaml and adjust settings if needed")
     print("   2. Run: pre-commit run --all-files")
     print("   3. Commit the configuration files")
+    print("   4. (Optional) Trigger badge update: Actions → Solt Validation → Run workflow")
 
     if local:
         print("\n⚠️  Local mode: Ensure solt-pre-commit is in PYTHONPATH")
@@ -345,6 +470,9 @@ Examples:
   # Setup with full validation scope
   python setup-repo.py /path/to/solt-budget --scope full
 
+  # Setup for specific Odoo version
+  python setup-repo.py /path/to/solt-budget --odoo-version 18.0
+
   # Preview changes without applying
   python setup-repo.py /path/to/solt-budget --dry-run
 
@@ -365,6 +493,11 @@ Examples:
         choices=["changed", "full"],
         default="changed",
         help="Validation scope: 'changed' for PR files, 'full' for entire repo (default: changed)",
+    )
+    parser.add_argument(
+        "--odoo-version",
+        default="auto",
+        help="Odoo version: auto-detect or specify explicitly (e.g., 17.0, 18.0, 19.0, 20.0). Default: auto",
     )
     parser.add_argument(
         "--dry-run",
@@ -390,6 +523,7 @@ Examples:
         dry_run=args.dry_run,
         local=args.local,
         force=not args.no_force,
+        odoo_version=args.odoo_version,
     )
 
 

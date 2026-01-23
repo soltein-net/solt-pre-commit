@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "solt-pre-commit"
 version = "1.0.0"
-description = "Custom pre-commit hooks for Odoo module validation - Soltein"
+description = "Custom pre-commit hooks for Odoo module validation - Soltein (supports Odoo 17.0, 18.0, 19.0)"
 readme = "README.md"
 license = {text = "LGPL-3.0-or-later"}
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [
     {name = "Soltein", email = "dev@soltein.mx"}
 ]
@@ -17,12 +17,11 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Quality Assurance",
+    "Framework :: Odoo",
 ]
 dependencies = [
     "lxml>=4.9.0",
@@ -34,20 +33,30 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
-    "ruff>=0.1.0",
+    "ruff>=0.14.0",
 ]
 
 [project.scripts]
-solt-check-odoo = "solt_pre_commit.checks_odoo_module:main"
-solt-check-branch = "solt_pre_commit.checks_branch_name:main"
+solt-check-odoo = "checks_odoo_module:main"
+solt-check-branch = "checks_branch_name:main"
 
 [project.urls]
 Homepage = "https://github.com/soltein-net/solt-pre-commit"
 Repository = "https://github.com/soltein-net/solt-pre-commit"
 Issues = "https://github.com/soltein-net/solt-pre-commit/issues"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+py-modules = [
+    "checks_odoo_module",
+    "checks_odoo_module_csv",
+    "checks_odoo_module_po",
+    "checks_odoo_module_python",
+    "checks_odoo_module_xml",
+    "checks_odoo_module_xml_advanced",
+    "checks_branch_name",
+    "config_loader",
+    "doc_coverage",
+]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml"]
@@ -62,7 +71,7 @@ known_first_party = ["solt_pre_commit"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py38"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "B", "C4"]

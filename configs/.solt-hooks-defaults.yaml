@@ -2,7 +2,15 @@
 # SOLT PRE-COMMIT HOOKS - Default Configuration
 # =============================================================================
 # These are the system defaults. Users can override in their .solt-hooks.yaml
+# Supports Odoo versions: 17.0, 18.0, 19.0
 # =============================================================================
+
+# =============================================================================
+# ODOO VERSION
+# =============================================================================
+# Specify Odoo version or use 'auto' for automatic detection from manifest
+# Options: auto, 17.0, 18.0, 19.0
+odoo_version: auto
 
 # Validation scope: 'changed' or 'full'
 # - changed: Only validate files modified in PR/commit (recommended for legacy repos)

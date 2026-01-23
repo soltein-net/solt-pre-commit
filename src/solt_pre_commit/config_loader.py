@@ -6,6 +6,7 @@
 
 Loads configuration from .solt-hooks.yaml with fallback to defaults.
 Supports validation_scope for changed-only or full repository validation.
+Supports multiple Odoo versions (17.0, 18.0, 19.0).
 
 Context Detection:
 - LOCAL (pre-commit): Uses staged files (git diff --cached)
@@ -14,12 +15,229 @@ Context Detection:
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import os
 import subprocess
 from pathlib import Path
 
 import yaml
+
+# =============================================================================
+# ODOO VERSION SUPPORT
+# =============================================================================
+
+# Explicitly supported versions (tested and validated)
+SUPPORTED_ODOO_VERSIONS = ["17.0", "18.0", "19.0"]
+
+# Future versions that will be auto-supported with sensible defaults
+# The code handles any X.0 pattern where X >= 17
+MINIMUM_SUPPORTED_VERSION = 17
+
+DEFAULT_ODOO_VERSION = "17.0"
+
+# Minimum Python version required per Odoo version
+ODOO_PYTHON_REQUIREMENTS = {
+    "16.0": "3.10",
+    "17.0": "3.10",
+    "18.0": "3.11",
+    "19.0": "3.12",
+    # Future versions default to Python 3.12
+    "default": "3.12",
+}
+
+# Features deprecated per version (version where it was deprecated)
+DEPRECATED_FEATURES = {
+    "active_id_context": "17.0",  # Using active_id in context
+    "t_raw_directive": "17.0",  # t-raw QWeb directive
+    "tree_string_attribute": "17.0",  # string attribute on tree
+    "tree_colors_attribute": "17.0",  # colors attribute on tree
+    "tree_fonts_attribute": "17.0",  # fonts attribute on tree
+    "openerp_xml_node": "17.0",  # <openerp> instead of <odoo>
+    "data_node_wrapper": "17.0",  # <odoo><data> wrapper
+}
+
+# New field types introduced per version
+NEW_FIELD_TYPES_BY_VERSION = {
+    "17.0": set(),  # Base types
+    "18.0": set(),  # Add new types when known
+    "19.0": set(),  # Add new types when known
+}
+
+# New mail mixins per version
+MAIL_MIXINS_BY_VERSION = {
+    "17.0": {
+        "mail.thread",
+        "mail.activity.mixin",
+        "mail.thread.main.attachment",
+        "mail.thread.cc",
+        "mail.thread.blacklist",
+    },
+    "18.0": {
+        "mail.thread",
+        "mail.activity.mixin",
+        "mail.thread.main.attachment",
+        "mail.thread.cc",
+        "mail.thread.blacklist",
+    },
+    "19.0": {
+        "mail.thread",
+        "mail.activity.mixin",
+        "mail.thread.main.attachment",
+        "mail.thread.cc",
+        "mail.thread.blacklist",
+    },
+}
+
+
+class OdooVersionDetector:
+    """Detects and manages Odoo version for a module or repository."""
+
+    MANIFEST_NAMES = ("__manifest__.py", "__openerp__.py")
+
+    def __init__(self, path: str | Path | None = None):
+        self.path = Path(path) if path else Path.cwd()
+        self._detected_version: str | None = None
+
+    def detect_version(self) -> str:
+        """Detect Odoo version from manifest files.
+
+        Returns:
+            Detected version string (e.g., "17.0") or DEFAULT_ODOO_VERSION
+        """
+        if self._detected_version:
+            return self._detected_version
+
+        # Try to find manifest in current path or parent directories
+        search_path = self.path
+        for _ in range(5):
+            for manifest_name in self.MANIFEST_NAMES:
+                manifest_path = search_path / manifest_name
+                if manifest_path.exists():
+                    version = self._extract_version_from_manifest(manifest_path)
+                    if version:
+                        self._detected_version = version
+                        return version
+
+            # Also search for any manifest in subdirectories (module detection)
+            for manifest_name in self.MANIFEST_NAMES:
+                manifests = list(search_path.glob(f"*/{manifest_name}"))
+                if manifests:
+                    version = self._extract_version_from_manifest(manifests[0])
+                    if version:
+                        self._detected_version = version
+                        return version
+
+            parent = search_path.parent
+            if parent == search_path:
+                break
+            search_path = parent
+
+        self._detected_version = DEFAULT_ODOO_VERSION
+        return self._detected_version
+
+    def _extract_version_from_manifest(self, manifest_path: Path) -> str | None:
+        """Extract Odoo version from manifest file.
+
+        The manifest version typically follows: ODOO_VERSION.MODULE_VERSION
+        e.g., "17.0.1.0.0" -> "17.0"
+
+        Supports both explicit SUPPORTED_ODOO_VERSIONS and future versions (X.0 where X >= 17)
+        """
+        try:
+            content = manifest_path.read_text(encoding="utf-8")
+            manifest_dict = ast.literal_eval(content)
+            version = manifest_dict.get("version", "")
+
+            if version:
+                # Extract major.minor (e.g., "17.0" from "17.0.1.0.0")
+                parts = version.split(".")
+                if len(parts) >= 2:
+                    odoo_version = f"{parts[0]}.{parts[1]}"
+                    # Check explicitly supported versions
+                    if odoo_version in SUPPORTED_ODOO_VERSIONS:
+                        return odoo_version
+                    # Also accept future versions (X.0 where X >= MINIMUM_SUPPORTED_VERSION)
+                    try:
+                        major = int(parts[0])
+                        if major >= MINIMUM_SUPPORTED_VERSION and parts[1] == "0":
+                            return odoo_version
+                    except ValueError:
+                        pass
+
+            return None
+        except (SyntaxError, ValueError, OSError):
+            return None
+
+    @staticmethod
+    def normalize_version(version: str) -> str:
+        """Normalize version string to standard format.
+
+        Args:
+            version: Version string (e.g., "17", "17.0", "v17.0", "20.0")
+
+        Returns:
+            Normalized version (e.g., "17.0")
+
+        Supports both explicit SUPPORTED_ODOO_VERSIONS and future versions (X.0 where X >= 17)
+        """
+        version = version.lower().strip().lstrip("v")
+
+        # Handle single number (e.g., "17" -> "17.0")
+        if version.isdigit():
+            version = f"{version}.0"
+
+        # Validate against supported versions
+        if version in SUPPORTED_ODOO_VERSIONS:
+            return version
+
+        # Try to match partial version
+        for supported in SUPPORTED_ODOO_VERSIONS:
+            if supported.startswith(version):
+                return supported
+
+        # Handle future versions (X.0 format where X >= MINIMUM_SUPPORTED_VERSION)
+        import re
+
+        match = re.match(r"^(\d+)\.0$", version)
+        if match:
+            major = int(match.group(1))
+            if major >= MINIMUM_SUPPORTED_VERSION:
+                return version
+
+        return DEFAULT_ODOO_VERSION
+
+    @staticmethod
+    def is_feature_deprecated(feature: str, version: str) -> bool:
+        """Check if a feature is deprecated in the given version.
+
+        Args:
+            feature: Feature key from DEPRECATED_FEATURES
+            version: Odoo version to check against
+
+        Returns:
+            True if the feature is deprecated in this version
+        """
+        deprecated_in = DEPRECATED_FEATURES.get(feature)
+        if not deprecated_in:
+            return False
+
+        # Compare versions (simple string comparison works for X.Y format)
+        return version >= deprecated_in
+
+    @staticmethod
+    def get_mail_mixins(version: str) -> set:
+        """Get mail mixins available for the given version."""
+        return MAIL_MIXINS_BY_VERSION.get(version, MAIL_MIXINS_BY_VERSION[DEFAULT_ODOO_VERSION])
+
+    @staticmethod
+    def get_python_version(odoo_version: str) -> str:
+        """Get minimum Python version required for Odoo version.
+
+        Returns the appropriate Python version for known Odoo versions,
+        or the default (3.12) for future unknown versions.
+        """
+        return ODOO_PYTHON_REQUIREMENTS.get(odoo_version, ODOO_PYTHON_REQUIREMENTS.get("default", "3.12"))
 
 
 class Severity:
@@ -424,6 +642,15 @@ class SoltConfig:
         self.validation_scope: str = self.config.get("validation_scope", "changed")
         self.base_branch: str | None = self.config.get("base_branch")
 
+        # Odoo version settings
+        self._odoo_version: str | None = None
+        config_version = self.config.get("odoo_version", "auto")
+        if config_version and config_version != "auto":
+            self._odoo_version = OdooVersionDetector.normalize_version(config_version)
+
+        # Version detector (lazy init)
+        self._version_detector: OdooVersionDetector | None = None
+
         # Severity settings
         self.severity_map: dict[str, str] = DEFAULT_SEVERITY.copy()
         config_severity = self.config.get("severity", {})
@@ -500,3 +727,87 @@ class SoltConfig:
     def get_execution_context(self) -> str:
         """Get the detected execution context (local/ci/unknown)."""
         return self.changed_detector.context
+
+    # =========================================================================
+    # ODOO VERSION METHODS
+    # =========================================================================
+
+    @property
+    def version_detector(self) -> OdooVersionDetector:
+        """Get or create version detector."""
+        if self._version_detector is None:
+            self._version_detector = OdooVersionDetector()
+        return self._version_detector
+
+    def get_odoo_version(self, module_path: str | Path | None = None) -> str:
+        """Get Odoo version for validation.
+
+        Priority:
+        1. Explicitly configured version in .solt-hooks.yaml
+        2. Environment variable SOLT_ODOO_VERSION
+        3. Auto-detected from module manifest
+        4. Default version
+
+        Args:
+            module_path: Optional path to module for detection
+
+        Returns:
+            Odoo version string (e.g., "17.0")
+        """
+        # 1. Check configured version
+        if self._odoo_version:
+            return self._odoo_version
+
+        # 2. Check environment variable
+        env_version = os.environ.get("SOLT_ODOO_VERSION")
+        if env_version:
+            return OdooVersionDetector.normalize_version(env_version)
+
+        # 3. Auto-detect from module
+        if module_path:
+            detector = OdooVersionDetector(module_path)
+            return detector.detect_version()
+
+        return self.version_detector.detect_version()
+
+    def set_odoo_version(self, version: str) -> None:
+        """Explicitly set the Odoo version.
+
+        Args:
+            version: Version string (e.g., "17.0", "18", "v19.0")
+        """
+        self._odoo_version = OdooVersionDetector.normalize_version(version)
+
+    def is_feature_deprecated(self, feature: str, version: str | None = None) -> bool:
+        """Check if a feature is deprecated in the current/specified version.
+
+        Args:
+            feature: Feature key from DEPRECATED_FEATURES
+            version: Optional version override
+
+        Returns:
+            True if the feature is deprecated
+        """
+        check_version = version or self.get_odoo_version()
+        return OdooVersionDetector.is_feature_deprecated(feature, check_version)
+
+    def get_mail_mixins(self, version: str | None = None) -> set:
+        """Get mail mixins for the current/specified version.
+
+        Args:
+            version: Optional version override
+
+        Returns:
+            Set of mail mixin model names
+        """
+        check_version = version or self.get_odoo_version()
+        return OdooVersionDetector.get_mail_mixins(check_version)
+
+    def get_supported_versions(self) -> list[str]:
+        """Get list of supported Odoo versions."""
+        return SUPPORTED_ODOO_VERSIONS.copy()
+
+    def is_version_supported(self, version: str) -> bool:
+        """Check if a version is supported."""
+        normalized = OdooVersionDetector.normalize_version(version)
+        return normalized in SUPPORTED_ODOO_VERSIONS

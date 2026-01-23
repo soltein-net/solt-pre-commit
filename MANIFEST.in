@@ -1,13 +1,33 @@
 # Include essential files
 include LICENSE
 include README.md
+include CHANGELOG.md
+include CONTRIBUTING.md
 include requirements.txt
 include pyproject.toml
 
-# Include package data
-recursive-include src *.py
+# Include configuration templates
+include _pylintrc
+include _pre-commit-config.yaml
+include _pre-commit-config-local.yaml
+include _pre-commit-hooks.yaml
+include _solt-hooks.yaml
+include _solt-hooks-defaults.yaml
+include pyproject-base.toml
+include README-template.md
+include RUFF_LEVELS.md
+
+# Include workflow files
+include ci.yml
+include solt-validate.yml
+
+# Include all Python modules
+recursive-include . *.py
 
 # Exclude unnecessary files
 global-exclude __pycache__
 global-exclude *.py[cod]
 global-exclude .git*
+global-exclude *.egg-info
+global-exclude .pytest_cache
+global-exclude .ruff_cache

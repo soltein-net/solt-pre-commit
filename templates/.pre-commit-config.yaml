@@ -3,6 +3,7 @@
 # =============================================================================
 # Install: pip install pre-commit && pre-commit install
 # Run: pre-commit run --all-files
+# Supports Odoo versions: 17.0, 18.0, 19.0
 # =============================================================================
 
 repos:
@@ -10,13 +11,14 @@ repos:
   # SOLT PRE-COMMIT HOOKS
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.0.0
+    rev: v1.0.0  # Supports Odoo 17.0, 18.0, 19.0
     hooks:
       - id: solt-check-branch
         stages: [ pre-commit, pre-push ]
       - id: solt-check-odoo
         # args: [--show-info] # Uncomment to see info-level issues
         # args: [--scope, full]  # Uncomment to validate entire repo
+        # args: [--odoo-version, 18.0]  # Uncomment to force specific version
 
   # ─────────────────────────────────────────────────────────────────────────
   # PYTHON CODE QUALITY - Ruff (linter only, NO autofix, NO formatter)
@@ -24,9 +26,9 @@ repos:
   # Note: Ruff is INFORMATIONAL - does not block commits/PRs
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.14.13
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [ --no-fix, --output-format=concise ]
         # Removed: --fix (no autofix)
         # Removed: ruff-format hook (no auto-formatting)
@@ -35,7 +37,7 @@ repos:
   # ODOO-SPECIFIC LINTING (OCA) - BLOCKING with fail-on-warnings
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/OCA/pylint-odoo
-    rev: v9.3.22
+    rev: v10.0.0
     hooks:
       - id: pylint_odoo
         args:

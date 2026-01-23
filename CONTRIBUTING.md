@@ -30,34 +30,26 @@ pre-commit install
 
 ```
 solt-pre-commit/
-├── src/solt_pre_commit/          # Main package
-│   ├── __init__.py
-│   ├── checks_odoo_module.py           # Main orchestrator
-│   ├── checks_odoo_module_csv.py       # CSV validations
-│   ├── checks_odoo_module_po.py        # PO/POT validations
-│   ├── checks_odoo_module_python.py    # Python validations
-│   ├── checks_odoo_module_xml.py       # Basic XML validations
-│   ├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
-│   ├── checks_branch_name.py           # Branch naming validation
-│   └── config_loader.py                # Configuration management
-├── configs/                      # Default configurations for client repos
-│   ├── .pylintrc                 # Pylint config for Odoo
-│   ├── pyproject-base.toml       # Python tools config (ruff, black, isort, pytest)
-│   └── .solt-hooks-defaults.yaml # Default hook settings
-├── templates/                    # Templates copied to client repos
-│   ├── .pre-commit-config.yaml
-│   ├── .pre-commit-config-local.yaml   # For monorepo setup
-│   ├── .solt-hooks.yaml
-│   └── github-workflows/
-│       └── solt_validate.yml
-├── scripts/                      # Setup utilities
-│   ├── setup-repo.py             # Initialize hooks in a repo
-│   ├── sync-configs.py           # Sync configs across repos
-│   └── generate-badges.py        # Generate documentation badges
-├── .github/workflows/
-│   ├── ci.yml                    # Internal CI for this repo
-│   └── solt-validate.yml         # Reusable workflow for client repos
-└── tests/                        # Test suite
+├── checks_odoo_module.py           # Main orchestrator
+├── checks_odoo_module_csv.py       # CSV validations
+├── checks_odoo_module_po.py        # PO/POT validations
+├── checks_odoo_module_python.py    # Python validations
+├── checks_odoo_module_xml.py       # Basic XML validations
+├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
+├── checks_branch_name.py           # Branch naming validation
+├── config_loader.py                # Configuration management
+├── doc_coverage.py                 # Documentation coverage analysis
+├── setup-repo.py                   # Initialize hooks in client repos
+├── _pylintrc                       # Pylint config for Odoo
+├── _pre-commit-config.yaml         # Pre-commit hooks template
+├── _pre-commit-config-local.yaml   # Local pre-commit (monorepo)
+├── _pre-commit-hooks.yaml          # Hook definitions
+├── _solt-hooks.yaml                # Soltein validation settings
+├── _solt-hooks-defaults.yaml       # Default hook settings
+├── pyproject-base.toml             # Base Python tools config
+├── ci.yml                          # Internal CI workflow
+├── solt-validate.yml               # Reusable workflow for clients
+└── README-template.md              # README template for client repos
 ```
 
 ## Adding a New Check
@@ -91,7 +83,7 @@ DEFAULT_SEVERITY = {
 
 4. Update the README.md to document the new check
 
-5. Add the check to `.solt-hooks-defaults.yaml` if it needs configurable severity
+5. Add the check to `_solt-hooks-defaults.yaml` if it needs configurable severity
 
 ## Severity Levels
 
@@ -133,24 +125,8 @@ solt-check-branch invalid-branch  # Should fail
 - Document public methods with docstrings
 - Run checks before committing:
 ```bash
-ruff check src/ scripts/
-ruff format src/ scripts/
-```
-
-## Client Repository Setup
-
-To test the setup process:
-```bash
-# Create a test directory
-mkdir /tmp/test-odoo-module
-cd /tmp/test-odoo-module
-
-# Initialize with solt-pre-commit
-python /path/to/solt-pre-commit/scripts/setup-repo.py .
-
-# Verify files created
-ls -la
-# Should show: pyproject.toml, .pylintrc, .solt-hooks.yaml, .pre-commit-config.yaml
+ruff check .
+ruff format .
 ```
 
 ## Pull Request Process
@@ -175,10 +151,10 @@ Tags: `[IMP]` improvement, `[FIX]` bugfix, `[ADD]` new feature, `[REM]` removal,
 
 ## Releasing
 
-1. Update version in all locations:
+1. Update version in:
    - `pyproject.toml`
    - `setup.py`
-   - `src/solt_pre_commit/__init__.py`
+   - `__init__.py`
 
 2. Update CHANGELOG.md
 
@@ -190,24 +166,10 @@ git push origin v1.x.0
 
 4. The CI will automatically create a GitHub release
 
-## Files Reference
-
-### Client Repository Files
-
-When `setup-repo.py` runs, it creates these files in the client repo:
-
-| File | Source | Purpose                                 |
-|------|--------|-----------------------------------------|
-| `pyproject.toml` | `configs/pyproject-base.toml` | Ruff, black, isort, pytest, mypy config |
-| `.pylintrc` | `configs/.pylintrc` | Pylint-odoo configuration               |
-| `.solt-hooks.yaml` | `templates/.solt-hooks.yaml` | Soltein validation settings             |
-| `.pre-commit-config.yaml` | `templates/.pre-commit-config.yaml` | Pre-commit hooks                        |
-| `.github/workflows/solt_validate.yml` | `templates/github-workflows/solt_validate.yml` | CI workflow                             |
-
-### Configuration Priority
+## Configuration Priority
 
 1. `.solt-hooks.yaml` in client repo (highest priority)
-2. `.solt-hooks-defaults.yaml` in solt-pre-commit (defaults)
+2. `_solt-hooks-defaults.yaml` in solt-pre-commit (defaults)
 
 ## Questions?
 

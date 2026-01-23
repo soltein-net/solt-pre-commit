@@ -25,13 +25,14 @@
 #   - RUF (ruff): ruff-specific rules
 #
 # To change level, modify the 'select' list in [tool.ruff.lint]
+# See RUFF_LEVELS.md for detailed documentation
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# BLACK - Code Formatter
+# BLACK - Code Formatter (optional, ruff format can replace it)
 # -----------------------------------------------------------------------------
 [tool.black]
-line-length = 120
+line-length = 150
 target-version = ['py310', 'py311', 'py312']
 include = '\.pyi?$'
 extend-exclude = '''
@@ -54,11 +55,11 @@ extend-exclude = '''
 '''
 
 # -----------------------------------------------------------------------------
-# ISORT - Import Sorting
+# ISORT - Import Sorting (handled by ruff if using ruff's isort)
 # -----------------------------------------------------------------------------
 [tool.isort]
 profile = "black"
-line_length = 120
+line_length = 150
 known_odoo = ["odoo", "odoo.addons"]
 known_first_party = []
 sections = [
@@ -81,12 +82,12 @@ skip = [
 skip_glob = ["**/static/**", "**/lib/**"]
 
 # -----------------------------------------------------------------------------
-# RUFF - Fast Python Linter
+# RUFF - Fast Python Linter (v0.14+)
 # -----------------------------------------------------------------------------
 # Using LEVEL 2 (STANDARD) by default - safe for most Odoo projects
 # -----------------------------------------------------------------------------
 [tool.ruff]
-line-length = 120
+line-length = 150
 target-version = "py310"
 
 exclude = [
@@ -104,6 +105,7 @@ exclude = [
     "node_modules",
     "migrations",
     "__pycache__",
+    ".ruff_cache",
 ]
 
 [tool.ruff.lint]
@@ -152,7 +154,7 @@ ignore = [
     # "RUF012", # mutable class attributes (Odoo fields)
 ]
 
-# Allow autofix for all enabled rules
+# Autofix configuration (disabled by default in pre-commit, enable if needed)
 fixable = ["ALL"]
 unfixable = []
 
@@ -173,6 +175,11 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
     "S101",   # assert used
 ]
 
+# Relaxed rules for migrations
+"migrations/**/*.py" = [
+    "E501",   # line too long (SQL queries)
+]
+
 [tool.ruff.lint.isort]
 known-first-party = []
 known-third-party = ["odoo"]
@@ -190,13 +197,16 @@ max-complexity = 15
 [tool.ruff.lint.flake8-bugbear]
 # Extend immutable calls for Odoo field definitions
 extend-immutable-calls = [
+    # Full path (odoo.fields.*)
     "odoo.fields.Binary",
     "odoo.fields.Boolean",
     "odoo.fields.Char",
+    "odoo.fields.Command",
     "odoo.fields.Date",
     "odoo.fields.Datetime",
     "odoo.fields.Float",
     "odoo.fields.Html",
+    "odoo.fields.Id",
     "odoo.fields.Integer",
     "odoo.fields.Image",
     "odoo.fields.Json",
@@ -210,13 +220,16 @@ extend-immutable-calls = [
     "odoo.fields.Reference",
     "odoo.fields.Selection",
     "odoo.fields.Text",
+    # Short path (fields.*)
     "fields.Binary",
     "fields.Boolean",
     "fields.Char",
+    "fields.Command",
     "fields.Date",
     "fields.Datetime",
     "fields.Float",
     "fields.Html",
+    "fields.Id",
     "fields.Integer",
     "fields.Image",
     "fields.Json",
@@ -230,6 +243,14 @@ extend-immutable-calls = [
     "fields.Reference",
     "fields.Selection",
     "fields.Text",
+    # Command helpers (Odoo 13+)
+    "Command.create",
+    "Command.update",
+    "Command.delete",
+    "Command.unlink",
+    "Command.link",
+    "Command.clear",
+    "Command.set",
 ]
 
 # -----------------------------------------------------------------------------
@@ -273,7 +294,7 @@ exclude_lines = [
 ]
 
 # -----------------------------------------------------------------------------
-# MYPY - Type Checking
+# MYPY - Type Checking (optional)
 # -----------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.10"

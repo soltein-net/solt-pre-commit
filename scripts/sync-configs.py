@@ -15,12 +15,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
+# In flat structure, all files are in the same directory as the script
 SCRIPT_DIR = Path(__file__).parent.absolute()
-REPO_ROOT = SCRIPT_DIR.parent
-TEMPLATES_DIR = REPO_ROOT / "templates"
-CONFIGS_DIR = REPO_ROOT / "configs"
 
 # Default files to sync
 DEFAULT_SYNC_FILES = [
@@ -35,28 +32,32 @@ FILES_TO_REMOVE = [
     "ruff.toml",
 ]
 
-# Map filenames to their source directories/files
+# Map filenames to their source files (flat structure with _ prefix)
 FILE_SOURCE_MAP = {
-    ".pylintrc": CONFIGS_DIR / ".pylintrc",
-    "pyproject.toml": CONFIGS_DIR / "pyproject-base.toml",
-    ".solt-hooks.yaml": TEMPLATES_DIR / ".solt-hooks.yaml",
-    ".pre-commit-config.yaml": TEMPLATES_DIR / ".pre-commit-config.yaml",
-    ".pre-commit-config-local.yaml": TEMPLATES_DIR / ".pre-commit-config-local.yaml",
+    ".pylintrc": SCRIPT_DIR / "_pylintrc",
+    "pyproject.toml": SCRIPT_DIR / "pyproject-base.toml",
+    ".solt-hooks.yaml": SCRIPT_DIR / "_solt-hooks.yaml",
+    ".pre-commit-config.yaml": SCRIPT_DIR / "_pre-commit-config.yaml",
+    ".pre-commit-config-local.yaml": SCRIPT_DIR / "_pre-commit-config-local.yaml",
 }
 
 
-def get_source_path(filename: str) -> Optional[Path]:
+def get_source_path(filename: str) -> Path | None:
     """Get source path for a config file."""
     if filename in FILE_SOURCE_MAP:
         src = FILE_SOURCE_MAP[filename]
         if src.exists():
             return src
 
-    # Fallback: search in configs then templates
-    for search_dir in [CONFIGS_DIR, TEMPLATES_DIR]:
-        candidate = search_dir / filename
-        if candidate.exists():
-            return candidate
+    # Fallback: search in same directory with _ prefix
+    candidate_with_prefix = SCRIPT_DIR / f"_{filename.lstrip('.')}"
+    if candidate_with_prefix.exists():
+        return candidate_with_prefix
+
+    # Fallback: search without prefix
+    candidate = SCRIPT_DIR / filename
+    if candidate.exists():
+        return candidate
 
     return None
 
@@ -242,7 +243,11 @@ Examples:
         print(f"❌ Repos file not found: {repos_file}")
         sys.exit(1)
 
-    repos = [line.strip() for line in repos_file.read_text().splitlines() if line.strip() and not line.startswith("#")]
+    repos = [
+        line.strip()
+        for line in repos_file.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
 
     print(f"\n{'=' * 60}")
     print(f"🔄 Syncing to {len(repos)} repositories")

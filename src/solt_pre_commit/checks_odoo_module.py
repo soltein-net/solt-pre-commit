@@ -2,7 +2,11 @@
 # Copyright 2025 Soltein SA. de CV.
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
-"""Main orchestrator for Odoo module validations with severity support."""
+"""Main orchestrator for Odoo module validations with severity support.
+
+Supports Odoo versions: 17.0, 18.0, 19.0, and future versions (20.0+)
+Auto-detects version from manifest or branch name.
+"""
 
 import argparse
 import ast
@@ -22,6 +26,9 @@ from . import (
     checks_odoo_module_xml_advanced,
 )
 from .config_loader import (
+    MINIMUM_SUPPORTED_VERSION,
+    SUPPORTED_ODOO_VERSIONS,
+    OdooVersionDetector,
     Severity,
     SoltConfig,
 )
@@ -29,7 +36,7 @@ from .config_loader import (
 # Backward compatibility alias
 SeverityConfig = SoltConfig
 
-DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/17.0/docs/README_TEMPLATE.rst"
+DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/main/docs/README_TEMPLATE.rst"
 DFTL_README_FILES = ["README.md", "README.txt", "README.rst"]
 DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "update_xml"]
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")
@@ -327,9 +334,13 @@ def installable(method):
 
 
 class ChecksOdooModule:
-    """Main class to run validations on Odoo modules."""
+    """Main class to run validations on Odoo modules.
 
-    def __init__(self, manifest_path, verbose=True, check_mode=None, severity_config=None):
+    Supports Odoo versions: 17.0, 18.0, 19.0, and future versions (X.0 where X >= 17)
+    Auto-detects version from module manifest or allows explicit override.
+    """
+
+    def __init__(self, manifest_path, verbose=True, check_mode=None, severity_config=None, odoo_version=None):
         self.manifest_path = self._get_manifest_file_path(manifest_path)
         self.verbose = verbose
         self.check_mode = check_mode
@@ -342,9 +353,40 @@ class ChecksOdooModule:
         self.manifest_referenced_files = self._referenced_files_by_extension()
         self.check_result = CheckResult(self.severity_config)
 
+        # Odoo version detection/configuration
+        if odoo_version:
+            self.odoo_version = OdooVersionDetector.normalize_version(odoo_version)
+        else:
+            self.odoo_version = self._detect_odoo_version()
+
         self._changed_detector = None
         if self.severity_config.use_changed_files_only():
             self._changed_detector = self.severity_config.changed_detector
+
+    def _detect_odoo_version(self) -> str:
+        """Detect Odoo version from manifest or config.
+
+        Supports both explicit SUPPORTED_ODOO_VERSIONS and future versions (X.0 where X >= 17)
+        """
+        # Try from manifest first
+        version = self.manifest_dict.get("version", "")
+        if version:
+            parts = version.split(".")
+            if len(parts) >= 2:
+                odoo_version = f"{parts[0]}.{parts[1]}"
+                # Check explicitly supported versions
+                if odoo_version in SUPPORTED_ODOO_VERSIONS:
+                    return odoo_version
+                # Also accept future versions (X.0 where X >= MINIMUM_SUPPORTED_VERSION)
+                try:
+                    major = int(parts[0])
+                    if major >= MINIMUM_SUPPORTED_VERSION and parts[1] == "0":
+                        return odoo_version
+                except ValueError:
+                    pass
+
+        # Fall back to config
+        return self.severity_config.get_odoo_version(self.odoo_addon_path)
 
     def has_changed_files(self) -> bool:
         if not self._changed_detector:
@@ -479,7 +521,9 @@ class ChecksOdooModule:
         if not manifest_datas:
             return
 
-        checks_obj = checks_odoo_module_xml.ChecksOdooModuleXML(manifest_datas, self.odoo_addon_name)
+        checks_obj = checks_odoo_module_xml.ChecksOdooModuleXML(
+            manifest_datas, self.odoo_addon_name, odoo_version=self.odoo_version
+        )
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
@@ -492,7 +536,9 @@ class ChecksOdooModule:
         if not manifest_datas:
             return
 
-        checks_obj = checks_odoo_module_xml_advanced.ChecksOdooModuleXMLAdvanced(manifest_datas, self.odoo_addon_name)
+        checks_obj = checks_odoo_module_xml_advanced.ChecksOdooModuleXMLAdvanced(
+            manifest_datas, self.odoo_addon_name, odoo_version=self.odoo_version
+        )
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
         self.check_result.add_from_dict(checks_obj.checks_errors)
@@ -536,6 +582,7 @@ class ChecksOdooModule:
             manifest_datas,
             self.odoo_addon_name,
             config=self.severity_config,
+            odoo_version=self.odoo_version,
         )
         for check_meth in self._get_check_methods(checks_obj):
             check_meth()
@@ -560,6 +607,7 @@ class ChecksOdooModule:
             all_py_files,
             self.odoo_addon_name,
             config=self.severity_config,
+            odoo_version=self.odoo_version,
         )
         del _parser
 
@@ -707,8 +755,28 @@ def run(
     json_report=None,
     show_coverage=True,
     show_all_modules=False,
+    odoo_version=None,
+    max_messages=None,
 ):
-    """Main entry point."""
+    """Main entry point.
+
+    Args:
+        manifest_paths: List of paths to Odoo modules
+        verbose: Show detailed output
+        do_exit: Exit with code after validation
+        check_mode: Run only specific checks (xml, csv, po, python)
+        config_path: Path to .solt-hooks.yaml
+        show_info: Show info-level issues
+        force_scope: Override validation scope (changed, full)
+        json_report: Path to save JSON coverage report
+        show_coverage: Show coverage metrics
+        show_all_modules: Show all modules even if no issues
+        odoo_version: Odoo version override (17.0, 18.0, 19.0)
+        max_messages: Maximum messages per check (None = use default, which is 10 in terminal or unlimited in CI)
+
+    Returns:
+        Tuple of (all_results, exit_code)
+    """
     import time
 
     start_time = time.time()
@@ -721,11 +789,19 @@ def run(
     if force_scope:
         severity_config.validation_scope = force_scope
 
-    printer = ResultPrinter(use_colors=True, verbose=show_info)
+    # Set Odoo version if provided
+    if odoo_version:
+        severity_config.set_odoo_version(odoo_version)
+        detected_version = OdooVersionDetector.normalize_version(odoo_version)
+    else:
+        detected_version = None
+
+    printer = ResultPrinter(use_colors=True, verbose=show_info, max_messages=max_messages)
 
     all_results = []
     checks_objects = []
     has_blocking = False
+    versions_found = set()
 
     for manifest_path in manifest_paths:
         checks_obj = ChecksOdooModule(
@@ -733,7 +809,10 @@ def run(
             verbose=verbose,
             check_mode=check_mode,
             severity_config=severity_config,
+            odoo_version=detected_version,
         )
+
+        versions_found.add(checks_obj.odoo_version)
 
         for check in checks_obj.getattr_checks():
             check(checks_obj)
@@ -775,6 +854,8 @@ def run(
         print("=" * 60)
         scope_label = "changed files only" if severity_config.validation_scope == "changed" else "full repository"
         print(f"  Validation scope: {scope_label}")
+        if versions_found:
+            print(f"  Odoo version(s): {', '.join(sorted(versions_found))}")
 
         total_counts = {Severity.ERROR: 0, Severity.WARNING: 0, Severity.INFO: 0}
         for _module_name, result in all_results:
@@ -815,7 +896,10 @@ def run(
 
 def main():
     """Console entry point."""
-    parser = argparse.ArgumentParser(description="Solt Pre-commit: Odoo module validation hooks")
+    parser = argparse.ArgumentParser(
+        description="Solt Pre-commit: Odoo module validation hooks",
+        epilog=f"Supported Odoo versions: {', '.join(SUPPORTED_ODOO_VERSIONS)}",
+    )
     parser.add_argument("paths", nargs="*", help="Paths to Odoo modules or files to validate")
     parser.add_argument("--check-xml-only", action="store_true", help="Run only XML checks")
     parser.add_argument("--check-csv-only", action="store_true", help="Run only CSV checks")
@@ -829,7 +913,24 @@ def main():
         default=None,
         help="Override validation scope",
     )
+    parser.add_argument(
+        "--odoo-version",
+        choices=SUPPORTED_ODOO_VERSIONS + ["auto"],
+        default="auto",
+        help="Odoo version for validation (default: auto-detect from manifest)",
+    )
     parser.add_argument("-q", "--quiet", action="store_true", help="Suppress output")
+    parser.add_argument(
+        "--no-limit",
+        action="store_true",
+        help="Show all errors without limit (default: 10 in terminal, unlimited in CI)",
+    )
+    parser.add_argument(
+        "--max-messages",
+        type=int,
+        default=None,
+        help="Maximum number of messages to show per check (default: 10 in terminal, unlimited in CI)",
+    )
     parser.add_argument(
         "--json-report",
         default=None,
@@ -853,6 +954,17 @@ def main():
     elif args.check_python_only:
         check_mode = "python"
 
+    # Handle Odoo version
+    odoo_version = None if args.odoo_version == "auto" else args.odoo_version
+
+    # Handle max messages limit
+    if args.no_limit:
+        max_messages = None  # No limit
+    elif args.max_messages is not None:
+        max_messages = args.max_messages
+    else:
+        max_messages = None  # Will use default (10 in terminal, None in CI)
+
     paths = args.paths or []
 
     # =========================================================================
@@ -865,7 +977,7 @@ def main():
                 if not args.quiet:
                     print(f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {len(paths)} file(s)")
                     for mod in detected_modules:
-                        print(f"  → {Path(mod).name}")
+                        print(f"  -> {Path(mod).name}")
                 paths = detected_modules
             else:
                 if not args.quiet:
@@ -881,12 +993,16 @@ def main():
                     f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {staged_count} staged file(s)"
                 )
                 for mod in detected_modules:
-                    print(f"  → {Path(mod).name}")
+                    print(f"  -> {Path(mod).name}")
             paths = detected_modules
         else:
             # Fallback to current directory
             paths = ["."]
     # =========================================================================
+
+    # Show version being used
+    if not args.quiet and odoo_version:
+        print(f"[solt-check-odoo] Using Odoo version: {odoo_version}")
 
     return run(
         manifest_paths=paths,
@@ -897,6 +1013,8 @@ def main():
         force_scope=args.scope,
         json_report=args.json_report,
         show_all_modules=args.show_all_modules,
+        odoo_version=odoo_version,
+        max_messages=max_messages,
     )
 
 

@@ -4,6 +4,8 @@
 
 """Python validations for Odoo modules.
 
+Supports Odoo versions: 17.0, 18.0, 19.0
+
 Detects patterns that generate runtime warnings:
 - Fields with same string/label in the same model
 - Inconsistent compute_sudo on related computed fields
@@ -17,10 +19,13 @@ import ast
 from collections import defaultdict
 from typing import Dict, List, Optional, Set
 
+from .config_loader import DEFAULT_ODOO_VERSION, MAIL_MIXINS_BY_VERSION
+
 
 class OdooFieldVisitor(ast.NodeVisitor):
     """AST visitor to extract Odoo field and method information."""
 
+    # Base field types available in all supported Odoo versions
     FIELD_TYPES = {
         "Char",
         "Text",
@@ -41,6 +46,14 @@ class OdooFieldVisitor(ast.NodeVisitor):
         "Json",
         "Properties",
         "PropertiesDefinition",
+    }
+
+    # Field types added in specific Odoo versions
+    # Can be extended when new versions add new field types
+    FIELD_TYPES_BY_VERSION = {
+        "17.0": set(),
+        "18.0": set(),
+        "19.0": set(),
     }
 
     DEFAULT_SKIP_DOCSTRING_METHODS = {
@@ -68,13 +81,19 @@ class OdooFieldVisitor(ast.NodeVisitor):
         "__format__",
     }
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, odoo_version: str = DEFAULT_ODOO_VERSION):
         self.filename = filename
+        self.odoo_version = odoo_version
         self.current_class: Optional[str] = None
         self.current_class_lineno: int = 0
         self.models: Dict[str, dict] = {}
         self.fields: Dict[str, List[dict]] = defaultdict(list)
         self.methods: Dict[str, List[dict]] = defaultdict(list)
+
+        # Get field types for this version
+        self.field_types = self.FIELD_TYPES.copy()
+        version_types = self.FIELD_TYPES_BY_VERSION.get(odoo_version, set())
+        self.field_types.update(version_types)
 
     def visit_ClassDef(self, node: ast.ClassDef):  # noqa: N802
         """Visit class definitions to detect Odoo models."""
@@ -124,14 +143,11 @@ class OdooFieldVisitor(ast.NodeVisitor):
         return []
 
     def _check_mail_thread(self, inherit_list: List[str]) -> bool:
-        """Check if model inherits from mail.thread."""
-        mail_mixins = {
-            "mail.thread",
-            "mail.activity.mixin",
-            "mail.thread.main.attachment",
-            "mail.thread.cc",
-            "mail.thread.blacklist",
-        }
+        """Check if model inherits from mail.thread.
+
+        Uses version-specific mail mixins from config.
+        """
+        mail_mixins = MAIL_MIXINS_BY_VERSION.get(self.odoo_version, MAIL_MIXINS_BY_VERSION[DEFAULT_ODOO_VERSION])
         return bool(set(inherit_list) & mail_mixins)
 
     def visit_FunctionDef(self, node: ast.FunctionDef):  # noqa: N802
@@ -349,10 +365,11 @@ class ChecksOdooModulePython:
         "activity_ids",
     }
 
-    def __init__(self, manifest_datas: List[dict], module_name: str, config=None):
+    def __init__(self, manifest_datas: List[dict], module_name: str, config=None, odoo_version: str = None):
         self.module_name = module_name
         self.manifest_datas = manifest_datas
         self.config = config
+        self.odoo_version = odoo_version or DEFAULT_ODOO_VERSION
         self.checks_errors = defaultdict(list)
         self.all_models: Dict[str, dict] = {}
         self.all_fields: Dict[str, List[dict]] = defaultdict(list)
@@ -383,7 +400,7 @@ class ChecksOdooModulePython:
                 source = f.read()
 
             tree = ast.parse(source, filename=filename)
-            visitor = OdooFieldVisitor(filename)
+            visitor = OdooFieldVisitor(filename, odoo_version=self.odoo_version)
             visitor.visit(tree)
 
             for class_name, model_info in visitor.models.items():

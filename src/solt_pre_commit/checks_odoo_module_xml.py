@@ -2,23 +2,29 @@
 # Copyright 2025 Soltein SA. de CV.
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
-"""Basic XML validations for Odoo modules."""
+"""Basic XML validations for Odoo modules.
+
+Supports Odoo versions: 17.0, 18.0, 19.0
+"""
 
 import os
 import re
 from collections import defaultdict
-from typing import List
+from typing import List, Optional
 
 from lxml import etree
+
+from .config_loader import DEFAULT_ODOO_VERSION
 
 
 class ChecksOdooModuleXML:
     """Basic XML validator for Odoo modules."""
 
-    def __init__(self, manifest_datas: List[dict], module_name: str):
+    def __init__(self, manifest_datas: List[dict], module_name: str, odoo_version: Optional[str] = None):
         self.module_name = module_name
         self.manifest_datas = manifest_datas
         self.checks_errors = defaultdict(list)
+        self.odoo_version = odoo_version or DEFAULT_ODOO_VERSION
 
         for manifest_data in manifest_datas:
             try:

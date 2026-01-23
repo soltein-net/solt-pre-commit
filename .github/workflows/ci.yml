@@ -1,8 +1,7 @@
 # =============================================================================
 # SOLT PRE-COMMIT - CI/CD Pipeline
 # =============================================================================
-# CI interno para el repositorio solt-pre-commit
-# Valida que los hooks funcionen correctamente antes de release
+# Supports Odoo versions: 17.0, 18.0, 19.0
 # =============================================================================
 
 name: CI
@@ -55,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ '3.8', '3.9', '3.10', '3.11', '3.12' ]
+        python-version: [ '3.10', '3.11', '3.12' ]
 
     steps:
       - uses: actions/checkout@v4
@@ -78,16 +77,20 @@ jobs:
             pytest tests/ -v --tb=short --cov=solt_pre_commit --cov-report=xml
           else
             echo "No tests directory found, running basic import test"
-            python -c "from solt_pre_commit import ChecksOdooModule, SoltConfig; print('Import OK')"
+            python -c "from solt_pre_commit import ChecksOdooModule, SoltConfig, SUPPORTED_ODOO_VERSIONS; print(f'Import OK - Supported versions: {SUPPORTED_ODOO_VERSIONS}')"
           fi
 
   # ───────────────────────────────────────────────────────────────────────────
-  # INTEGRATION TEST - Validate sample module
+  # INTEGRATION TEST - Validate sample modules for each Odoo version
   # ───────────────────────────────────────────────────────────────────────────
   integration:
-    name: 🔗 Integration Test
+    name: 🔗 Integration Test (Odoo ${{ matrix.odoo-version }})
     runs-on: ubuntu-latest
     needs: [ lint, test ]
+    strategy:
+      fail-fast: false
+      matrix:
+        odoo-version: [ '17.0', '18.0', '19.0' ]
 
     steps:
       - uses: actions/checkout@v4
@@ -100,15 +103,15 @@ jobs:
       - name: Install package
         run: pip install -e .
 
-      - name: Create sample Odoo module
+      - name: Create sample Odoo ${{ matrix.odoo-version }} module
         run: |
           mkdir -p test_module
-          cat > test_module/__manifest__.py << 'EOF'
+          cat > test_module/__manifest__.py << EOF
           {
               "name": "Test Module",
-              "version": "17.0.1.0.0",
+              "version": "${{ matrix.odoo-version }}.1.0.0",
               "category": "Tools",
-              "summary": "Test module for solt-pre-commit",
+              "summary": "Test module for solt-pre-commit (Odoo ${{ matrix.odoo-version }})",
               "depends": ["base"],
               "data": [],
               "installable": True,
@@ -141,15 +144,23 @@ jobs:
 
       - name: Run solt-check-odoo
         run: |
-          echo "Testing solt-check-odoo..."
-          solt-check-odoo test_module --show-info || true
+          echo "Testing solt-check-odoo for Odoo ${{ matrix.odoo-version }}..."
+          solt-check-odoo test_module --show-info --odoo-version ${{ matrix.odoo-version }} || true
+
+      - name: Test version auto-detection
+        run: |
+          echo "Testing version auto-detection..."
+          DETECTED=$(solt-check-odoo test_module -q 2>&1 | grep -o "Odoo version(s): [0-9.]*" | head -1 || echo "")
+          if [ -n "$DETECTED" ]; then
+            echo "Detected: $DETECTED"
+          fi
 
       - name: Run solt-check-branch
         run: |
           echo "Testing solt-check-branch..."
           solt-check-branch "feature/TEST-123-sample-branch"
           solt-check-branch "fix/correct-bug"
-          solt-check-branch "release/17.0.1.0"
+          solt-check-branch "release/${{ matrix.odoo-version }}.1.0"
 
       - name: Test invalid branch (should fail)
         run: |

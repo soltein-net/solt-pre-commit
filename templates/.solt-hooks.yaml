@@ -19,8 +19,14 @@ validation_scope: changed
 # =============================================================================
 # BRANCH NAMING POLICY
 # =============================================================================
+# Supports Odoo multi-version branch patterns:
+#   - Direct version: 17.0, 18.0 (protected)
+#   - Version-prefixed: feature/17.0-description, hotfix/18.0-fix
+#   - Standard: feature/description, fix/TICKET-123-description
+#   - Release: release/17.0.1.0
+# =============================================================================
 branch_naming:
-  strict: false  # true = requires ticket (feature/SOLT-123-desc)
+  strict: false  # true = requires ticket OR version (feature/SOLT-123-desc OR feature/17.0-desc)
 
   # Ticket prefixes (used when strict: true)
   ticket_prefixes:
@@ -28,18 +34,19 @@ branch_naming:
     - PROJ
 
   # Allowed branch types with pattern: <type>/<description>
+  # All types support version prefix: <type>/<odoo-version>-<description>
   allowed_types:
-    - feature
-    - fix
-    - hotfix
+    - feature    # feature/add-invoice OR feature/17.0-add-invoice
+    - fix        # fix/bug-name OR fix/18.0-critical-fix
+    - hotfix     # hotfix/urgent OR hotfix/17.0-urgent
     - bugfix
-    - release
+    - release    # release/17.0.1.0
     - refactor
     - docs
     - test
     - chore
 
-  # Protected branches (skip validation)
+  # Protected branches (skip validation entirely)
   protected_branches:
     - main
     - master
@@ -48,13 +55,14 @@ branch_naming:
     - production
 
   # Protected patterns (regex) - branches matching these skip validation
+  # Odoo version branches are protected by default
   protected_patterns:
-    - "^17\\.0.*$"
-    - "^18\\.0.*$"
-    - "^feature/17\\.0-.*$"
-    - "^feature/18\\.0-.*$"
-    - "^hotfix/17\\.0-.*$"
-    - "^hotfix/18\\.0-.*$"
+    # Direct version branches (17.0, 18.0, etc.)
+    - "^\\d+\\.0$"
+    # Version with patch (17.0.1.0, 17.0-stable, etc.)
+    - "^\\d+\\.0\\.\\d+.*$"
+    # Custom patterns (add your own)
+    # - "^feature/17\\.0-.*$"  # Uncomment to also protect feature branches
 
 # =============================================================================
 # DISABLED CHECKS

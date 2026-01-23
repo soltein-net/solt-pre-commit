@@ -5,29 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.0] - 2024-12-16
+## [Unreleased]
+
+### Changed
+- Simplified project structure (flat layout, no src/ directory)
+- Removed utility scripts (`generate-badges.py`, `sync-configs.py`) from core package
+- Updated MANIFEST.in to reflect new structure
+
+## [1.0.0] - 2025-01-XX
 
 ### Added
+- Multi-version Odoo support (17.0, 18.0, 19.0+)
+- Automatic Odoo version detection from branch names
+- Python version auto-selection based on Odoo version
+- Advanced XML validation checks
+- Ruff levels documentation (RUFF_LEVELS.md)
+
+### Changed
+- Migrated to flat project structure
+- Renamed template files with underscore prefix (`_pre-commit-config.yaml`)
+- Improved GitHub Actions workflow with better error handling
+- Enhanced PR comments with detailed validation reports
 - Centralized `pyproject.toml` configuration for client repos (replaces separate `ruff.toml`)
 - `--no-force` flag in `setup-repo.py` to skip existing files
 - Automatic cleanup of old `ruff.toml` files when syncing
 - `fail-on-warnings` option in GitHub Actions workflow
 - `show-info` option to display info-level issues
-
-### Changed
 - **BREAKING**: `ruff.toml` replaced by `pyproject.toml` in client repos
 - `setup-repo.py` now overwrites existing files by default (use `--no-force` to skip)
 - Ruff hooks now use `pyproject.toml` automatically (removed `--config ruff.toml` args)
 - Simplified GitHub workflow template (corrected reusable workflow path)
-- Updated `sync-configs.py` to handle `pyproject.toml` migration
 
 ### Fixed
-- Setup script now properly updates existing configurations
+- Version detection from manifest files
+- Branch name patterns for feature/hotfix prefixes
 
 ### Removed
-- `configs/ruff.toml` (consolidated into `configs/pyproject-base.toml`)
+- `configs/ruff.toml` (consolidated into `pyproject-base.toml`)
 
-## [1.0.0] - 2024-12-15
+## [0.1.0] - 2024-12-15
 
 ### Added
 - Initial release
@@ -39,8 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.solt-hooks.yaml` configuration support
 - Skip lists for fields and methods
 - Ruff linter configuration for Odoo modules
-- Setup script (`scripts/setup-repo.py`) to initialize hooks in client repos
-- Sync script (`scripts/sync-configs.py`) to sync configs across multiple repos
+- Setup script (`setup-repo.py`) to initialize hooks in client repos
 - GitHub Actions workflow template for CI validation
 - Path exclusions for migrations, tests, static, and node_modules
 - Odoo runtime warning detection:

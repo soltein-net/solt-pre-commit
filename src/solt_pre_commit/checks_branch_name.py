@@ -2,7 +2,14 @@
 # Copyright 2025 Soltein SA. de CV.
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
-"""Branch naming policy validation."""
+"""Branch naming policy validation with multi-version Odoo support.
+
+Supports branch patterns:
+- Direct version: 17.0, 18.0, 17.0.1.0
+- Version-prefixed: feature/17.0-description, hotfix/18.0-fix
+- Standard: feature/description, fix/TICKET-123-description
+- Release: release/17.0.1.0
+"""
 
 import argparse
 import re
@@ -35,16 +42,26 @@ DEFAULT_PROTECTED_BRANCHES = {
     "HEAD",
 }
 
-# Default protected patterns (Odoo version branches and feature/hotfix with version)
+# Odoo version pattern: 16.0, 17.0, 18.0, etc.
+ODOO_VERSION_PATTERN = r"\d+\.0"
+
+# Default protected patterns (Odoo version branches)
 DEFAULT_PROTECTED_PATTERNS = [
-    r"^\d+\.0.*$",  # 17.0, 17.0.1, 18.0, etc.
-    r"^feature/\d+\.0-.*$",  # feature/17.0-something
-    r"^hotfix/\d+\.0-.*$",  # hotfix/17.0-something
+    rf"^{ODOO_VERSION_PATTERN}$",           # 17.0, 18.0
+    rf"^{ODOO_VERSION_PATTERN}\.\d+.*$",    # 17.0.1, 17.0.1.0, 17.0-stable
 ]
 
 
 class BranchNameValidator:
-    """Validates branch names against naming policy."""
+    """Validates branch names against naming policy.
+
+    Supports multiple branch naming conventions:
+    1. Standard: feature/description, fix/bug-name
+    2. With ticket: feature/SOLT-123-description
+    3. Version-prefixed: feature/17.0-description, hotfix/18.0-fix
+    4. Release: release/17.0.1.0
+    5. Direct version: 17.0, 18.0 (protected)
+    """
 
     CONFIG_FILES = [".solt-hooks.yaml", ".solt-hooks.yml", "solt-hooks.yaml"]
 
@@ -54,6 +71,13 @@ class BranchNameValidator:
         config_path: Optional[str] = None,
         strict: Optional[bool] = None,
     ):
+        """Initialize the validator.
+
+        Args:
+            ticket_prefixes: List of valid ticket prefixes (e.g., ['SOLT', 'PROJ'])
+            config_path: Path to configuration file
+            strict: If True, requires ticket in branch name
+        """
         self.config = self._load_config(config_path)
         self.branch_config = self.config.get("branch_naming", {})
 
@@ -101,15 +125,23 @@ class BranchNameValidator:
         """Get protected patterns from config."""
         config_patterns = self.branch_config.get("protected_patterns", [])
         if config_patterns:
-            return config_patterns
+            # Merge with defaults
+            return list(set(DEFAULT_PROTECTED_PATTERNS + config_patterns))
         return DEFAULT_PROTECTED_PATTERNS
 
     def _compile_patterns(self):
-        """Compile regex patterns for branch validation."""
+        """Compile regex patterns for branch validation.
+
+        Creates patterns for each branch type supporting:
+        - Standard: type/description
+        - With ticket: type/TICKET-123-description
+        - Version-prefixed: type/17.0-description
+        - Release: release/17.0.1.0
+        """
         if self.ticket_prefixes == ["[A-Z]+"]:
             prefix_pattern = "[A-Z]+"
         else:
-            prefix_pattern = "(" + "|".join(self.ticket_prefixes) + ")"
+            prefix_pattern = "(" + "|".join(re.escape(p) for p in self.ticket_prefixes) + ")"
 
         self.patterns = {}
 
@@ -118,12 +150,22 @@ class BranchNameValidator:
                 # release/17.0.1.0 or release/1.0.0
                 self.patterns[branch_type] = re.compile(r"^release/\d+\.\d+(\.\d+)*$")
             elif self.strict:
-                # Strict: requires ticket - feature/SOLT-123-description
-                self.patterns[branch_type] = re.compile(f"^{branch_type}/{prefix_pattern}-\\d+-.+$")
-            else:
-                # Flexible: type/description or type/TICKET-123-description
+                # Strict mode: requires ticket OR version prefix
+                # feature/SOLT-123-description OR feature/17.0-description
                 self.patterns[branch_type] = re.compile(
-                    f"^{branch_type}/([a-z0-9][-a-z0-9]*|{prefix_pattern}-\\d+-.+)$"
+                    rf"^{branch_type}/("
+                    rf"{prefix_pattern}-\d+-.+|"  # SOLT-123-description
+                    rf"{ODOO_VERSION_PATTERN}-.+"  # 17.0-description
+                    rf")$"
+                )
+            else:
+                # Flexible mode: type/description or type/TICKET-123-description or type/17.0-description
+                self.patterns[branch_type] = re.compile(
+                    rf"^{branch_type}/("
+                    rf"[a-z0-9][-a-z0-9]*|"  # simple-description
+                    rf"{prefix_pattern}-\d+-.+|"  # SOLT-123-description
+                    rf"{ODOO_VERSION_PATTERN}-.+"  # 17.0-description
+                    rf")$"
                 )
 
     def get_current_branch(self) -> Optional[str]:
@@ -140,7 +182,13 @@ class BranchNameValidator:
             return None
 
     def is_protected_branch(self, branch_name: str) -> bool:
-        """Check if branch is protected (skip validation)."""
+        """Check if branch is protected (skip validation).
+
+        Protected branches include:
+        - Explicit names: main, master, develop, etc.
+        - Odoo version branches: 17.0, 18.0, 17.0.1.0
+        - Custom patterns from config
+        """
         # Check explicit protected branches
         if branch_name in DEFAULT_PROTECTED_BRANCHES:
             return True
@@ -160,15 +208,54 @@ class BranchNameValidator:
 
         return False
 
+    def extract_odoo_version(self, branch_name: str) -> Optional[str]:
+        """Extract Odoo version from branch name if present.
+
+        Args:
+            branch_name: The branch name to analyze
+
+        Returns:
+            Odoo version string (e.g., '17.0') or None
+        """
+        # Pattern 1: Direct version branch (17.0, 18.0)
+        match = re.match(rf"^({ODOO_VERSION_PATTERN})", branch_name)
+        if match:
+            return match.group(1)
+
+        # Pattern 2: Prefixed branch (feature/17.0-something)
+        match = re.match(rf"^[a-z]+/({ODOO_VERSION_PATTERN})", branch_name)
+        if match:
+            return match.group(1)
+
+        # Pattern 3: Version anywhere
+        match = re.search(rf"({ODOO_VERSION_PATTERN})", branch_name)
+        if match:
+            return match.group(1)
+
+        return None
+
     def validate(self, branch_name: str) -> Tuple[bool, str]:
-        """Validate a branch name against the naming policy."""
+        """Validate a branch name against the naming policy.
+
+        Args:
+            branch_name: The branch name to validate
+
+        Returns:
+            Tuple of (is_valid, message)
+        """
         # Check if protected (skip validation)
         if self.is_protected_branch(branch_name):
+            odoo_version = self.extract_odoo_version(branch_name)
+            if odoo_version:
+                return True, f"Protected Odoo {odoo_version} branch '{branch_name}' - skipped validation"
             return True, f"Protected branch '{branch_name}' - skipped validation"
 
         # Check against type patterns
         for branch_type, pattern in self.patterns.items():
             if pattern.match(branch_name):
+                odoo_version = self.extract_odoo_version(branch_name)
+                if odoo_version:
+                    return True, f"Valid {branch_type} branch for Odoo {odoo_version}: {branch_name}"
                 return True, f"Valid {branch_type} branch: {branch_name}"
 
         return False, self._generate_error_message(branch_name)
@@ -186,76 +273,91 @@ class BranchNameValidator:
             example_prefix = self.ticket_prefixes[0] if self.ticket_prefixes[0] != "[A-Z]+" else "PROJ"
 
             message = f"""
-❌ Invalid branch name: '{branch_name}'
+[ERROR] Invalid branch name: '{branch_name}'
 
-Mode: STRICT (ticket required)
+Mode: STRICT (ticket or version required)
 
-Branch names must follow the pattern:
+Branch names must follow one of these patterns:
   <type>/<TICKET>-<number>-<description>
+  <type>/<odoo-version>-<description>
 
 Valid types: {types_str}
 Ticket prefixes: {prefixes_str}
 
 Examples:
-  ✔ feature/{example_prefix}-123-add-new-feature
-  ✔ fix/{example_prefix}-456-correct-bug
-  ✔ release/17.0.1.0
+  [OK] feature/{example_prefix}-123-add-new-feature
+  [OK] fix/{example_prefix}-456-correct-bug
+  [OK] feature/17.0-add-new-feature
+  [OK] hotfix/18.0-urgent-fix
+  [OK] release/17.0.1.0
 
 Common mistakes:
-  ✗ Feature/... (use lowercase)
-  ✗ feature/add-something (missing ticket number)
-  ✗ my-branch (missing type prefix)
+  [X] Feature/... (use lowercase)
+  [X] feature/add-something (missing ticket or version)
+  [X] my-branch (missing type prefix)
 """
         else:
             message = f"""
-❌ Invalid branch name: '{branch_name}'
+[ERROR] Invalid branch name: '{branch_name}'
 
 Mode: FLEXIBLE (ticket optional)
 
-Branch names must follow the pattern:
+Branch names must follow one of these patterns:
   <type>/<description>
-  OR
   <type>/<TICKET>-<number>-<description>
+  <type>/<odoo-version>-<description>
 
 Valid types: {types_str}
 
 Examples:
-  ✔ feature/add-new-feature
-  ✔ feature/SOLT-123-add-new-feature
-  ✔ fix/correct-calculation
-  ✔ release/17.0.1.0
-  ✔ feature/17.0-new-feature (version-prefixed)
-  ✔ hotfix/17.0-urgent-fix (version-prefixed)
+  [OK] feature/add-new-feature
+  [OK] feature/SOLT-123-add-new-feature
+  [OK] fix/correct-calculation
+  [OK] feature/17.0-new-feature
+  [OK] hotfix/18.0-urgent-fix
+  [OK] release/17.0.1.0
 
 Common mistakes:
-  ✗ Feature/... (use lowercase)
-  ✗ my-branch (missing type prefix)
+  [X] Feature/... (use lowercase)
+  [X] my-branch (missing type prefix)
 """
 
         # List protected branches and patterns
-        protected = list(DEFAULT_PROTECTED_BRANCHES)
-        protected.extend(self.branch_config.get("protected_branches", []))
+        protected = sorted(DEFAULT_PROTECTED_BRANCHES)
+        additional = self.branch_config.get("protected_branches", [])
+        if additional:
+            protected = sorted(set(protected) | set(additional))
 
         message += f"""
 Protected branches (no validation required):
-  {", ".join(sorted(protected))}
+  {", ".join(protected)}
 
-Protected patterns:
-  Odoo versions: 17.0, 17.0.1, 18.0, etc.
-  Version features: feature/17.0-*, hotfix/17.0-*
+Protected patterns (Odoo version branches):
+  * 17.0, 18.0, 19.0 (direct version)
+  * 17.0.1.0 (version with patch)
 """
         return message
 
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Validate git branch naming policy")
+    parser = argparse.ArgumentParser(
+        description="Validate git branch naming policy",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  solt-check-branch feature/17.0-add-invoice
+  solt-check-branch fix/SOLT-123-bug-fix
+  solt-check-branch --strict feature/SOLT-456-new-feature
+        """,
+    )
     parser.add_argument("branch", nargs="?", help="Branch name to validate")
-    parser.add_argument("--ticket-prefixes", nargs="+", default=None)
-    parser.add_argument("--config", default=None)
-    parser.add_argument("--strict", action="store_true", default=None)
-    parser.add_argument("--no-strict", action="store_true")
-    parser.add_argument("-q", "--quiet", action="store_true")
+    parser.add_argument("--ticket-prefixes", nargs="+", default=None, help="Valid ticket prefixes")
+    parser.add_argument("--config", default=None, help="Path to config file")
+    parser.add_argument("--strict", action="store_true", default=None, help="Require ticket or version")
+    parser.add_argument("--no-strict", action="store_true", help="Allow simple descriptions")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress output on success")
+    parser.add_argument("--show-version", action="store_true", help="Show detected Odoo version")
 
     args = parser.parse_args()
 
@@ -277,11 +379,20 @@ def main():
         print("Error: Could not determine branch name", file=sys.stderr)
         sys.exit(1)
 
+    # Show detected version if requested
+    if args.show_version:
+        odoo_version = validator.extract_odoo_version(branch_name)
+        if odoo_version:
+            print(f"Detected Odoo version: {odoo_version}")
+        else:
+            print("No Odoo version detected in branch name")
+        sys.exit(0)
+
     is_valid, message = validator.validate(branch_name)
 
     if is_valid:
         if not args.quiet:
-            print(f"✔ {message}")
+            print(f"[OK] {message}")
         sys.exit(0)
     else:
         print(message, file=sys.stderr)

@@ -4,6 +4,8 @@
 
 """Advanced XML validations for Odoo modules.
 
+Supports Odoo versions: 17.0, 18.0, 19.0
+
 Detects:
 - Deprecated active_id, active_ids, active_model usage
 - Alert elements without proper role
@@ -12,9 +14,11 @@ Detects:
 
 import re
 from collections import defaultdict
-from typing import List
+from typing import List, Optional
 
 from lxml import etree
+
+from .config_loader import DEFAULT_ODOO_VERSION
 
 
 class ChecksOdooModuleXMLAdvanced:
@@ -34,10 +38,11 @@ class ChecksOdooModuleXMLAdvanced:
     # Real record IDs in production databases are typically much larger
     HARDCODED_ID_THRESHOLD = 100
 
-    def __init__(self, manifest_datas: List[dict], module_name: str):
+    def __init__(self, manifest_datas: List[dict], module_name: str, odoo_version: Optional[str] = None):
         self.module_name = module_name
         self.manifest_datas = manifest_datas
         self.checks_errors = defaultdict(list)
+        self.odoo_version = odoo_version or DEFAULT_ODOO_VERSION
 
         for manifest_data in manifest_datas:
             self._parse_xml_file(manifest_data)

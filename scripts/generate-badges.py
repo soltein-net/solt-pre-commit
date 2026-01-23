@@ -6,7 +6,8 @@
 """Generate documentation coverage badges for README.
 
 Usage:
-    python scripts/generate-badges.py reports/doc-coverage.json
+    python generate-badges.py reports/doc-coverage.json
+    python generate-badges.py reports/doc-coverage.json --readme README.md
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ def get_badge_color(percentage: float, metric: str = "coverage") -> str:
             return "yellow"
         else:
             return "red"
+    return "gray"
 
 
 def generate_shields_url(
