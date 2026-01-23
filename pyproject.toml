@@ -37,8 +37,8 @@ dev = [
 ]
 
 [project.scripts]
-solt-check-odoo = "checks_odoo_module:main"
-solt-check-branch = "checks_branch_name:main"
+solt-check-branch = "solt_pre_commit.checks_branch_name:main"
+solt-check-odoo = "solt_pre_commit.checks_odoo_module:main"
 
 [project.urls]
 Homepage = "https://github.com/soltein-net/solt-pre-commit"
