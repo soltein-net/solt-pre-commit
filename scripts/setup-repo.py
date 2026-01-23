@@ -49,10 +49,18 @@ FILES_TO_COPY = [
 
 # Pre-commit config (depends on --local flag)
 PRECOMMIT_REMOTE = (TEMPLATES_DIR / ".pre-commit-config.yaml", ".pre-commit-config.yaml", "Pre-commit config (GitHub)")
-PRECOMMIT_LOCAL = (TEMPLATES_DIR / ".pre-commit-config-local.yaml", ".pre-commit-config.yaml", "Pre-commit config (local/monorepo)")
+PRECOMMIT_LOCAL = (
+    TEMPLATES_DIR / ".pre-commit-config-local.yaml",
+    ".pre-commit-config.yaml",
+    "Pre-commit config (local/monorepo)",
+)
 
 # GitHub workflow
-WORKFLOW_FILE = (TEMPLATES_DIR / "github-workflows" / "solt-validate.yml", ".github/workflows/solt-validate.yml", "GitHub Actions workflow")
+WORKFLOW_FILE = (
+    TEMPLATES_DIR / "github-workflows" / "solt-validate.yml",
+    ".github/workflows/solt-validate.yml",
+    "GitHub Actions workflow",
+)
 
 # Files to remove (consolidated into pyproject.toml)
 FILES_TO_REMOVE = ["ruff.toml"]
@@ -232,11 +240,7 @@ def setup_batch(
         print(f"❌ Repos file not found: {repos_path}")
         sys.exit(1)
 
-    repos = [
-        line.strip()
-        for line in repos_path.read_text().splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
+    repos = [line.strip() for line in repos_path.read_text().splitlines() if line.strip() and not line.startswith("#")]
 
     mode_str = "DRY RUN - " if dry_run else ""
     print(f"\n{'=' * 60}")

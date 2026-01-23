@@ -47,8 +47,8 @@ ODOO_VERSION_PATTERN = r"\d+\.0"
 
 # Default protected patterns (Odoo version branches)
 DEFAULT_PROTECTED_PATTERNS = [
-    rf"^{ODOO_VERSION_PATTERN}$",           # 17.0, 18.0
-    rf"^{ODOO_VERSION_PATTERN}\.\d+.*$",    # 17.0.1, 17.0.1.0, 17.0-stable
+    rf"^{ODOO_VERSION_PATTERN}$",  # 17.0, 18.0
+    rf"^{ODOO_VERSION_PATTERN}\.\d+.*$",  # 17.0.1, 17.0.1.0, 17.0-stable
 ]
 
 
