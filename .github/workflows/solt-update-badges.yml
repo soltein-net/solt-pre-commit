@@ -194,7 +194,7 @@ jobs:
           ODOO_VERSION: ${{ needs.detect-version.outputs.odoo_version }}
           REPO_NAME: ${{ needs.detect-version.outputs.repo_name }}
         run: |
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.0"
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1"
 
           # Find all modules
           MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
