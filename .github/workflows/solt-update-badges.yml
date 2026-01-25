@@ -56,16 +56,11 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # DETECT VERSION
+  # UPDATE BADGES
   # ---------------------------------------------------------------------------
-  detect-version:
-    name: Detect Odoo Version
+  Update-Badges:
+    name: Update Documentation Badges
     runs-on: ubuntu-latest
-    outputs:
-      odoo_version: ${{ steps.detect.outputs.odoo_version }}
-      python_version: ${{ steps.detect.outputs.python_version }}
-      branch_name: ${{ steps.detect.outputs.branch_name }}
-      repo_name: ${{ steps.detect.outputs.repo_name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -73,126 +68,72 @@ jobs:
           ref: ${{ inputs.branch || github.ref_name }}
           fetch-depth: 1
 
-      - name: Detect Odoo and Python versions
+      - name: Detect versions
         id: detect
         run: |
-          # =================================================================
-          # REPOSITORY NAME (for badge prefix)
-          # =================================================================
+          # Repository name
           REPO_NAME="${{ github.event.repository.name }}"
           echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
-          echo "::notice::Repository: $REPO_NAME"
 
-          # =================================================================
-          # ODOO VERSION DETECTION LOGIC
-          # =================================================================
-
+          # Branch
           BRANCH="${{ inputs.branch || github.ref_name }}"
           echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
-          echo "::notice::Branch: $BRANCH"
 
-          # Check for input override
+          # Odoo version
           INPUT_ODOO="${{ inputs.odoo-version }}"
           INPUT_PYTHON="${{ inputs.python-version }}"
 
           if [ -n "$INPUT_ODOO" ]; then
             ODOO_VERSION="$INPUT_ODOO"
-            echo "::notice::Using input odoo-version: $ODOO_VERSION"
           else
             ODOO_VERSION=""
 
             # Pattern 1: Direct version branch (17.0, 18.0, 17.0.1)
             if [[ "$BRANCH" =~ ^([0-9]+\.[0-9]+) ]]; then
               ODOO_VERSION="${BASH_REMATCH[1]}"
-              echo "::notice::Detected from direct branch: $ODOO_VERSION"
             fi
 
-            # Pattern 2: Prefixed branch (feature/17.0-*, hotfix/18.0-*)
-            if [ -z "$ODOO_VERSION" ] && [[ "$BRANCH" =~ ^[a-z]+/([0-9]+\.[0-9]+) ]]; then
+            # Pattern 2: Prefixed branch
+            if [ -z "$ODOO_VERSION" ] && [[ "$BRANCH" =~ ([0-9]+\.[0-9]+) ]]; then
               ODOO_VERSION="${BASH_REMATCH[1]}"
-              echo "::notice::Detected from prefixed branch: $ODOO_VERSION"
             fi
 
-            # Pattern 3: Scan manifest files
+            # Pattern 3: Scan manifests
             if [ -z "$ODOO_VERSION" ]; then
-              echo "::notice::Scanning manifests for version..."
               MANIFEST_VERSION=$(find . -name "__manifest__.py" -exec grep -h '"version"' {} \; 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
-              if [ -n "$MANIFEST_VERSION" ]; then
-                ODOO_VERSION="$MANIFEST_VERSION"
-                echo "::notice::Detected from manifest: $ODOO_VERSION"
-              fi
+              [ -n "$MANIFEST_VERSION" ] && ODOO_VERSION="$MANIFEST_VERSION"
             fi
 
             # Default fallback
-            if [ -z "$ODOO_VERSION" ]; then
-              ODOO_VERSION="17.0"
-              echo "::warning::Could not detect Odoo version, defaulting to $ODOO_VERSION"
-            fi
+            : "${ODOO_VERSION:=17.0}"
           fi
 
-          # =================================================================
-          # PYTHON VERSION MAPPING
-          # =================================================================
+          # Python version mapping
           if [ -n "$INPUT_PYTHON" ]; then
             PYTHON_VERSION="$INPUT_PYTHON"
-            echo "::notice::Using input python-version: $PYTHON_VERSION"
           else
             case "$ODOO_VERSION" in
-              16.0*)
-                PYTHON_VERSION="3.10"
-                ;;
-              17.0*)
-                PYTHON_VERSION="3.10"
-                ;;
-              18.0*)
-                PYTHON_VERSION="3.11"
-                ;;
-              19.0*|20.0*|21.0*|22.0*|23.0*|24.0*|25.0*)
-                PYTHON_VERSION="3.12"
-                ;;
-              *)
-                PYTHON_VERSION="3.11"
-                echo "::warning::Unknown Odoo version $ODOO_VERSION, using Python $PYTHON_VERSION"
-                ;;
+              16.0*|17.0*) PYTHON_VERSION="3.10" ;;
+              18.0*) PYTHON_VERSION="3.11" ;;
+              19.0*|20.0*) PYTHON_VERSION="3.12" ;;
+              *) PYTHON_VERSION="3.11" ;;
             esac
           fi
 
           echo "odoo_version=$ODOO_VERSION" >> $GITHUB_OUTPUT
           echo "python_version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
-
-          echo ""
-          echo "============================================================"
-          echo "  DETECTED CONFIGURATION"
-          echo "============================================================"
-          echo "  Repository:     $REPO_NAME"
-          echo "  Branch:         $BRANCH"
-          echo "  Odoo Version:   $ODOO_VERSION"
-          echo "  Python Version: $PYTHON_VERSION"
-          echo "============================================================"
-
-  # ---------------------------------------------------------------------------
-  # UPDATE BADGES
-  # ---------------------------------------------------------------------------
-  update-badges:
-    name: Update Documentation Badges
-    runs-on: ubuntu-latest
-    needs: detect-version
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.branch || github.ref_name }}
+          echo "::notice::Repository: $REPO_NAME | Odoo: $ODOO_VERSION | Python: $PYTHON_VERSION"
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ needs.detect-version.outputs.python_version }}
+          python-version: ${{ steps.detect.outputs.python_version }}
           cache: 'pip'
 
       - name: Collect metrics
         id: metrics
         env:
-          ODOO_VERSION: ${{ needs.detect-version.outputs.odoo_version }}
-          REPO_NAME: ${{ needs.detect-version.outputs.repo_name }}
+          ODOO_VERSION: ${{ steps.detect.outputs.odoo_version }}
+          REPO_NAME: ${{ steps.detect.outputs.repo_name }}
         run: |
           pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1"
 
@@ -205,7 +146,7 @@ jobs:
           # Run with full scope for metrics
           solt-check-odoo $MODULES --scope full --odoo-version "$ODOO_VERSION" 2>&1 | tee output.txt || true
 
-          # Extract metrics from METRICS line
+          # Extract metrics
           DOC_COV=$(grep -oP "docstring_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
           STRING_COV=$(grep -oP "string_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
           HELP_COV=$(grep -oP "help_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
@@ -229,13 +170,13 @@ jobs:
           echo "docs_status=$STATUS" >> $GITHUB_OUTPUT
           echo "module_count=$MODULE_COUNT" >> $GITHUB_OUTPUT
 
+          # Summary
           echo "## Badge Update Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Repository | **$REPO_NAME** |" >> $GITHUB_STEP_SUMMARY
           echo "| Odoo Version | **$ODOO_VERSION** |" >> $GITHUB_STEP_SUMMARY
-          echo "| Python Version | ${{ needs.detect-version.outputs.python_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Modules | $MODULE_COUNT |" >> $GITHUB_STEP_SUMMARY
           echo "| Docstrings | ${DOC_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
           echo "| Field strings | ${STRING_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
@@ -245,22 +186,20 @@ jobs:
       - name: Determine badge prefix
         id: prefix
         run: |
-          # Use input prefix if provided, otherwise use repository name
           if [ -n "${{ inputs.badge-filename-prefix }}" ]; then
             PREFIX="${{ inputs.badge-filename-prefix }}"
           else
-            PREFIX="${{ needs.detect-version.outputs.repo_name }}"
+            PREFIX="${{ steps.detect.outputs.repo_name }}"
           fi
           echo "value=$PREFIX" >> $GITHUB_OUTPUT
-          echo "Badge prefix: $PREFIX"
 
       - name: Update docstrings badge
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ inputs.gist-id }}
-          filename: ${{ steps.prefix.outputs.value }}-${{ needs.detect-version.outputs.odoo_version }}-docstrings.json
-          label: "docstrings (${{ needs.detect-version.outputs.odoo_version }})"
+          filename: ${{ steps.prefix.outputs.value }}-${{ steps.detect.outputs.odoo_version }}-docstrings.json
+          label: "docstrings (${{ steps.detect.outputs.odoo_version }})"
           message: "${{ steps.metrics.outputs.docstring_cov }}%"
           valColorRange: ${{ steps.metrics.outputs.docstring_cov }}
           minColorRange: 0
@@ -273,8 +212,8 @@ jobs:
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ inputs.gist-id }}
-          filename: ${{ steps.prefix.outputs.value }}-${{ needs.detect-version.outputs.odoo_version }}-docs-status.json
-          label: "Docs (${{ needs.detect-version.outputs.odoo_version }})"
+          filename: ${{ steps.prefix.outputs.value }}-${{ steps.detect.outputs.odoo_version }}-docs-status.json
+          label: "Docs (${{ steps.detect.outputs.odoo_version }})"
           message: ${{ steps.metrics.outputs.docs_status }}
           color: ${{ steps.metrics.outputs.docs_status == 'passing' && 'brightgreen' || 'red' }}
           namedLogo: github
