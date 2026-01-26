@@ -40,10 +40,10 @@ jobs:
           pip install ruff
 
       - name: Run Ruff linter
-        run: ruff check src/ scripts/
+        run: ruff check solt_pre_commit/ --ignore E501
 
       - name: Run Ruff formatter
-        run: ruff format --check src/ scripts/
+        run: ruff format --check solt_pre_commit/
 
   # ───────────────────────────────────────────────────────────────────────────
   # TESTS
@@ -155,17 +155,31 @@ jobs:
             echo "Detected: $DETECTED"
           fi
 
-      - name: Run solt-check-branch
+      - name: Run solt-check-branch (valid branches)
         run: |
-          echo "Testing solt-check-branch..."
-          solt-check-branch "feature/TEST-123-sample-branch"
-          solt-check-branch "fix/correct-bug"
+          echo "Testing solt-check-branch with valid branches..."
+          # Version + ticket (recommended)
+          solt-check-branch "feature/${{ matrix.odoo-version }}-SOLT-123-sample-branch"
+          # Version only
+          solt-check-branch "fix/${{ matrix.odoo-version }}-correct-bug"
+          # Version-type format
+          solt-check-branch "${{ matrix.odoo-version }}-hotfix-urgent-fix"
+          # Release
           solt-check-branch "release/${{ matrix.odoo-version }}.1.0"
+          # Protected branches
+          solt-check-branch "main"
+          solt-check-branch "${{ matrix.odoo-version }}"
 
-      - name: Test invalid branch (should fail)
+      - name: Test invalid branches (should fail)
         run: |
-          echo "Testing invalid branch name..."
+          echo "Testing invalid branch names (should all fail)..."
+          # Missing version
+          ! solt-check-branch "feature/add-something"
+          # Missing version (has ticket but no version)
+          ! solt-check-branch "feature/SOLT-123-something"
+          # Invalid format
           ! solt-check-branch "invalid-branch-name"
+          echo "All invalid branch tests passed (correctly rejected)"
 
   # ───────────────────────────────────────────────────────────────────────────
   # BUILD & PUBLISH
