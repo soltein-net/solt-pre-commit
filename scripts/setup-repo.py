@@ -18,17 +18,19 @@ Usage (batch mode):
 Usage (update version only):
     python setup-repo.py --update-only /path/to/odoo-repo
     python setup-repo.py --update-only --batch repos.txt
-    python setup-repo.py --update-only --batch repos.txt --version v1.0.5
+    python setup-repo.py --update-only --batch repos.txt --version v1.0.1
 
 Usage (pre-commit maintenance):
     python setup-repo.py --clean                    # Clean global pre-commit cache
     python setup-repo.py --reinstall-hooks /path/to/repo
     python setup-repo.py --reinstall-hooks --batch repos.txt
+    python setup-repo.py --autoupdate /path/to/repo
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -37,12 +39,18 @@ from pathlib import Path
 # ─────────────────────────────────────────────────────────────────────────────
 # PATH CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
-# Script location: /solt-pre-commit/scripts/setup-repo.py
-# Config files:    /solt-pre-commit/configs/
-# Template files:  /solt-pre-commit/templates/
+# Script can be in:
+#   - /solt-pre-commit/setup-repo.py (root)
+#   - /solt-pre-commit/scripts/setup-repo.py (scripts folder)
+# All templates:   /solt-pre-commit/templates/
 SCRIPT_DIR = Path(__file__).parent.absolute()
-PROJECT_ROOT = SCRIPT_DIR.parent  # Go up one level from scripts/ to solt-pre-commit/
-CONFIGS_DIR = PROJECT_ROOT / "configs"
+
+# Detect if script is in scripts/ subdirectory or root
+if SCRIPT_DIR.name == "scripts":
+    PROJECT_ROOT = SCRIPT_DIR.parent
+else:
+    PROJECT_ROOT = SCRIPT_DIR
+
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
 # Current version of solt-pre-commit
@@ -52,13 +60,13 @@ SOLT_REPO_URL = "https://github.com/soltein-net/solt-pre-commit"
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE MAPPINGS (source -> destination)
 # ─────────────────────────────────────────────────────────────────────────────
-# Source files use dot prefix (.pylintrc, .solt-hooks-defaults.yaml)
-# Destination files also use dot prefix
+# All source files are in templates/ directory
+# Destination files use dot prefix for hidden files
 FILES_TO_COPY = [
     # (source_path, destination_relative_path, description)
-    (CONFIGS_DIR / ".pylintrc", ".pylintrc", "Pylint configuration"),
-    (CONFIGS_DIR / "pyproject-base.toml", "pyproject.toml", "Python project configuration"),
-    (CONFIGS_DIR / ".solt-hooks-defaults.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
+    (TEMPLATES_DIR / ".pylintrc", ".pylintrc", "Pylint configuration"),
+    (TEMPLATES_DIR / "pyproject.toml", "pyproject.toml", "Python project configuration"),
+    (TEMPLATES_DIR / ".solt-hooks.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
 ]
 
 # Pre-commit config (depends on --local flag)
@@ -76,7 +84,7 @@ WORKFLOW_FILE = (
     "GitHub Actions workflow",
 )
 
-# Files to remove (consolidated into pyproject.toml)
+# Files to remove (old configs consolidated into new structure)
 FILES_TO_REMOVE = ["ruff.toml"]
 
 
@@ -209,7 +217,7 @@ def run_precommit_autoupdate(target: Path, repo_url: str = SOLT_REPO_URL, dry_ru
         # Parse output to show version change
         output = result.stdout.strip()
         if "updating" in output.lower():
-            print_step("✅", output.split("\n")[0] if output else "Updated")
+            print_step("✅", output.split('\n')[0] if output else "Updated")
         elif "already up to date" in output.lower():
             print_step("✓ ", "Already up to date")
         else:
@@ -254,12 +262,13 @@ def reinstall_hooks_single(target_path: str, dry_run: bool = False, quiet: bool 
             cwd=target,
             check=True,
             capture_output=True,
+            text=True,
         )
         if not quiet:
-            print_step("✅", f"{target.name}: hooks reinstalled")
+            print_step("✅", f"Hooks reinstalled in {target.name}")
         return True
     except subprocess.CalledProcessError as e:
-        print_step("❌", f"{target.name}: failed - {e}")
+        print_step("❌", f"Failed to reinstall hooks: {e.stderr or e}")
         return False
     except FileNotFoundError:
         print_step("⚠️ ", "pre-commit not found. Install with: pip install pre-commit")
@@ -278,33 +287,24 @@ def reinstall_hooks_batch(repos_file: str, dry_run: bool = False) -> None:
 
     mode_str = "DRY RUN - " if dry_run else ""
     print(f"\n{'=' * 60}")
-    print(f"🔧 {mode_str}Reinstalling hooks in {len(repos)} repositories")
+    print(f"🔄 {mode_str}Reinstalling hooks in {len(repos)} repositories")
     print(f"{'=' * 60}")
 
     success = 0
-    skipped = 0
     failed = 0
 
     for repo in repos:
-        target = Path(repo).absolute()
-        if not target.exists():
-            print_step("❌", f"{Path(repo).name}: not found")
-            failed += 1
-            continue
-
-        if not (target / ".pre-commit-config.yaml").exists():
-            print_step("⏭️ ", f"{target.name}: no .pre-commit-config.yaml")
-            skipped += 1
-            continue
-
+        print(f"\n📂 {Path(repo).name}")
         if reinstall_hooks_single(repo, dry_run, quiet=True):
-            print_step("✅", f"{target.name}: hooks reinstalled")
             success += 1
+            print_step("✅", "Done")
         else:
             failed += 1
 
     print(f"\n{'=' * 60}")
-    print(f"✅ Reinstalled: {success} | ⏭️  Skipped: {skipped} | ❌ Failed: {failed}")
+    print(f"✅ Completed: {success}/{len(repos)} repositories")
+    if failed > 0:
+        print(f"❌ Failed: {failed} repositories")
     print(f"{'=' * 60}\n")
 
 
@@ -320,89 +320,79 @@ def cleanup_old_files(target: Path, dry_run: bool = False) -> None:
                 print_step("🗑️ ", f"Removed: {filename}")
 
 
-def update_precommit_version(target: Path, version: str = CURRENT_VERSION, dry_run: bool = False) -> bool:
-    """Update solt-pre-commit version in .pre-commit-config.yaml.
+def update_version_in_file(filepath: Path, new_version: str, dry_run: bool = False) -> bool:
+    """Update solt-pre-commit version in a file.
 
-    Args:
-        target: Path to the repository
-        version: Version to update to (e.g., 'v1.0.1')
-        dry_run: If True, only show what would be done
-
-    Returns:
-        True if updated successfully, False otherwise
+    Handles multiple version patterns:
+    - rev: vX.Y.Z
+    - @vX.Y.Z
     """
-    config_file = target / ".pre-commit-config.yaml"
-
-    if not config_file.exists():
-        print_step("⚠️ ", f".pre-commit-config.yaml not found in {target.name}")
+    if not filepath.exists():
         return False
 
-    content = config_file.read_text()
+    content = filepath.read_text()
+    original = content
 
-    # Check if this repo uses solt-pre-commit
-    if SOLT_REPO_URL not in content:
-        print_step("⏭️ ", f"solt-pre-commit not configured in {target.name}")
-        return False
+    # Pattern 1: rev: vX.Y.Z (pre-commit config)
+    content = re.sub(
+        r'(rev:\s*)v\d+\.\d+\.\d+',
+        rf'\g<1>{new_version}',
+        content
+    )
 
-    # Find current version using regex
-    import re
+    # Pattern 2: @vX.Y.Z (workflow uses clause)
+    content = re.sub(
+        r'(@)v\d+\.\d+\.\d+',
+        rf'\g<1>{new_version}',
+        content
+    )
 
-    pattern = r"(repo:\s*" + re.escape(SOLT_REPO_URL) + r"\s+rev:\s*)(v?[\d.]+)"
-    match = re.search(pattern, content)
-
-    if not match:
-        print_step("⚠️ ", f"Could not find solt-pre-commit version in {target.name}")
-        return False
-
-    current_ver = match.group(2)
-
-    if current_ver == version:
-        print_step("✓ ", f"Already at {version}")
+    if content != original:
+        if not dry_run:
+            filepath.write_text(content)
+            print_step("✏️ ", f"Version updated to {new_version} in {filepath.name}")
+        else:
+            print_step("📄", f"Would update version to {new_version} in {filepath.name}")
         return True
 
-    if dry_run:
-        print_step("📄", f"Would update: {current_ver} → {version}")
-        return True
-
-    # Replace version
-    new_content = re.sub(pattern, rf"\g<1>{version}", content)
-    config_file.write_text(new_content)
-    print_step("✅", f"Updated: {current_ver} → {version}")
-    return True
+    return False
 
 
-def update_single_repo(
+def update_version_single(
     target_path: str,
-    version: str = CURRENT_VERSION,
+    new_version: str = CURRENT_VERSION,
     dry_run: bool = False,
     quiet: bool = False,
 ) -> bool:
     """Update solt-pre-commit version in a single repository.
 
-    Returns:
-        True if update was successful, False otherwise.
+    Only updates version references, doesn't copy files.
     """
     target = Path(target_path).absolute()
 
     if not target.exists():
-        print(f"  ❌ Target path does not exist: {target}")
+        print_step("❌", f"Target not found: {target}")
         return False
 
-    if not quiet:
-        mode_str = "DRY RUN - " if dry_run else ""
-        print(f"  {mode_str}Updating {target.name}...", end=" ")
+    files_to_update = [
+        target / ".pre-commit-config.yaml",
+        target / ".github" / "workflows" / "solt-validate.yml",
+    ]
 
-    result = update_precommit_version(target, version, dry_run)
+    updated = False
+    for filepath in files_to_update:
+        if update_version_in_file(filepath, new_version, dry_run):
+            updated = True
 
-    if quiet and result:
-        print_step("✅", f"{target.name}: updated to {version}")
+    if not updated and not quiet:
+        print_step("⏭️ ", "No version references found to update")
 
-    return result
+    return updated
 
 
-def update_batch(
+def update_version_batch(
     repos_file: str,
-    version: str = CURRENT_VERSION,
+    new_version: str = CURRENT_VERSION,
     dry_run: bool = False,
 ) -> None:
     """Update solt-pre-commit version in multiple repositories."""
@@ -416,28 +406,25 @@ def update_batch(
 
     mode_str = "DRY RUN - " if dry_run else ""
     print(f"\n{'=' * 60}")
-    print(f"🔄 {mode_str}Updating {len(repos)} repositories to {version}")
+    print(f"🔄 {mode_str}Updating version to {new_version} in {len(repos)} repositories")
     print(f"{'=' * 60}")
 
     success = 0
     skipped = 0
-    failed = 0
 
     for repo in repos:
-        target = Path(repo).absolute()
-        if not target.exists():
-            print_step("❌", f"{Path(repo).name}: not found")
-            failed += 1
-            continue
-
-        result = update_precommit_version(target, version, dry_run)
-        if result:
+        print(f"\n📂 {Path(repo).name}")
+        if update_version_single(repo, new_version, dry_run, quiet=True):
             success += 1
+            print_step("✅", f"Updated to {new_version}")
         else:
             skipped += 1
+            print_step("⏭️ ", "No changes needed")
 
     print(f"\n{'=' * 60}")
-    print(f"✅ Updated: {success} | ⏭️  Skipped: {skipped} | ❌ Failed: {failed}")
+    print(f"✅ Updated: {success}/{len(repos)} repositories")
+    if skipped > 0:
+        print(f"⏭️  Skipped: {skipped} repositories (already up to date)")
     print(f"{'=' * 60}\n")
 
 
@@ -535,8 +522,6 @@ def setup_batch(
     print(f"  Scope:        {scope}")
     print(f"  Odoo Version: {odoo_version}")
     print(f"  Mode:         {'local (monorepo)' if local else 'remote (GitHub)'}")
-    print(f"  Project Root: {PROJECT_ROOT}")
-    print(f"  Configs:      {CONFIGS_DIR}")
     print(f"  Templates:    {TEMPLATES_DIR}")
     print(f"{'=' * 60}")
 
@@ -559,39 +544,84 @@ def setup_batch(
     print(f"{'=' * 60}\n")
 
 
+def autoupdate_single(target_path: str, dry_run: bool = False, quiet: bool = False) -> bool:
+    """Run pre-commit autoupdate for solt-pre-commit in a single repo."""
+    target = Path(target_path).absolute()
+
+    if not target.exists():
+        print_step("❌", f"Target not found: {target}")
+        return False
+
+    if not (target / ".pre-commit-config.yaml").exists():
+        print_step("⏭️ ", f"No .pre-commit-config.yaml in {target.name}")
+        return False
+
+    return run_precommit_autoupdate(target, SOLT_REPO_URL, dry_run)
+
+
+def autoupdate_batch(repos_file: str, dry_run: bool = False) -> None:
+    """Run pre-commit autoupdate in multiple repositories."""
+    repos_path = Path(repos_file)
+
+    if not repos_path.exists():
+        print(f"❌ Repos file not found: {repos_path}")
+        sys.exit(1)
+
+    repos = [line.strip() for line in repos_path.read_text().splitlines() if line.strip() and not line.startswith("#")]
+
+    mode_str = "DRY RUN - " if dry_run else ""
+    print(f"\n{'=' * 60}")
+    print(f"🔄 {mode_str}Running autoupdate in {len(repos)} repositories")
+    print(f"{'=' * 60}")
+
+    success = 0
+    failed = 0
+
+    for repo in repos:
+        print(f"\n📂 {Path(repo).name}")
+        if autoupdate_single(repo, dry_run, quiet=True):
+            success += 1
+        else:
+            failed += 1
+
+    print(f"\n{'=' * 60}")
+    print(f"✅ Completed: {success}/{len(repos)} repositories")
+    if failed > 0:
+        print(f"❌ Failed: {failed} repositories")
+    print(f"{'=' * 60}\n")
+
+
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
         description="Setup solt-pre-commit in client repositories",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
+        epilog="""
 Examples:
-  # Single repo setup
+  # Full setup (single repo)
   python setup-repo.py /path/to/solt-budget
   python setup-repo.py /path/to/solt-budget --scope full
   python setup-repo.py /path/to/solt-budget --odoo-version 18.0
   python setup-repo.py /path/to/solt-budget --dry-run
 
-  # Batch setup (multiple repos)
+  # Full setup (batch)
   python setup-repo.py --batch repos.txt
   python setup-repo.py --batch repos.txt --dry-run
-  python setup-repo.py --batch repos.txt --scope full
+
+  # Update version only (doesn't copy files)
+  python setup-repo.py --update-only /path/to/solt-budget
+  python setup-repo.py --update-only --batch repos.txt
+  python setup-repo.py --update-only --batch repos.txt --version v1.0.1
+
+  # Pre-commit maintenance
+  python setup-repo.py --clean                           # Clean global cache
+  python setup-repo.py --reinstall-hooks /path/to/repo   # Reinstall hooks
+  python setup-repo.py --reinstall-hooks --batch repos.txt
+  python setup-repo.py --autoupdate /path/to/repo        # Run autoupdate
+  python setup-repo.py --autoupdate --batch repos.txt
 
   # Monorepo setup
   python setup-repo.py /path/to/solt-addons --local
-
-  # Update version only (no file copying)
-  python setup-repo.py --update-only /path/to/solt-budget
-  python setup-repo.py --update-only --batch repos.txt
-  python setup-repo.py --update-only --batch repos.txt --version v1.0.5
-
-  # Pre-commit maintenance
-  python setup-repo.py --clean                              # Clean global cache
-  python setup-repo.py --reinstall-hooks /path/to/repo      # Reinstall hooks
-  python setup-repo.py --reinstall-hooks --batch repos.txt  # Batch reinstall
-  python setup-repo.py --autoupdate /path/to/repo           # Run autoupdate
-
-Current version: {CURRENT_VERSION}
         """,
     )
 
@@ -604,35 +634,6 @@ Current version: {CURRENT_VERSION}
         "--batch",
         metavar="FILE",
         help="File with list of repository paths (one per line)",
-    )
-
-    # Mode flags (mutually exclusive operations)
-    mode_group = parser.add_argument_group("operation modes")
-    mode_group.add_argument(
-        "--update-only",
-        action="store_true",
-        help="Only update solt-pre-commit version in .pre-commit-config.yaml",
-    )
-    mode_group.add_argument(
-        "--clean",
-        action="store_true",
-        help="Run 'pre-commit clean' to clear global cache (no path needed)",
-    )
-    mode_group.add_argument(
-        "--reinstall-hooks",
-        action="store_true",
-        help="Run 'pre-commit install --install-hooks' to reinstall hooks",
-    )
-    mode_group.add_argument(
-        "--autoupdate",
-        action="store_true",
-        help="Run 'pre-commit autoupdate' for solt-pre-commit repo",
-    )
-
-    parser.add_argument(
-        "--version",
-        default=CURRENT_VERSION,
-        help=f"Version to update to (default: {CURRENT_VERSION})",
     )
     parser.add_argument(
         "--scope",
@@ -662,79 +663,78 @@ Current version: {CURRENT_VERSION}
         help="Don't overwrite existing files",
     )
 
+    # Update-only mode
+    parser.add_argument(
+        "--update-only",
+        action="store_true",
+        help="Only update version references (don't copy files)",
+    )
+    parser.add_argument(
+        "--version",
+        default=CURRENT_VERSION,
+        help=f"Version to set (default: {CURRENT_VERSION})",
+    )
+
+    # Pre-commit maintenance
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clean global pre-commit cache",
+    )
+    parser.add_argument(
+        "--reinstall-hooks",
+        action="store_true",
+        help="Reinstall pre-commit hooks",
+    )
+    parser.add_argument(
+        "--autoupdate",
+        action="store_true",
+        help="Run pre-commit autoupdate for solt-pre-commit",
+    )
+
     args = parser.parse_args()
 
-    # --clean is global (no path needed)
+    # Handle global clean (no path required)
     if args.clean:
         run_precommit_clean(args.dry_run)
         return
 
-    # Validate arguments for other modes
-    if not args.clean:
-        if args.batch and args.path:
-            parser.error("Cannot use both --batch and a single path")
-        if not args.batch and not args.path:
-            if args.reinstall_hooks or args.update_only or args.autoupdate:
-                parser.error("Either provide a path or use --batch")
-            else:
-                parser.error("Either provide a path or use --batch")
-
-    # --reinstall-hooks mode
+    # Handle reinstall-hooks
     if args.reinstall_hooks:
         if args.batch:
             reinstall_hooks_batch(args.batch, args.dry_run)
-        else:
+        elif args.path:
             reinstall_hooks_single(args.path, args.dry_run)
+        else:
+            parser.error("--reinstall-hooks requires a path or --batch")
         return
 
-    # --autoupdate mode
+    # Handle autoupdate
     if args.autoupdate:
         if args.batch:
-            # Batch autoupdate
-            repos_path = Path(args.batch)
-            if not repos_path.exists():
-                print(f"❌ Repos file not found: {repos_path}")
-                sys.exit(1)
-            repos = [
-                line.strip()
-                for line in repos_path.read_text().splitlines()
-                if line.strip() and not line.startswith("#")
-            ]
-
-            mode_str = "DRY RUN - " if args.dry_run else ""
-            print(f"\n{'=' * 60}")
-            print(f"🔄 {mode_str}Running autoupdate on {len(repos)} repositories")
-            print(f"{'=' * 60}")
-
-            for repo in repos:
-                target = Path(repo).absolute()
-                print(f"  {target.name}: ", end="")
-                run_precommit_autoupdate(target, dry_run=args.dry_run)
-
-            print(f"{'=' * 60}\n")
+            autoupdate_batch(args.batch, args.dry_run)
+        elif args.path:
+            autoupdate_single(args.path, args.dry_run)
         else:
-            target = Path(args.path).absolute()
-            print(f"Running autoupdate on {target.name}...")
-            run_precommit_autoupdate(target, dry_run=args.dry_run)
+            parser.error("--autoupdate requires a path or --batch")
         return
 
-    # --update-only mode
+    # Handle update-only mode
     if args.update_only:
         if args.batch:
-            update_batch(
-                repos_file=args.batch,
-                version=args.version,
-                dry_run=args.dry_run,
-            )
+            update_version_batch(args.batch, args.version, args.dry_run)
+        elif args.path:
+            update_version_single(args.path, args.version, args.dry_run)
         else:
-            update_single_repo(
-                target_path=args.path,
-                version=args.version,
-                dry_run=args.dry_run,
-            )
+            parser.error("--update-only requires a path or --batch")
         return
 
-    # Full setup mode (default)
+    # Validate arguments for setup mode
+    if args.batch and args.path:
+        parser.error("Cannot use both --batch and a single path")
+    if not args.batch and not args.path:
+        parser.error("Either provide a path or use --batch")
+
     if args.batch:
         setup_batch(
             repos_file=args.batch,
