@@ -92,6 +92,7 @@ severity:
 # =============================================================================
 blocking_severities:
   - error
+  - warning
 
 # =============================================================================
 # SKIP LISTS
@@ -163,5 +164,20 @@ branch_naming:
     - docs
     - test
     - chore
+    # Additional common types
+    - imp
+    - improvement
+    - perf
+    - style
+    - ci
+    - build
+    - deps
+    - config
+    - security
+    - ux
+    - ui
+    - infra
+    - ops
+    - revert
   protected_branches: [ ]
   protected_patterns: [ ]
