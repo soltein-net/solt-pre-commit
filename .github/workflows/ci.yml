@@ -40,10 +40,28 @@ jobs:
           pip install ruff
 
       - name: Run Ruff linter
-        run: ruff check solt_pre_commit/ --ignore E501
+        run: |
+          echo "Current directory: $(pwd)"
+          ls -la
+          if [ -d "solt_pre_commit" ]; then
+            ruff check solt_pre_commit/ --ignore E501
+          elif [ -d "src/solt_pre_commit" ]; then
+            ruff check src/solt_pre_commit/ --ignore E501
+          else
+            echo "Finding Python files..."
+            find . -name "*.py" -not -path "./.git/*" -not -path "./__pycache__/*" | head -20
+            ruff check . --ignore E501 --exclude __pycache__,build,dist,.git
+          fi
 
       - name: Run Ruff formatter
-        run: ruff format --check solt_pre_commit/
+        run: |
+          if [ -d "solt_pre_commit" ]; then
+            ruff format --check solt_pre_commit/
+          elif [ -d "src/solt_pre_commit" ]; then
+            ruff format --check src/solt_pre_commit/
+          else
+            ruff format --check . --exclude __pycache__,build,dist,.git
+          fi
 
   # ───────────────────────────────────────────────────────────────────────────
   # TESTS
