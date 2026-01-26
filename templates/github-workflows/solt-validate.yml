@@ -1,8 +1,8 @@
 # =============================================================================
 # SOLT PRE-COMMIT - Client Repository Workflow
 # =============================================================================
-# This workflow runs validation on PRs and pushes
-# Badge updates run weekly (optional - requires GIST_SECRET)
+# This workflow runs validation ONLY on Pull Requests
+# Once a PR is merged, validation is not re-run (already validated in PR)
 #
 # SETUP:
 # 1. Copy this file to .github/workflows/solt-validate.yml
@@ -12,11 +12,9 @@
 name: Soltein Validation
 
 on:
-  push:
-    branches: [ main, master, develop, '17.0', '18.0', '19.0' ]
   pull_request:
     branches: [ main, master, develop, '17.0', '18.0', '19.0' ]
-  # Weekly badge updates - uncomment schedule to enable
+  # Weekly badge updates
   schedule:
     - cron: '0 6 * * 1'  # Mondays at 6 AM UTC
   workflow_dispatch:
@@ -27,10 +25,10 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # VALIDATION - Runs on PRs and pushes
+  # VALIDATION - Runs ONLY on Pull Requests
   # ---------------------------------------------------------------------------
-  Validate:
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+  validate:
+    if: github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.1
     with:
       validation-scope: 'changed'
