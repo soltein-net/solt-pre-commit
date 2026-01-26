@@ -370,15 +370,21 @@ jobs:
               sev = None
               for line in content.split('\n'):
                   ls = line.strip()
+                  # Reset severity on section changes (Summary, modules list, etc.)
+                  if 'Summary:' in ls or 'FINAL SUMMARY' in ls.upper() or 'Modules checked:' in ls or ls.startswith('==='):
+                      sev = None
+                      continue
                   if 'ERRORS' in ls.upper() and '(' in ls: sev = 'error'
                   elif 'WARNING' in ls.upper() and '(' in ls: sev = 'warning'
                   elif 'INFO' in ls.upper() and '(' in ls: sev = 'info'
                   if line.startswith('    - ') and sev in ('error', 'warning'):
                       msg = line[6:]
                       m = re.match(r'^([^\s:]+):(\d+)\s+(.+)$', msg)
-                      entry = {'file': shorten_path(m.group(1)), 'line': m.group(2), 'message': escape_html(m.group(3)[:120])} if m else {'file': '', 'line': '', 'message': escape_html(msg[:150])}
-                      if sev == 'error' and len(result['errors']) < MAX_ERRORS: result['errors'].append(entry)
-                      elif sev == 'warning' and len(result['warnings']) < MAX_ERRORS: result['warnings'].append(entry)
+                      # Only add if it matches file:line format (not module names)
+                      if m:
+                          entry = {'file': shorten_path(m.group(1)), 'line': m.group(2), 'message': escape_html(m.group(3)[:120])}
+                          if sev == 'error' and len(result['errors']) < MAX_ERRORS: result['errors'].append(entry)
+                          elif sev == 'warning' and len(result['warnings']) < MAX_ERRORS: result['warnings'].append(entry)
           except: pass
           try:
               with open('reports/pylint-changed.txt', 'r', encoding='utf-8', errors='replace') as f:
