@@ -195,6 +195,25 @@ class CheckResult:
     def is_empty(self):
         return all(len(msgs) == 0 for msgs in self.results.values())
 
+    def has_visible_issues(self, show_info=True):
+        """Check if there are issues that would be displayed.
+
+        Args:
+            show_info: If False, INFO level issues are not considered visible.
+
+        Returns:
+            True if there are visible issues to display.
+        """
+        for check_name, messages in self.results.items():
+            if not messages:
+                continue
+            severity = self.severity_config.get_severity(check_name)
+            # Skip INFO if show_info is False
+            if severity == Severity.INFO and not show_info:
+                continue
+            return True
+        return False
+
 
 class ResultPrinter:
     """Pretty printer for check results."""
@@ -845,8 +864,10 @@ def run(
                 has_blocking = True
 
         if verbose:
+            # Use has_visible_issues to avoid printing modules with only INFO when show_info=False
+            has_visible = checks_obj.check_result.has_visible_issues(show_info)
             if show_all_modules:
-                if not checks_obj.check_result.is_empty():
+                if has_visible:
                     printer.print_results(
                         checks_obj.check_result,
                         checks_obj.odoo_addon_name,
@@ -854,7 +875,7 @@ def run(
                     )
                 else:
                     printer.print_success(checks_obj.odoo_addon_name, severity_config.validation_scope)
-            elif not checks_obj.check_result.is_empty():
+            elif has_visible:
                 printer.print_results(
                     checks_obj.check_result,
                     checks_obj.odoo_addon_name,
