@@ -49,7 +49,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.0.4  # Supports Odoo 17.0, 18.0, 19.0
+    rev: v1.0.1  # Supports Odoo 17.0, 18.0, 19.0
     hooks:
       - id: solt-check-branch
       - id: solt-check-odoo
@@ -101,7 +101,7 @@ Use our reusable GitHub Actions workflow:
 # .github/workflows/validate.yml
 jobs:
   validate:
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.4
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.1
     with:
       validation-scope: 'changed'
       fail-on-warnings: false
@@ -347,7 +347,7 @@ python setup-repo.py /path/to/repo --scope full --odoo-version 18.0
 # Update solt-pre-commit version in .pre-commit-config.yaml
 python setup-repo.py --update-only /path/to/repo
 python setup-repo.py --update-only --batch repos.txt
-python setup-repo.py --update-only --batch repos.txt --version v1.0.5
+python setup-repo.py --update-only --batch repos.txt --version v1.0.2
 ```
 
 ### Pre-commit Maintenance
