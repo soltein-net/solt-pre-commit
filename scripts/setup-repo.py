@@ -217,7 +217,7 @@ def run_precommit_autoupdate(target: Path, repo_url: str = SOLT_REPO_URL, dry_ru
         # Parse output to show version change
         output = result.stdout.strip()
         if "updating" in output.lower():
-            print_step("✅", output.split('\n')[0] if output else "Updated")
+            print_step("✅", output.split("\n")[0] if output else "Updated")
         elif "already up to date" in output.lower():
             print_step("✓ ", "Already up to date")
         else:
@@ -334,18 +334,10 @@ def update_version_in_file(filepath: Path, new_version: str, dry_run: bool = Fal
     original = content
 
     # Pattern 1: rev: vX.Y.Z (pre-commit config)
-    content = re.sub(
-        r'(rev:\s*)v\d+\.\d+\.\d+',
-        rf'\g<1>{new_version}',
-        content
-    )
+    content = re.sub(r"(rev:\s*)v\d+\.\d+\.\d+", rf"\g<1>{new_version}", content)
 
     # Pattern 2: @vX.Y.Z (workflow uses clause)
-    content = re.sub(
-        r'(@)v\d+\.\d+\.\d+',
-        rf'\g<1>{new_version}',
-        content
-    )
+    content = re.sub(r"(@)v\d+\.\d+\.\d+", rf"\g<1>{new_version}", content)
 
     if content != original:
         if not dry_run:
