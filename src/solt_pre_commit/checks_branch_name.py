@@ -189,9 +189,7 @@ class BranchNameValidator:
                 )
 
         # Add pattern for version-type-description format: 17.0-hotfix-something, 18.0-feature-new
-        self.patterns["version-type"] = re.compile(
-            rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$"
-        )
+        self.patterns["version-type"] = re.compile(rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$")
 
     def get_current_branch(self) -> Optional[str]:
         """Get current git branch name."""
