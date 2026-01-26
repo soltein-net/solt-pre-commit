@@ -8,11 +8,6 @@
 # - Automatically detects Odoo version from branch name or manifest
 # - Supports: 17.0, 18.0, 19.0+ (future versions)
 # - Uses appropriate Python version per Odoo version
-#
-# SINGLE JOB STRUCTURE:
-# - All steps run in one job for efficiency
-# - Version detection integrated (no separate job)
-# - Branch validation integrated (no separate job)
 # =============================================================================
 name: Soltein Validation (Reusable)
 
@@ -57,33 +52,33 @@ on:
     outputs:
       validation-result:
         description: 'Validation result (success/failure)'
-        value: \${{ jobs.Validate.outputs.result }}
+        value: ${{ jobs.Validate.outputs.result }}
       errors-count:
         description: 'Number of errors found'
-        value: \${{ jobs.Validate.outputs.errors }}
+        value: ${{ jobs.Validate.outputs.errors }}
       warnings-count:
         description: 'Number of warnings found'
-        value: \${{ jobs.Validate.outputs.warnings }}
+        value: ${{ jobs.Validate.outputs.warnings }}
       detected-odoo-version:
         description: 'Detected Odoo version'
-        value: \${{ jobs.Validate.outputs.odoo_version }}
+        value: ${{ jobs.Validate.outputs.odoo_version }}
       detected-python-version:
         description: 'Detected Python version'
-        value: \${{ jobs.Validate.outputs.python_version }}
+        value: ${{ jobs.Validate.outputs.python_version }}
 
 jobs:
   Validate:
-    name: Odoo Module Checks
+    name: Soltein Odoo Checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
     outputs:
-      result: \${{ steps.final-check.outputs.result }}
-      errors: \${{ steps.summary.outputs.errors }}
-      warnings: \${{ steps.summary.outputs.warnings }}
-      odoo_version: \${{ steps.detect-version.outputs.odoo_version }}
-      python_version: \${{ steps.detect-version.outputs.python_version }}
+      result: ${{ steps.final-check.outputs.result }}
+      errors: ${{ steps.summary.outputs.errors }}
+      warnings: ${{ steps.summary.outputs.warnings }}
+      odoo_version: ${{ steps.detect-version.outputs.odoo_version }}
+      python_version: ${{ steps.detect-version.outputs.python_version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -93,56 +88,54 @@ jobs:
       - name: Detect versions
         id: detect-version
         run: |
-          if [ "\${{ github.event_name }}" = "pull_request" ]; then
-            BRANCH="\${{ github.head_ref }}"
-            BASE_BRANCH="\${{ github.base_ref }}"
+          EVENT_NAME="${{ github.event_name }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BRANCH="${{ github.head_ref }}"
+            BASE_BRANCH="${{ github.base_ref }}"
           else
-            BRANCH="\${{ github.ref_name }}"
+            BRANCH="${{ github.ref_name }}"
             BASE_BRANCH=""
           fi
 
-          echo "branch_name=\$BRANCH" >> \$GITHUB_OUTPUT
-          echo "::notice::Branch: \$BRANCH"
+          echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
+          echo "::notice::Branch: $BRANCH"
 
-          INPUT_ODOO="\${{ inputs.odoo-version }}"
-          INPUT_PYTHON="\${{ inputs.python-version }}"
+          INPUT_ODOO="${{ inputs.odoo-version }}"
+          INPUT_PYTHON="${{ inputs.python-version }}"
 
-          if [ -n "\$INPUT_ODOO" ]; then
-            ODOO_VERSION="\$INPUT_ODOO"
+          if [ -n "$INPUT_ODOO" ]; then
+            ODOO_VERSION="$INPUT_ODOO"
           else
             ODOO_VERSION=""
-            if [[ "\$BRANCH" =~ ^([0-9]+\.[0-9]+) ]]; then
-              ODOO_VERSION="\${BASH_REMATCH[1]}"
+            if [[ "$BRANCH" =~ ^([0-9]+\.[0-9]+) ]]; then
+              ODOO_VERSION="${BASH_REMATCH[1]}"
             fi
-            if [ -z "\$ODOO_VERSION" ] && [[ "\$BRANCH" =~ ^([0-9]+\.[0-9]+)- ]]; then
-              ODOO_VERSION="\${BASH_REMATCH[1]}"
+            if [ -z "$ODOO_VERSION" ] && [[ "$BRANCH" =~ ^[a-z]+/([0-9]+\.[0-9]+) ]]; then
+              ODOO_VERSION="${BASH_REMATCH[1]}"
             fi
-            if [ -z "\$ODOO_VERSION" ] && [[ "\$BRANCH" =~ ^[a-z]+/([0-9]+\.[0-9]+) ]]; then
-              ODOO_VERSION="\${BASH_REMATCH[1]}"
+            if [ -z "$ODOO_VERSION" ] && [[ "$BRANCH" =~ ([0-9]+\.[0-9]+) ]]; then
+              ODOO_VERSION="${BASH_REMATCH[1]}"
             fi
-            if [ -z "\$ODOO_VERSION" ] && [[ "\$BRANCH" =~ ([0-9]+\.[0-9]+) ]]; then
-              ODOO_VERSION="\${BASH_REMATCH[1]}"
-            fi
-            if [ -z "\$ODOO_VERSION" ] && [ -n "\$BASE_BRANCH" ]; then
-              if [[ "\$BASE_BRANCH" =~ ^([0-9]+\.[0-9]+) ]]; then
-                ODOO_VERSION="\${BASH_REMATCH[1]}"
+            if [ -z "$ODOO_VERSION" ] && [ -n "$BASE_BRANCH" ]; then
+              if [[ "$BASE_BRANCH" =~ ^([0-9]+\.[0-9]+) ]]; then
+                ODOO_VERSION="${BASH_REMATCH[1]}"
               fi
             fi
-            if [ -z "\$ODOO_VERSION" ]; then
-              MANIFEST_VERSION=\$(find . -name "__manifest__.py" -exec grep -h '"version"' {} \; 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
-              if [ -n "\$MANIFEST_VERSION" ]; then
-                ODOO_VERSION="\$MANIFEST_VERSION"
+            if [ -z "$ODOO_VERSION" ]; then
+              MANIFEST_VERSION=$(find . -name "__manifest__.py" -exec grep -h '"version"' {} \; 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
+              if [ -n "$MANIFEST_VERSION" ]; then
+                ODOO_VERSION="$MANIFEST_VERSION"
               fi
             fi
-            if [ -z "\$ODOO_VERSION" ]; then
+            if [ -z "$ODOO_VERSION" ]; then
               ODOO_VERSION="17.0"
             fi
           fi
 
-          if [ -n "\$INPUT_PYTHON" ]; then
-            PYTHON_VERSION="\$INPUT_PYTHON"
+          if [ -n "$INPUT_PYTHON" ]; then
+            PYTHON_VERSION="$INPUT_PYTHON"
           else
-            case "\$ODOO_VERSION" in
+            case "$ODOO_VERSION" in
               16.0*|17.0*) PYTHON_VERSION="3.10" ;;
               18.0*) PYTHON_VERSION="3.11" ;;
               19.0*|20.0*|21.0*|22.0*|23.0*|24.0*|25.0*) PYTHON_VERSION="3.12" ;;
@@ -150,14 +143,14 @@ jobs:
             esac
           fi
 
-          echo "odoo_version=\$ODOO_VERSION" >> \$GITHUB_OUTPUT
-          echo "python_version=\$PYTHON_VERSION" >> \$GITHUB_OUTPUT
-          echo "::notice::Odoo: \$ODOO_VERSION, Python: \$PYTHON_VERSION"
+          echo "odoo_version=$ODOO_VERSION" >> $GITHUB_OUTPUT
+          echo "python_version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+          echo "::notice::Odoo: $ODOO_VERSION, Python: $PYTHON_VERSION"
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: \${{ steps.detect-version.outputs.python_version }}
+          python-version: ${{ steps.detect-version.outputs.python_version }}
           cache: 'pip'
 
       - name: Install dependencies
@@ -168,149 +161,153 @@ jobs:
       - name: Validate branch name
         if: github.event_name == 'pull_request'
         run: |
-          BRANCH="\${{ github.head_ref }}"
-          echo "## Branch Validation" >> \$GITHUB_STEP_SUMMARY
-          echo "Branch: \\\`\$BRANCH\\\`" >> \$GITHUB_STEP_SUMMARY
-          if solt-check-branch "\$BRANCH"; then
-            echo "Branch name is valid" >> \$GITHUB_STEP_SUMMARY
+          BRANCH="${{ github.head_ref }}"
+          echo "## Branch Validation" >> $GITHUB_STEP_SUMMARY
+          echo "Branch: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
+          if solt-check-branch "$BRANCH"; then
+            echo "Branch name is valid" >> $GITHUB_STEP_SUMMARY
           else
-            echo "Branch name is invalid" >> \$GITHUB_STEP_SUMMARY
+            echo "Branch name is invalid" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
       - name: Find Odoo modules
         id: find-modules
         run: |
-          MODULES=\$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
-          MODULE_COUNT=\$(echo "\$MODULES" | wc -w | tr -d ' ')
-          if [ -z "\$MODULE_COUNT" ]; then MODULE_COUNT=0; fi
-          echo "modules=\$MODULES" >> \$GITHUB_OUTPUT
-          echo "count=\$MODULE_COUNT" >> \$GITHUB_OUTPUT
-          echo "Found \$MODULE_COUNT modules"
+          MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
+          MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
+          case "$MODULE_COUNT" in ''|*[!0-9]*) MODULE_COUNT=0 ;; esac
+          echo "modules=$MODULES" >> $GITHUB_OUTPUT
+          echo "count=$MODULE_COUNT" >> $GITHUB_OUTPUT
+          echo "Found $MODULE_COUNT modules"
 
       - name: Fetch base branch
         if: github.event_name == 'pull_request'
         run: |
-          git fetch origin \${{ github.base_ref }}:refs/remotes/origin/\${{ github.base_ref }} --depth=1 || true
+          git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} --depth=1 || true
 
       - name: Soltein validation
         id: validate
         continue-on-error: true
         env:
-          SOLT_BASE_BRANCH: \${{ github.base_ref }}
-          ODOO_VERSION: \${{ steps.detect-version.outputs.odoo_version }}
+          SOLT_BASE_BRANCH: ${{ github.base_ref }}
+          ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
         run: |
           mkdir -p reports
-          if [ "\${{ github.event_name }}" = "push" ]; then
+          EVENT_NAME="${{ github.event_name }}"
+          if [ "$EVENT_NAME" = "push" ]; then
             ARGS="--scope full"
           else
-            ARGS="--scope \${{ inputs.validation-scope }}"
+            ARGS="--scope ${{ inputs.validation-scope }}"
           fi
-          if [ "\${{ inputs.show-info }}" = "true" ]; then
-            ARGS="\$ARGS --show-info"
+          SHOW_INFO="${{ inputs.show-info }}"
+          if [ "$SHOW_INFO" = "true" ]; then
+            ARGS="$ARGS --show-info"
           fi
-          START_TIME=\$(date +%s)
+          START_TIME=$(date +%s)
           set -o pipefail
           set +e
-          solt-check-odoo \${{ steps.find-modules.outputs.modules }} \$ARGS --odoo-version "\$ODOO_VERSION" 2>&1 | tee reports/validation.txt
-          VALIDATION_EXIT_CODE=\${PIPESTATUS[0]}
+          solt-check-odoo ${{ steps.find-modules.outputs.modules }} $ARGS --odoo-version "$ODOO_VERSION" 2>&1 | tee reports/validation.txt
+          VALIDATION_EXIT_CODE=${PIPESTATUS[0]}
           set -e
           set +o pipefail
-          END_TIME=\$(date +%s)
-          DURATION=\$((END_TIME - START_TIME))
-          echo "exit_code=\$VALIDATION_EXIT_CODE" >> \$GITHUB_OUTPUT
-          echo "duration=\$DURATION" >> \$GITHUB_OUTPUT
-          exit \$VALIDATION_EXIT_CODE
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          echo "exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          exit $VALIDATION_EXIT_CODE
 
       - name: Ruff linting
         id: ruff
         if: always()
         continue-on-error: true
         env:
-          ODOO_VERSION: \${{ steps.detect-version.outputs.odoo_version }}
+          ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
         run: |
           set +e
           mkdir -p reports
-          echo "=== Ruff Linting (Odoo \$ODOO_VERSION) ==="
+          echo "=== Ruff Linting (Odoo $ODOO_VERSION) ==="
           CHANGED_PY=""
-          if [ "\${{ github.event_name }}" = "pull_request" ]; then
-            git fetch origin \${{ github.base_ref }} --depth=1 2>/dev/null || true
-            CHANGED_PY=\$(git diff --name-only --diff-filter=ACMR origin/\${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+          EVENT_NAME="${{ github.event_name }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           else
-            CHANGED_PY=\$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
           RUFF_COUNT=0
-          if [ -n "\$CHANGED_PY" ]; then
+          if [ -n "$CHANGED_PY" ]; then
             EXISTING_PY=""
-            for f in \$CHANGED_PY; do
-              if [ -f "\$f" ]; then
-                EXISTING_PY="\$EXISTING_PY \$f"
+            for f in $CHANGED_PY; do
+              if [ -f "$f" ]; then
+                EXISTING_PY="$EXISTING_PY $f"
               fi
             done
-            EXISTING_PY=\$(echo "\$EXISTING_PY" | xargs)
-            if [ -n "\$EXISTING_PY" ]; then
-              FILE_COUNT=\$(echo "\$EXISTING_PY" | wc -w | tr -d ' ')
-              echo "Checking \$FILE_COUNT changed Python files..."
-              ruff check \$EXISTING_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
-              RUFF_COUNT=\$(grep -cE "^.+\\.py:[0-9]+" reports/ruff-changed.txt 2>/dev/null || echo "0")
-              case "\$RUFF_COUNT" in ''|*[!0-9]*) RUFF_COUNT=0 ;; esac
+            EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
+            if [ -n "$EXISTING_PY" ]; then
+              FILE_COUNT=$(echo "$EXISTING_PY" | wc -w | tr -d ' ')
+              echo "Checking $FILE_COUNT changed Python files..."
+              ruff check $EXISTING_PY --output-format=concise 2>&1 | tee reports/ruff-changed.txt || true
+              RUFF_COUNT=$(grep -cE "^.+\.py:[0-9]+" reports/ruff-changed.txt 2>/dev/null || echo "0")
+              case "$RUFF_COUNT" in ''|*[!0-9]*) RUFF_COUNT=0 ;; esac
             else
               echo "No existing Python files to check"
             fi
           else
             echo "No changed Python files detected"
           fi
-          echo "Ruff issues in changed files: \$RUFF_COUNT"
-          echo "changed=\$RUFF_COUNT" >> \$GITHUB_OUTPUT
+          echo "Ruff issues in changed files: $RUFF_COUNT"
+          echo "changed=$RUFF_COUNT" >> $GITHUB_OUTPUT
 
       - name: Pylint-Odoo linting
         id: pylint
         if: always()
         continue-on-error: true
         env:
-          ODOO_VERSION: \${{ steps.detect-version.outputs.odoo_version }}
+          ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
         run: |
           set +e
           mkdir -p reports
-          echo "=== Pylint-Odoo Linting (Odoo \$ODOO_VERSION) ==="
+          echo "=== Pylint-Odoo Linting (Odoo $ODOO_VERSION) ==="
           strip_ansi() {
             sed 's/\x1b\[[0-9;]*m//g' | sed 's/\[0m//g' | sed 's/\[1;[0-9]*m//g' | sed 's/\[35m//g'
           }
           PYLINT_ARGS="--load-plugins=pylint_odoo --exit-zero"
-          case "\$ODOO_VERSION" in
-            16.0*) PYLINT_ARGS="\$PYLINT_ARGS --valid-odoo-versions=16.0" ;;
-            17.0*) PYLINT_ARGS="\$PYLINT_ARGS --valid-odoo-versions=17.0" ;;
-            18.0*) PYLINT_ARGS="\$PYLINT_ARGS --valid-odoo-versions=18.0" ;;
+          case "$ODOO_VERSION" in
+            16.0*) PYLINT_ARGS="$PYLINT_ARGS --valid-odoo-versions=16.0" ;;
+            17.0*) PYLINT_ARGS="$PYLINT_ARGS --valid-odoo-versions=17.0" ;;
+            18.0*) PYLINT_ARGS="$PYLINT_ARGS --valid-odoo-versions=18.0" ;;
           esac
           CHANGED_PY=""
-          if [ "\${{ github.event_name }}" = "pull_request" ]; then
-            CHANGED_PY=\$(git diff --name-only --diff-filter=ACMR origin/\${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+          EVENT_NAME="${{ github.event_name }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           else
-            CHANGED_PY=\$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
+            CHANGED_PY=$(git diff --name-only --diff-filter=ACMR HEAD~1...HEAD -- '*.py' 2>/dev/null | tr '\n' ' ')
           fi
           PYLINT_COUNT=0
-          if [ -n "\$CHANGED_PY" ]; then
+          if [ -n "$CHANGED_PY" ]; then
             EXISTING_PY=""
-            for f in \$CHANGED_PY; do
-              if [ -f "\$f" ]; then
-                EXISTING_PY="\$EXISTING_PY \$f"
+            for f in $CHANGED_PY; do
+              if [ -f "$f" ]; then
+                EXISTING_PY="$EXISTING_PY $f"
               fi
             done
-            EXISTING_PY=\$(echo "\$EXISTING_PY" | xargs)
-            if [ -n "\$EXISTING_PY" ]; then
-              FILE_COUNT=\$(echo "\$EXISTING_PY" | wc -w | tr -d ' ')
-              echo "Checking \$FILE_COUNT changed Python files..."
-              echo "\$EXISTING_PY" | xargs pylint \$PYLINT_ARGS 2>&1 | strip_ansi | tee reports/pylint-changed.txt || true
-              PYLINT_COUNT=\$(grep -cE "\\.py:[0-9]+:.*\\[" reports/pylint-changed.txt 2>/dev/null || echo "0")
-              case "\$PYLINT_COUNT" in ''|*[!0-9]*) PYLINT_COUNT=0 ;; esac
+            EXISTING_PY=$(echo "$EXISTING_PY" | xargs)
+            if [ -n "$EXISTING_PY" ]; then
+              FILE_COUNT=$(echo "$EXISTING_PY" | wc -w | tr -d ' ')
+              echo "Checking $FILE_COUNT changed Python files..."
+              echo "$EXISTING_PY" | xargs pylint $PYLINT_ARGS 2>&1 | strip_ansi | tee reports/pylint-changed.txt || true
+              PYLINT_COUNT=$(grep -cE "\.py:[0-9]+:.*\[" reports/pylint-changed.txt 2>/dev/null || echo "0")
+              case "$PYLINT_COUNT" in ''|*[!0-9]*) PYLINT_COUNT=0 ;; esac
             else
               echo "No existing Python files to check"
             fi
           else
             echo "No changed Python files detected"
           fi
-          echo "Pylint issues in changed files: \$PYLINT_COUNT"
-          echo "changed=\$PYLINT_COUNT" >> \$GITHUB_OUTPUT
+          echo "Pylint issues in changed files: $PYLINT_COUNT"
+          echo "changed=$PYLINT_COUNT" >> $GITHUB_OUTPUT
 
       - name: Extract summary
         id: summary

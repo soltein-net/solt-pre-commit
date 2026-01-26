@@ -7,9 +7,6 @@
 # SETUP:
 # 1. Copy this file to .github/workflows/solt-validate.yml
 # 2. For badges: Configure GIST_SECRET in repository/organization secrets
-#
-# ORGANIZATION VARIABLES (Settings → Secrets and variables → Actions → Variables):
-# - SOLTEIN_GIST_ID: Central gist ID for badges (147d543a086f6735d1ffa02172766e86)
 # =============================================================================
 
 name: Soltein Validation
@@ -19,7 +16,7 @@ on:
     branches: [ main, master, develop, '17.0', '18.0', '19.0' ]
   pull_request:
     branches: [ main, master, develop, '17.0', '18.0', '19.0' ]
-  # Weekly badge updates
+  # Weekly badge updates - uncomment schedule to enable
   schedule:
     - cron: '0 6 * * 1'  # Mondays at 6 AM UTC
   workflow_dispatch:
@@ -32,7 +29,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # VALIDATION - Runs on PRs and pushes
   # ---------------------------------------------------------------------------
-  validate:
+  Validate:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.1
     with:
@@ -40,17 +37,12 @@ jobs:
       fail-on-warnings: true
       pylint-blocking: true
       ruff-blocking: false
-      show-info: true
+      show-info: false
 
   # ---------------------------------------------------------------------------
   # WEEKLY BADGE UPDATES
   # ---------------------------------------------------------------------------
-  # To enable:
-  # 1. Uncomment the schedule trigger above
-  # 2. Configure GIST_SECRET in organization secrets
-  # 3. Configure SOLTEIN_GIST_ID in organization variables
-  # ---------------------------------------------------------------------------
-  update-badges:
+  Update-Badges:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-badges.yml@v1.0.1
     with:
