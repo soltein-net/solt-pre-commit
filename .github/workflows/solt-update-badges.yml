@@ -1,20 +1,11 @@
 # =============================================================================
 # SOLT PRE-COMMIT - Weekly Badge Update (Reusable)
 # =============================================================================
+# Version: 1.0.1
 # Runs weekly to update documentation coverage badges
-# Should be called from each repository's workflow
-#
-# CENTRALIZED GIST:
-# - All Soltein repos share a single Gist for badges
-# - Gist ID: 147d543a086f6735d1ffa02172766e86
-# - Each repo uses its name as badge-filename-prefix
-#
-# ODOO VERSION SUPPORT:
-# - Supports: 17.0, 18.0, 19.0+ (future versions)
-# - Auto-detects from branch name or manifest
-# - Uses appropriate Python version per Odoo version
+# Single job structure for efficiency
 # =============================================================================
-name: Update Badges (Weekly)
+name: Update Badges (Reusable)
 
 on:
   workflow_call:
@@ -55,11 +46,8 @@ on:
         required: true
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # UPDATE BADGES
-  # ---------------------------------------------------------------------------
   Update-Badges:
-    name: Update Documentation Badges
+    name: Documentation Badges
     runs-on: ubuntu-latest
 
     steps:
@@ -71,15 +59,12 @@ jobs:
       - name: Detect versions
         id: detect
         run: |
-          # Repository name
           REPO_NAME="${{ github.event.repository.name }}"
           echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
 
-          # Branch
           BRANCH="${{ inputs.branch || github.ref_name }}"
           echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
 
-          # Odoo version
           INPUT_ODOO="${{ inputs.odoo-version }}"
           INPUT_PYTHON="${{ inputs.python-version }}"
 
@@ -87,42 +72,37 @@ jobs:
             ODOO_VERSION="$INPUT_ODOO"
           else
             ODOO_VERSION=""
-
-            # Pattern 1: Direct version branch (17.0, 18.0, 17.0.1)
             if [[ "$BRANCH" =~ ^([0-9]+\.[0-9]+) ]]; then
               ODOO_VERSION="${BASH_REMATCH[1]}"
             fi
-
-            # Pattern 2: Prefixed branch
-            if [ -z "$ODOO_VERSION" ] && [[ "$BRANCH" =~ ([0-9]+\.[0-9]+) ]]; then
+            if [ -z "$ODOO_VERSION" ] && [[ "$BRANCH" =~ ^[a-z]+/([0-9]+\.[0-9]+) ]]; then
               ODOO_VERSION="${BASH_REMATCH[1]}"
             fi
-
-            # Pattern 3: Scan manifests
             if [ -z "$ODOO_VERSION" ]; then
               MANIFEST_VERSION=$(find . -name "__manifest__.py" -exec grep -h '"version"' {} \; 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
-              [ -n "$MANIFEST_VERSION" ] && ODOO_VERSION="$MANIFEST_VERSION"
+              if [ -n "$MANIFEST_VERSION" ]; then
+                ODOO_VERSION="$MANIFEST_VERSION"
+              fi
             fi
-
-            # Default fallback
-            : "${ODOO_VERSION:=17.0}"
+            if [ -z "$ODOO_VERSION" ]; then
+              ODOO_VERSION="17.0"
+            fi
           fi
 
-          # Python version mapping
           if [ -n "$INPUT_PYTHON" ]; then
             PYTHON_VERSION="$INPUT_PYTHON"
           else
             case "$ODOO_VERSION" in
               16.0*|17.0*) PYTHON_VERSION="3.10" ;;
               18.0*) PYTHON_VERSION="3.11" ;;
-              19.0*|20.0*) PYTHON_VERSION="3.12" ;;
+              19.0*|20.0*|21.0*) PYTHON_VERSION="3.12" ;;
               *) PYTHON_VERSION="3.11" ;;
             esac
           fi
 
           echo "odoo_version=$ODOO_VERSION" >> $GITHUB_OUTPUT
           echo "python_version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
-          echo "::notice::Repository: $REPO_NAME | Odoo: $ODOO_VERSION | Python: $PYTHON_VERSION"
+          echo "::notice::Repo: $REPO_NAME, Odoo: $ODOO_VERSION, Python: $PYTHON_VERSION"
 
       - uses: actions/setup-python@v5
         with:
@@ -135,52 +115,52 @@ jobs:
           ODOO_VERSION: ${{ steps.detect.outputs.odoo_version }}
           REPO_NAME: ${{ steps.detect.outputs.repo_name }}
         run: |
+          pip install --upgrade pip
           pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1"
 
-          # Find all modules
           MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
           MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
 
           echo "Found $MODULE_COUNT modules for $REPO_NAME (Odoo $ODOO_VERSION)"
 
-          # Run with full scope for metrics
           solt-check-odoo $MODULES --scope full --odoo-version "$ODOO_VERSION" 2>&1 | tee output.txt || true
 
-          # Extract metrics
           DOC_COV=$(grep -oP "docstring_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
           STRING_COV=$(grep -oP "string_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
           HELP_COV=$(grep -oP "help_cov=\K[0-9.]+" output.txt 2>/dev/null | head -1 || echo "0")
 
-          # Remove decimals
           DOC_COV=${DOC_COV%.*}
           STRING_COV=${STRING_COV%.*}
           HELP_COV=${HELP_COV%.*}
 
-          # Determine status
+          case "$DOC_COV" in ''|*[!0-9]*) DOC_COV=0 ;; esac
+          case "$STRING_COV" in ''|*[!0-9]*) STRING_COV=0 ;; esac
+          case "$HELP_COV" in ''|*[!0-9]*) HELP_COV=0 ;; esac
+
           THRESHOLD=${{ inputs.docstring-threshold }}
-          if [ "${DOC_COV:-0}" -ge "$THRESHOLD" ]; then
+          if [ "$DOC_COV" -ge "$THRESHOLD" ]; then
             STATUS="passing"
           else
             STATUS="failing"
           fi
 
-          echo "docstring_cov=${DOC_COV:-0}" >> $GITHUB_OUTPUT
-          echo "string_cov=${STRING_COV:-0}" >> $GITHUB_OUTPUT
-          echo "help_cov=${HELP_COV:-0}" >> $GITHUB_OUTPUT
+          echo "docstring_cov=$DOC_COV" >> $GITHUB_OUTPUT
+          echo "string_cov=$STRING_COV" >> $GITHUB_OUTPUT
+          echo "help_cov=$HELP_COV" >> $GITHUB_OUTPUT
           echo "docs_status=$STATUS" >> $GITHUB_OUTPUT
           echo "module_count=$MODULE_COUNT" >> $GITHUB_OUTPUT
 
-          # Summary
           echo "## Badge Update Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Repository | **$REPO_NAME** |" >> $GITHUB_STEP_SUMMARY
           echo "| Odoo Version | **$ODOO_VERSION** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Python Version | ${{ steps.detect.outputs.python_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Modules | $MODULE_COUNT |" >> $GITHUB_STEP_SUMMARY
-          echo "| Docstrings | ${DOC_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
-          echo "| Field strings | ${STRING_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
-          echo "| Field help | ${HELP_COV:-0}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docstrings | $DOC_COV% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Field strings | $STRING_COV% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Field help | $HELP_COV% |" >> $GITHUB_STEP_SUMMARY
           echo "| Status | $STATUS |" >> $GITHUB_STEP_SUMMARY
 
       - name: Determine badge prefix
