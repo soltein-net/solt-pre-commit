@@ -201,17 +201,31 @@ class ResultPrinter:
 
     MAX_MESSAGE_LENGTH = 200
 
-    def __init__(self, use_colors=True, verbose=False, use_unicode=None, max_messages=None):
-        self.use_colors = use_colors and sys.stdout.isatty()
+    def __init__(
+        self, use_colors=True, verbose=False, use_unicode=None, max_messages=None, use_stderr=False, show_info=True
+    ):
+        self.use_stderr = use_stderr
+        # Check if output stream is a tty
+        output_stream = sys.stderr if use_stderr else sys.stdout
+        is_tty = output_stream.isatty()
+        self.use_colors = use_colors and is_tty
         self.verbose = verbose
+        self.show_info = show_info  # Separate flag for showing INFO level issues
         if use_unicode is None:
-            self.use_unicode = sys.stdout.isatty() and os.environ.get("CI") is None
+            self.use_unicode = is_tty and os.environ.get("CI") is None
         else:
             self.use_unicode = use_unicode
         if max_messages is None:
             self.max_messages = None if os.environ.get("CI") else 10
         else:
             self.max_messages = max_messages
+
+    def _print(self, *args, **kwargs):
+        """Print to stderr if use_stderr is True, otherwise stdout."""
+        if self.use_stderr:
+            print(*args, file=sys.stderr, **kwargs)
+        else:
+            print(*args, **kwargs)
 
     def _get_icon(self, severity):
         if self.use_unicode:
@@ -246,52 +260,57 @@ class ResultPrinter:
         counts = check_result.get_counts()
         blocking = check_result.severity_config.blocking_severities
 
-        print("")
+        self._print("")
         if module_name:
-            print(self._bold("=" * 60))
-            print(self._bold(f"MODULE: {module_name}"))
+            self._print(self._bold("=" * 60))
+            self._print(self._bold(f"MODULE: {module_name}"))
             scope_label = "changed files only" if validation_scope == "changed" else "full repository"
-            print(f"   Scope: {scope_label}")
-            print(self._bold("=" * 60))
+            self._print(f"   Scope: {scope_label}")
+            self._print(self._bold("=" * 60))
 
         for severity in [Severity.ERROR, Severity.WARNING, Severity.INFO]:
             checks = by_severity[severity]
             if not checks:
                 continue
 
+            # Skip INFO level if show_info is False
+            if severity == Severity.INFO and not self.show_info:
+                continue
+
             count = counts[severity]
             is_blocking = severity in blocking
 
-            print("")
+            self._print("")
             header = self._severity_header(severity, count)
             if is_blocking:
                 header += self._color(" [BLOCKING]", Severity.COLORS[Severity.ERROR])
-            print(header)
-            print("-" * 50)
+            self._print(header)
+            self._print("-" * 50)
 
             for check_name, messages in sorted(checks.items()):
                 check_display = self._format_check_name(check_name)
-                print(f"\n  {self._bold(check_display)} ({len(messages)})")
+                self._print(f"\n  {self._bold(check_display)} ({len(messages)})")
 
                 display_messages = messages if self.max_messages is None else messages[: self.max_messages]
                 for msg in display_messages:
                     if len(msg) > self.MAX_MESSAGE_LENGTH:
                         msg = msg[: self.MAX_MESSAGE_LENGTH - 3] + "..."
-                    print(f"    - {msg}")
+                    self._print(f"    - {msg}")
 
                 if self.max_messages and len(messages) > self.max_messages:
                     remaining = len(messages) - self.max_messages
-                    print(f"    ... and {remaining} more")
+                    self._print(f"    ... and {remaining} more")
 
-        print("")
-        print("-" * 50)
+        self._print("")
+        self._print("-" * 50)
         self._print_summary(counts, blocking)
 
     def _print_summary(self, counts, blocking):
         parts = []
         for severity in [Severity.ERROR, Severity.WARNING, Severity.INFO]:
             count = counts[severity]
-            if count == 0 and severity == Severity.INFO:
+            # Skip INFO in summary if show_info is False or count is 0
+            if severity == Severity.INFO and (not self.show_info or count == 0):
                 continue
             icon = self._get_icon(severity)
             color = Severity.COLORS[severity]
@@ -299,21 +318,21 @@ class ResultPrinter:
             if severity in blocking and count > 0:
                 text += " (blocking)"
             parts.append(self._color(text, color))
-        print(f"Summary: {' | '.join(parts)}")
+        self._print(f"Summary: {' | '.join(parts)}")
 
     def print_blocking_notice(self, check_result):
         if not check_result.has_blocking_issues():
             return
-        print("")
-        print(self._color("=" * 60, Severity.COLORS[Severity.ERROR]))
-        print(self._color("VALIDATION FAILED - Blocking issues found", Severity.COLORS[Severity.ERROR]))
-        print(self._color("=" * 60, Severity.COLORS[Severity.ERROR]))
-        print("")
+        self._print("")
+        self._print(self._color("=" * 60, Severity.COLORS[Severity.ERROR]))
+        self._print(self._color("VALIDATION FAILED - Blocking issues found", Severity.COLORS[Severity.ERROR]))
+        self._print(self._color("=" * 60, Severity.COLORS[Severity.ERROR]))
+        self._print("")
 
     def print_success(self, module_name="", validation_scope="full"):
         scope_label = "(changed files)" if validation_scope == "changed" else "(full)"
         msg = f"{module_name}: All checks passed! {scope_label}" if module_name else "All checks passed!"
-        print(self._color(msg, "\033[92m"))
+        self._print(self._color(msg, "\033[92m"))
 
 
 def installable(method):
@@ -796,7 +815,7 @@ def run(
     else:
         detected_version = None
 
-    printer = ResultPrinter(use_colors=True, verbose=show_info, max_messages=max_messages)
+    printer = ResultPrinter(use_colors=True, max_messages=max_messages, use_stderr=True, show_info=show_info)
 
     all_results = []
     checks_objects = []
@@ -842,8 +861,8 @@ def run(
                     severity_config.validation_scope,
                 )
 
-    # Always show summary for local commits (single module or when verbose)
-    if verbose and manifest_paths:
+    # Always show summary (use stderr so pre-commit always displays it)
+    if manifest_paths:
         elapsed_time = time.time() - start_time
 
         # Calculate totals
@@ -853,25 +872,35 @@ def run(
             for sev, count in counts.items():
                 total_counts[sev] += count
 
-        print("")
-        print("=" * 60)
-        print("SOLT PRE-COMMIT VALIDATION SUMMARY")
-        print("=" * 60)
+        # Use stderr so pre-commit always shows the output
+        def eprint(*args, **kwargs):
+            print(*args, file=sys.stderr, **kwargs)
+
+        eprint("")
+        eprint("=" * 60)
+        eprint("SOLT PRE-COMMIT VALIDATION")
+        eprint("=" * 60)
         scope_label = "changed files only" if severity_config.validation_scope == "changed" else "full repository"
-        print(f"  Scope: {scope_label}")
+        eprint(f"  Scope: {scope_label}")
         if versions_found:
-            print(f"  Odoo version(s): {', '.join(sorted(versions_found))}")
-        print(f"  Modules checked: {len(manifest_paths)}")
-        print(f"  Modules with issues: {len(all_results)}")
-        print(f"  Errors: {total_counts[Severity.ERROR]}")
-        print(f"  Warnings: {total_counts[Severity.WARNING]}")
-        print(f"  Info: {total_counts[Severity.INFO]}")
-        print(f"  Time: {elapsed_time:.2f}s")
+            eprint(f"  Odoo version(s): {', '.join(sorted(versions_found))}")
+        eprint(f"  Modules checked: {len(manifest_paths)}")
+
+        # Show which modules were checked
+        for module_name, _checks_obj in checks_objects:
+            eprint(f"    - {module_name}")
+
+        eprint("")
+        eprint(f"  Errors: {total_counts[Severity.ERROR]}")
+        eprint(f"  Warnings: {total_counts[Severity.WARNING]}")
+        if show_info:
+            eprint(f"  Info: {total_counts[Severity.INFO]}")
+        eprint(f"  Time: {elapsed_time:.2f}s")
 
         if not has_blocking:
-            print("")
-            print(printer._color("  ✓ All checks passed!", "\033[92m"))
-        print("=" * 60)
+            eprint("")
+            eprint("\033[92m  ✓ All checks passed!\033[0m")
+        eprint("=" * 60)
 
     if verbose and show_coverage:
         _print_global_coverage_metrics(checks_objects, severity_config)
