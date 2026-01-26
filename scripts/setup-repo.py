@@ -209,7 +209,7 @@ def run_precommit_autoupdate(target: Path, repo_url: str = SOLT_REPO_URL, dry_ru
         # Parse output to show version change
         output = result.stdout.strip()
         if "updating" in output.lower():
-            print_step("✅", output.split('\n')[0] if output else "Updated")
+            print_step("✅", output.split("\n")[0] if output else "Updated")
         elif "already up to date" in output.lower():
             print_step("✓ ", "Already up to date")
         else:
@@ -346,7 +346,8 @@ def update_precommit_version(target: Path, version: str = CURRENT_VERSION, dry_r
 
     # Find current version using regex
     import re
-    pattern = r'(repo:\s*' + re.escape(SOLT_REPO_URL) + r'\s+rev:\s*)(v?[\d.]+)'
+
+    pattern = r"(repo:\s*" + re.escape(SOLT_REPO_URL) + r"\s+rev:\s*)(v?[\d.]+)"
     match = re.search(pattern, content)
 
     if not match:
@@ -364,7 +365,7 @@ def update_precommit_version(target: Path, version: str = CURRENT_VERSION, dry_r
         return True
 
     # Replace version
-    new_content = re.sub(pattern, rf'\g<1>{version}', content)
+    new_content = re.sub(pattern, rf"\g<1>{version}", content)
     config_file.write_text(new_content)
     print_step("✅", f"Updated: {current_ver} → {version}")
     return True
@@ -694,8 +695,11 @@ Current version: {CURRENT_VERSION}
             if not repos_path.exists():
                 print(f"❌ Repos file not found: {repos_path}")
                 sys.exit(1)
-            repos = [line.strip() for line in repos_path.read_text().splitlines()
-                     if line.strip() and not line.startswith("#")]
+            repos = [
+                line.strip()
+                for line in repos_path.read_text().splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
 
             mode_str = "DRY RUN - " if args.dry_run else ""
             print(f"\n{'=' * 60}")
