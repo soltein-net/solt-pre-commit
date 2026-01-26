@@ -9,6 +9,7 @@
 # - Auto-detects Odoo version from branch name or manifest
 # - Supports: 17.0, 18.0, 19.0+ (future versions)
 # - Uses appropriate Python version per Odoo version
+# - Clear error messages for invalid branch names
 # =============================================================================
 name: Soltein Validation (Reusable)
 
@@ -157,19 +158,23 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1" pylint-odoo ruff
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.6" pylint-odoo ruff
 
       - name: Validate branch name
+        id: branch-check
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         run: |
           BRANCH="${{ github.head_ref }}"
+          echo "branch_name=$BRANCH" >> $GITHUB_OUTPUT
           echo "## Branch Validation" >> $GITHUB_STEP_SUMMARY
           echo "Branch: \`$BRANCH\`" >> $GITHUB_STEP_SUMMARY
           if solt-check-branch "$BRANCH"; then
             echo "✅ Branch name is valid" >> $GITHUB_STEP_SUMMARY
+            echo "valid=true" >> $GITHUB_OUTPUT
           else
             echo "❌ Branch name is invalid" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            echo "valid=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Find Odoo modules
@@ -455,6 +460,8 @@ jobs:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
           PYTHON_VERSION: ${{ steps.detect-version.outputs.python_version }}
           IS_EMPTY_REPO: ${{ steps.summary.outputs.is_empty_repo }}
+          BRANCH_VALID: ${{ steps.branch-check.outputs.valid }}
+          BRANCH_NAME: ${{ steps.branch-check.outputs.branch_name }}
         with:
           script: |
             const fs = require('fs');
@@ -470,11 +477,45 @@ jobs:
             const odooVersion = process.env.ODOO_VERSION || '17.0';
             const pythonVersion = process.env.PYTHON_VERSION || '3.11';
             const isEmptyRepo = process.env.IS_EMPTY_REPO === 'true';
+            const branchValid = process.env.BRANCH_VALID !== 'false';
+            const branchName = process.env.BRANCH_NAME || '';
 
             const bodyParts = [];
 
+            // Handle invalid branch name case
+            if (!branchValid) {
+              bodyParts.push(`## :x: Validation Failed (Odoo ${odooVersion})`);
+              bodyParts.push('');
+              bodyParts.push('> :no_entry: **Invalid branch name.** Please rename your branch to continue.');
+              bodyParts.push('');
+              bodyParts.push(`**Branch:** \`${branchName}\``);
+              bodyParts.push('');
+              bodyParts.push('### :label: Branch Naming Convention');
+              bodyParts.push('');
+              bodyParts.push('Branch names must follow one of these patterns:');
+              bodyParts.push('- `<type>/<odoo-version>-<description>` (e.g., `feature/17.0-add-invoice`)');
+              bodyParts.push('- `<type>/<odoo-version>-<TICKET>-<number>-<description>` (e.g., `fix/17.0-SOLT-123-bug-fix`)');
+              bodyParts.push('');
+              bodyParts.push('**Valid types:** `feature`, `fix`, `hotfix`, `bugfix`, `release`, `refactor`, `docs`, `test`, `chore`');
+              bodyParts.push('');
+              bodyParts.push(':warning: **Note:** Use hyphens (`-`) as separators, not underscores (`_`).');
+              bodyParts.push('');
+              bodyParts.push('**Examples:**');
+              bodyParts.push('| Branch | Status |');
+              bodyParts.push('|--------|--------|');
+              bodyParts.push('| `feature/17.0-add-new-feature` | :white_check_mark: Valid |');
+              bodyParts.push('| `fix/17.0-SOLT-123-bug-fix` | :white_check_mark: Valid |');
+              bodyParts.push('| `17.0-feature-something` | :white_check_mark: Valid |');
+              bodyParts.push('| `feature/17.0_add_feature` | :x: Invalid (uses `_`) |');
+              bodyParts.push(`| \`${branchName}\` | :x: Invalid |`);
+              bodyParts.push('');
+              bodyParts.push('---');
+              bodyParts.push(`:link: **[View workflow logs](${workflowUrl})**`);
+              bodyParts.push('');
+              bodyParts.push(`:robot: *solt-pre-commit v1.0.6 (Odoo ${odooVersion})*`);
+            }
             // Handle empty repository case
-            if (isEmptyRepo || moduleCount === 0) {
+            else if (isEmptyRepo || moduleCount === 0) {
               bodyParts.push(`## :white_check_mark: Validation Report (Odoo ${odooVersion})`);
               bodyParts.push('');
               bodyParts.push('> :information_source: **No Odoo modules found in this repository.**');
@@ -482,7 +523,7 @@ jobs:
               bodyParts.push('This PR only contains configuration files. Validation will run once you add an Odoo module with `__manifest__.py`.');
               bodyParts.push('');
               bodyParts.push('---');
-              bodyParts.push(`:robot: *solt-pre-commit v1.0.1 (Odoo ${odooVersion})*`);
+              bodyParts.push(`:robot: *solt-pre-commit v1.0.6 (Odoo ${odooVersion})*`);
             } else {
               // Normal validation report
               const exitCode = safeInt(process.env.EXIT_CODE);
@@ -615,7 +656,7 @@ jobs:
               if (hasFailed) bodyParts.push(':bulb: **Tip:** Fix the blocking issues above and push again.\n');
               bodyParts.push(`:link: **[View full workflow logs](${workflowUrl})**`);
               bodyParts.push('');
-              bodyParts.push(`:robot: *solt-pre-commit v1.0.1 (Odoo ${odooVersion})*`);
+              bodyParts.push(`:robot: *solt-pre-commit v1.0.6 (Odoo ${odooVersion})*`);
             }
 
             const body = bodyParts.join('\n');
@@ -633,7 +674,15 @@ jobs:
         env:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
           MODULE_COUNT: ${{ steps.find-modules.outputs.count }}
+          BRANCH_VALID: ${{ steps.branch-check.outputs.valid }}
         run: |
+          # Check branch validation first (for PRs)
+          if [ "$BRANCH_VALID" = "false" ]; then
+            echo "result=failure" >> $GITHUB_OUTPUT
+            echo "::error::Validation FAILED - invalid branch name"
+            exit 1
+          fi
+
           # If no modules, always pass
           if [ "$MODULE_COUNT" = "0" ]; then
             echo "result=success" >> $GITHUB_OUTPUT

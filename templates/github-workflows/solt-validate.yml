@@ -27,7 +27,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # VALIDATION - Runs ONLY on Pull Requests
   # ---------------------------------------------------------------------------
-  validate:
+  Validate:
     if: github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.1
     with:
