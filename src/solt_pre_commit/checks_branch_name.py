@@ -4,11 +4,16 @@
 
 """Branch naming policy validation with multi-version Odoo support.
 
-Supports branch patterns:
-- Direct version: 17.0, 18.0, 17.0.1.0
-- Version-prefixed: feature/17.0-description, hotfix/18.0-fix
-- Standard: feature/description, fix/TICKET-123-description
+Supports branch patterns (Odoo version is REQUIRED):
+- Version + ticket: feature/17.0-SOLT-123-description (recommended)
+- Version only: feature/17.0-description (flexible mode)
+- Version-type: 17.0-hotfix-description
 - Release: release/17.0.1.0
+- Protected: main, master, 17.0, 18.0 (skipped)
+
+Patterns WITHOUT Odoo version are NOT allowed:
+- feature/add-something (INVALID)
+- feature/SOLT-123-something (INVALID)
 """
 
 import argparse
@@ -71,12 +76,18 @@ DEFAULT_PROTECTED_PATTERNS = [
 class BranchNameValidator:
     """Validates branch names against naming policy.
 
+    Odoo version prefix is REQUIRED in all branch names.
+
     Supports multiple branch naming conventions:
-    1. Standard: feature/description, fix/bug-name
-    2. With ticket: feature/SOLT-123-description
-    3. Version-prefixed: feature/17.0-description, hotfix/18.0-fix
+    1. Version + ticket: feature/17.0-SOLT-123-description (recommended)
+    2. Version only: feature/17.0-description (flexible mode)
+    3. Version-type: 17.0-hotfix-description
     4. Release: release/17.0.1.0
-    5. Direct version: 17.0, 18.0 (protected)
+    5. Protected: main, master, 17.0, 18.0 (validation skipped)
+
+    NOT allowed (missing version):
+    - feature/add-something
+    - feature/SOLT-123-something
     """
 
     CONFIG_FILES = [".solt-hooks.yaml", ".solt-hooks.yml", "solt-hooks.yaml"]
@@ -149,11 +160,12 @@ class BranchNameValidator:
         """Compile regex patterns for branch validation.
 
         Creates patterns for each branch type supporting:
-        - Standard: type/description
-        - With ticket: type/TICKET-123-description
-        - Version-prefixed: type/17.0-description
+        - Version + ticket: type/17.0-TICKET-123-description (recommended)
+        - Version only: type/17.0-description
         - Release: release/17.0.1.0
         - Version-type: 17.0-type-description (e.g., 17.0-hotfix-something)
+
+        NOTE: Odoo version prefix is REQUIRED in all branch names.
         """
         if self.ticket_prefixes == ["[A-Z]+"]:
             prefix_pattern = "[A-Z]+"
@@ -170,26 +182,27 @@ class BranchNameValidator:
                 # release/17.0.1.0 or release/1.0.0
                 self.patterns[branch_type] = re.compile(r"^release/\d+\.\d+(\.\d+)*$")
             elif self.strict:
-                # Strict mode: requires ticket OR version prefix
-                # feature/SOLT-123-description OR feature/17.0-description
+                # Strict mode: requires version AND ticket
+                # - feature/17.0-SOLT-123-description (version + ticket)
                 self.patterns[branch_type] = re.compile(
-                    rf"^{branch_type}/("
-                    rf"{prefix_pattern}-\d+-.+|"  # SOLT-123-description
-                    rf"{ODOO_VERSION_PATTERN}-.+"  # 17.0-description
-                    rf")$"
+                    rf"^{branch_type}/"
+                    rf"{ODOO_VERSION_PATTERN}-{prefix_pattern}-\d+-.+$"  # 17.0-SOLT-123-description
                 )
             else:
-                # Flexible mode: type/description or type/TICKET-123-description or type/17.0-description
+                # Flexible mode: version required, ticket optional
+                # - type/17.0-TICKET-123-description (version + ticket)
+                # - type/17.0-description (version only)
                 self.patterns[branch_type] = re.compile(
                     rf"^{branch_type}/("
-                    rf"[a-z0-9][-a-z0-9]*|"  # simple-description
-                    rf"{prefix_pattern}-\d+-.+|"  # SOLT-123-description
+                    rf"{ODOO_VERSION_PATTERN}-{prefix_pattern}-\d+-.+|"  # 17.0-SOLT-123-description
                     rf"{ODOO_VERSION_PATTERN}-.+"  # 17.0-description
                     rf")$"
                 )
 
         # Add pattern for version-type-description format: 17.0-hotfix-something, 18.0-feature-new
-        self.patterns["version-type"] = re.compile(rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$")
+        self.patterns["version-type"] = re.compile(
+            rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$"
+        )
 
     def get_current_branch(self) -> Optional[str]:
         """Get current git branch name."""
@@ -285,7 +298,9 @@ class BranchNameValidator:
 
     def _generate_error_message(self, branch_name: str) -> str:
         """Generate a helpful error message for invalid branch names."""
-        types_str = ", ".join(self.allowed_types)
+        types_str = ", ".join(self.allowed_types[:10])  # Show first 10
+        if len(self.allowed_types) > 10:
+            types_str += f", ... (+{len(self.allowed_types) - 10} more)"
 
         if self.strict:
             if self.ticket_prefixes == ["[A-Z]+"]:
@@ -298,57 +313,51 @@ class BranchNameValidator:
             message = f"""
 [ERROR] Invalid branch name: '{branch_name}'
 
-Mode: STRICT (ticket or version required)
+Mode: STRICT (version AND ticket required)
 
-Branch names must follow one of these patterns:
-  <type>/<TICKET>-<number>-<description>
-  <type>/<odoo-version>-<description>
-  <odoo-version>-<type>-<description>
+Branch names must follow this pattern:
+  <type>/<odoo-version>-<TICKET>-<number>-<description>
 
 Valid types: {types_str}
 Ticket prefixes: {prefixes_str}
 
 Examples:
-  [OK] feature/{example_prefix}-123-add-new-feature
-  [OK] fix/{example_prefix}-456-correct-bug
-  [OK] feature/17.0-add-new-feature
-  [OK] hotfix/18.0-urgent-fix
+  [OK] feature/17.0-{example_prefix}-123-add-new-feature
+  [OK] fix/18.0-{example_prefix}-456-correct-bug
+  [OK] hotfix/17.0-{example_prefix}-789-urgent-fix
   [OK] 17.0-hotfix-urgent-fix
-  [OK] 18.0-feature-new-module
   [OK] release/17.0.1.0
 
-Common mistakes:
-  [X] Feature/... (use lowercase)
-  [X] feature/add-something (missing ticket or version)
-  [X] my-branch (missing type prefix)
+Invalid (missing version or ticket):
+  [X] feature/{example_prefix}-123-something  (missing version)
+  [X] feature/add-something                   (missing version and ticket)
+  [X] feature/17.0-add-something              (missing ticket in strict mode)
 """
         else:
             message = f"""
 [ERROR] Invalid branch name: '{branch_name}'
 
-Mode: FLEXIBLE (ticket optional)
+Mode: FLEXIBLE (version required, ticket optional)
 
 Branch names must follow one of these patterns:
-  <type>/<description>
-  <type>/<TICKET>-<number>-<description>
+  <type>/<odoo-version>-<TICKET>-<number>-<description>  (recommended)
   <type>/<odoo-version>-<description>
   <odoo-version>-<type>-<description>
 
 Valid types: {types_str}
 
 Examples:
-  [OK] feature/add-new-feature
-  [OK] feature/SOLT-123-add-new-feature
-  [OK] fix/correct-calculation
-  [OK] feature/17.0-new-feature
-  [OK] hotfix/18.0-urgent-fix
-  [OK] 17.0-hotfix-urgent-fix
-  [OK] 18.0-feature-new-module
+  [OK] feature/17.0-SOLT-123-add-new-feature  (version + ticket)
+  [OK] fix/18.0-PROJ-456-correct-bug          (version + ticket)
+  [OK] feature/17.0-add-new-feature           (version only)
+  [OK] hotfix/18.0-urgent-fix                 (version only)
+  [OK] 17.0-hotfix-urgent-fix                 (version-type format)
   [OK] release/17.0.1.0
 
-Common mistakes:
-  [X] Feature/... (use lowercase)
-  [X] my-branch (missing type prefix)
+Invalid (missing Odoo version):
+  [X] feature/add-something          (missing version)
+  [X] feature/SOLT-123-something     (missing version)
+  [X] Feature/17.0-something         (uppercase type)
 """
 
         # List protected branches and patterns

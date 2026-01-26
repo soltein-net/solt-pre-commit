@@ -49,7 +49,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.0.1  # Supports Odoo 17.0, 18.0, 19.0
+    rev: v1.0.4  # Supports Odoo 17.0, 18.0, 19.0
     hooks:
       - id: solt-check-branch
       - id: solt-check-odoo
@@ -101,7 +101,7 @@ Use our reusable GitHub Actions workflow:
 # .github/workflows/validate.yml
 jobs:
   validate:
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@1.0.1
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.0.4
     with:
       validation-scope: 'changed'
       fail-on-warnings: false
@@ -265,10 +265,12 @@ skip_docstring_methods:
 
 ### Branch Naming
 
+**Odoo version prefix is REQUIRED** in all branch names:
+
 ```yaml
 branch_naming:
-  strict: true  # Requires ticket: feature/SOLT-123-description
-  # strict: false  # Allows: feature/description
+  strict: true  # Requires version + ticket: feature/17.0-SOLT-123-description
+  # strict: false  # Requires version: feature/17.0-description
 
   ticket_prefixes:
     - SOLT
@@ -290,6 +292,17 @@ branch_naming:
     - deps
     - security
 ```
+
+**Valid examples:**
+- `feature/17.0-SOLT-123-add-invoice` ✅ (recommended)
+- `fix/18.0-PROJ-456-fix-bug` ✅
+- `feature/17.0-add-new-feature` ✅ (flexible mode)
+- `hotfix/18.0-urgent-fix` ✅
+- `release/17.0.1.0` ✅
+
+**Invalid (missing version):**
+- `feature/add-something` ❌
+- `feature/SOLT-123-something` ❌
 
 ---
 
@@ -381,13 +394,13 @@ solt-pre-commit/
 │       ├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
 │       ├── config_loader.py          # Configuration management
 │       └── doc_coverage.py           # Documentation coverage analysis
-├── templates/
-│   ├── .pre-commit-config.yaml       # Pre-commit template (GitHub)
-│   └── .pre-commit-config-local.yaml # Pre-commit template (local/monorepo)
-├── .pre-commit-config.yaml           # This repo's pre-commit config
+├── setup-repo.py                     # Initialize/maintain client repos
+├── _pylintrc                         # Pylint configuration for Odoo
+├── _solt-hooks.yaml                  # Default hook settings
+├── _pre-commit-config.yaml           # Pre-commit template (GitHub)
+├── _pre-commit-config-local.yaml     # Pre-commit template (local/monorepo)
 ├── .pre-commit-hooks.yaml            # Hook definitions for consumers
 ├── pyproject.toml                    # Package configuration
-├── setup.py                          # Package setup
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 ├── LICENSE
@@ -477,7 +490,7 @@ LGPL-3.0-or-later
 Contributions welcome! Please:
 
 1. Fork the repository
-2. Create a feature branch: `feature/ISSUE-123-description`
+2. Create a feature branch: `feature/17.0-ISSUE-123-description` (version + ticket recommended)
 3. Ensure all checks pass: `pre-commit run --all-files`
 4. Create a Pull Request
 
