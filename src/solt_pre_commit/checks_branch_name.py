@@ -30,6 +30,22 @@ DEFAULT_BRANCH_TYPES = [
     "docs",
     "test",
     "chore",
+    # additional types
+    "imp",
+    "improvement",
+    "perf",
+    "style",
+    "ci",
+    "build",
+    "deps",
+    "config",
+    "security",
+    "ux",
+    "ui",
+    "infra",
+    "ops",
+    "release-candidate",
+    "revert",
 ]
 
 DEFAULT_PROTECTED_BRANCHES = {
@@ -173,7 +189,9 @@ class BranchNameValidator:
                 )
 
         # Add pattern for version-type-description format: 17.0-hotfix-something, 18.0-feature-new
-        self.patterns["version-type"] = re.compile(rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$")
+        self.patterns["version-type"] = re.compile(
+            rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$"
+        )
 
     def get_current_branch(self) -> Optional[str]:
         """Get current git branch name."""
