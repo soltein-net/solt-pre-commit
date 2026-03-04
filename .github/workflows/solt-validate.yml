@@ -486,7 +486,7 @@ jobs:
             if (!branchValid) {
               bodyParts.push(`## :x: Validation Failed (Odoo ${odooVersion})`);
               bodyParts.push('');
-              bodyParts.push('> :no_entry: **Invalid branch name.** Please rename your branch to continue.');
+              bodyParts.push('> :no_entry: **Invalid branch name.** This PR has been **automatically closed**. Please rename your branch and open a new PR.');
               bodyParts.push('');
               bodyParts.push(`**Branch:** \`${branchName}\``);
               bodyParts.push('');
@@ -667,6 +667,21 @@ jobs:
             } else {
               await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, body: body});
             }
+
+      - name: Auto-close PR (invalid branch name)
+        if: github.event_name == 'pull_request' && steps.branch-check.outputs.valid == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              state: 'closed',
+            });
+            core.notice(`PR #${context.issue.number} auto-closed: invalid branch name '${process.env.BRANCH_NAME}'`);
+        env:
+          BRANCH_NAME: ${{ steps.branch-check.outputs.branch_name }}
 
       - name: Final validation check
         id: final-check

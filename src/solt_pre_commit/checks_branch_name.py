@@ -51,6 +51,7 @@ DEFAULT_BRANCH_TYPES = [
     "ops",
     "release-candidate",
     "revert",
+    "migration",
 ]
 
 DEFAULT_PROTECTED_BRANCHES = {
