@@ -174,7 +174,7 @@ jobs:
           echo "value=$PREFIX" >> $GITHUB_OUTPUT
 
       - name: Update docstrings badge
-        uses: schneegans/dynamic-badges-action@v1.7.0
+        uses: schneegans/dynamic-badges-action@v1.6.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ inputs.gist-id }}
@@ -188,7 +188,7 @@ jobs:
           logoColor: white
 
       - name: Update status badge
-        uses: schneegans/dynamic-badges-action@v1.7.0
+        uses: schneegans/dynamic-badges-action@v1.6.0
         with:
           auth: ${{ secrets.GIST_SECRET }}
           gistID: ${{ inputs.gist-id }}
