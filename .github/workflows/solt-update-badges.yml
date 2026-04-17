@@ -173,28 +173,46 @@ jobs:
           fi
           echo "value=$PREFIX" >> $GITHUB_OUTPUT
 
-      - name: Update docstrings badge
-        uses: schneegans/dynamic-badges-action@v1.6.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: ${{ inputs.gist-id }}
-          filename: ${{ steps.prefix.outputs.value }}-${{ steps.detect.outputs.odoo_version }}-docstrings.json
-          label: "docstrings (${{ steps.detect.outputs.odoo_version }})"
-          message: "${{ steps.metrics.outputs.docstring_cov }}%"
-          valColorRange: ${{ steps.metrics.outputs.docstring_cov }}
-          minColorRange: 0
-          maxColorRange: 100
-          namedLogo: python
-          logoColor: white
+      - name: Update badges in Gist
+        env:
+          GH_TOKEN: ${{ secrets.GIST_SECRET }}
+        run: |
+          GIST_ID="${{ inputs.gist-id }}"
+          PREFIX="${{ steps.prefix.outputs.value }}"
+          VERSION="${{ steps.detect.outputs.odoo_version }}"
+          COV="${{ steps.metrics.outputs.docstring_cov }}"
+          STATUS="${{ steps.metrics.outputs.docs_status }}"
 
-      - name: Update status badge
-        uses: schneegans/dynamic-badges-action@v1.6.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: ${{ inputs.gist-id }}
-          filename: ${{ steps.prefix.outputs.value }}-${{ steps.detect.outputs.odoo_version }}-docs-status.json
-          label: "Docs (${{ steps.detect.outputs.odoo_version }})"
-          message: ${{ steps.metrics.outputs.docs_status }}
-          color: ${{ steps.metrics.outputs.docs_status == 'passing' && 'brightgreen' || 'red' }}
-          namedLogo: github
-          logoColor: white
+          DOC_FILE="${PREFIX}-${VERSION}-docstrings.json"
+          STATUS_FILE="${PREFIX}-${VERSION}-docs-status.json"
+
+          # Determine docstring color by coverage
+          if [ "$COV" -ge 80 ]; then DOC_COLOR="brightgreen";
+          elif [ "$COV" -ge 60 ]; then DOC_COLOR="yellow";
+          elif [ "$COV" -ge 40 ]; then DOC_COLOR="orange";
+          else DOC_COLOR="red"; fi
+
+          # Determine status color
+          if [ "$STATUS" = "passing" ]; then STATUS_COLOR="brightgreen"; else STATUS_COLOR="red"; fi
+
+          # Build badge JSON content
+          DOC_CONTENT=$(jq -nc \
+            --arg label "docstrings ($VERSION)" \
+            --arg message "${COV}%" \
+            --arg color "$DOC_COLOR" \
+            '{schemaVersion:1, label:$label, message:$message, color:$color, namedLogo:"python", logoColor:"white"}')
+
+          STATUS_CONTENT=$(jq -nc \
+            --arg label "Docs ($VERSION)" \
+            --arg message "$STATUS" \
+            --arg color "$STATUS_COLOR" \
+            '{schemaVersion:1, label:$label, message:$message, color:$color, namedLogo:"github", logoColor:"white"}')
+
+          # Update Gist via GitHub API
+          jq -n \
+            --arg df "$DOC_FILE" --arg dc "$DOC_CONTENT" \
+            --arg sf "$STATUS_FILE" --arg sc "$STATUS_CONTENT" \
+            '{files: {($df): {content: $dc}, ($sf): {content: $sc}}}' | \
+          gh api --method PATCH "/gists/${GIST_ID}" --input -
+
+          echo "Updated badges: $DOC_FILE, $STATUS_FILE"
