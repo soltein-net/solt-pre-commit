@@ -7,7 +7,7 @@ repos:
   # PYTHON CODE QUALITY - Ruff
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.13
+    rev: v0.15.10
     hooks:
       - id: ruff
         args: [ --no-fix, --output-format=concise ]
@@ -19,7 +19,9 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: '\.(key|cer|pem|crt|der|p12|pfx)$'
       - id: end-of-file-fixer
+        exclude: '\.(key|cer|pem|crt|der|p12|pfx)$'
       - id: check-yaml
       - id: check-merge-conflict
       - id: check-added-large-files
