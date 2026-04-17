@@ -241,6 +241,10 @@ class OdooFieldVisitor(ast.NodeVisitor):
                 if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
                     return first_arg.value
 
+        # Variable reference: MY_CONSTANT (assume it holds a valid string)
+        if isinstance(node, ast.Name):
+            return node.id
+
         return None
 
     def _extract_field_info(self, field_name: str, value_node, lineno: int) -> Optional[dict]:
