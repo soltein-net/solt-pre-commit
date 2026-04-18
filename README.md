@@ -373,6 +373,42 @@ python setup-repo.py --help
 
 ---
 
+## 📝 Generate README Template
+
+Generate a standardized `README.md` with badges for any Soltein Odoo repository:
+
+```bash
+python scripts/generate-readme.py <repo-name> <odoo-version> "<description>" [options]
+```
+
+### Examples
+
+```bash
+# Default (soltein-net org)
+python scripts/generate-readme.py solt-hr 17.0 "Odoo HR modules for payroll and attendance"
+
+# Custom org
+python scripts/generate-readme.py solt-fc 18.0 "Financial consolidation modules" --org SolteinCorp
+
+# Preview without writing
+python scripts/generate-readme.py solt-base 19.0 "Core base modules" --dry-run
+
+# Write to specific path
+python scripts/generate-readme.py solt-web 17.0 "Web UI enhancements" --output /path/to/README.md
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--org` | `soltein-net` | GitHub organization/user |
+| `--gist-id` | SolteinCorp gist | Gist ID for docstring badge |
+| `--gist-owner` | `SolteinCorp` | Gist owner username |
+| `--output` | `./README.md` | Output file path |
+| `--dry-run` | — | Print to stdout only |
+
+---
+
 ## 📂 Repository Structure
 
 ```
@@ -394,6 +430,8 @@ solt-pre-commit/
 │       ├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
 │       ├── config_loader.py          # Configuration management
 │       └── doc_coverage.py           # Documentation coverage analysis
+├── scripts/
+│   └── generate-readme.py            # Generate README.md templates
 ├── setup-repo.py                     # Initialize/maintain client repos
 ├── _pylintrc                         # Pylint configuration for Odoo
 ├── _solt-hooks.yaml                  # Default hook settings
