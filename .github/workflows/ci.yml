@@ -252,8 +252,11 @@ jobs:
           path: dist/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
+          # Use the short tag name (v1.0.1), not the full ref. v1 passed
+          # refs/tags/v1.0.1 to the API, producing a malformed URL and a 500.
+          tag_name: ${{ github.ref_name }}
           files: dist/*
           generate_release_notes: true
           draft: false
