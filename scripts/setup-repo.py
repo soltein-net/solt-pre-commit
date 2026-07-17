@@ -67,6 +67,15 @@ FILES_TO_COPY = [
     (TEMPLATES_DIR / ".pylintrc", ".pylintrc", "Pylint configuration"),
     (TEMPLATES_DIR / "pyproject.toml", "pyproject.toml", "Python project configuration"),
     (TEMPLATES_DIR / ".solt-hooks.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
+    (TEMPLATES_DIR / "skills-lock.json", "skills-lock.json", "Agent skills lock file"),
+]
+
+# Directories copied wholesale (source_path, destination_relative_path, description).
+# Only .claude/skills is copied under .claude/ (not the whole .claude/ tree) so a
+# repo's own .claude/agents, .claude/commands, or settings are never touched.
+DIRECTORIES_TO_COPY = [
+    (TEMPLATES_DIR / ".agents", ".agents", "Shared agent skills (addyosmani/agent-skills)"),
+    (TEMPLATES_DIR / ".claude" / "skills", ".claude/skills", "Claude Code skill symlinks"),
 ]
 
 # Pre-commit config (depends on --local flag)
@@ -119,6 +128,33 @@ def copy_file(src: Path, dest: Path, dry_run: bool = False, force: bool = True) 
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
+        icon = "🔄" if action == "overwrite" else "✅"
+        print_step(icon, f"{'Updated' if action == 'overwrite' else 'Created'}: {dest}")
+        return True
+    except Exception as e:
+        print_step("❌", f"Error copying {src.name}: {e}")
+        return False
+
+
+def copy_tree(src: Path, dest: Path, dry_run: bool = False, force: bool = True) -> bool:
+    """Copy a directory tree to destination, preserving symlinks."""
+    if not src.exists():
+        print_step("⚠️ ", f"Source not found: {src}")
+        return False
+
+    if dest.exists() and not force:
+        print_step("⏭️ ", f"Skipped (exists): {dest}")
+        return False
+
+    action = "overwrite" if dest.exists() else "create"
+
+    if dry_run:
+        print_step("📁", f"Would {action} directory: {dest}")
+        return True
+
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dest, dirs_exist_ok=True, symlinks=True)
         icon = "🔄" if action == "overwrite" else "✅"
         print_step(icon, f"{'Updated' if action == 'overwrite' else 'Created'}: {dest}")
         return True
@@ -468,6 +504,15 @@ def setup_single_repo(
                 failed += 1
         else:
             print_step("❌", f"Source not found: {src}")
+            failed += 1
+
+    # Copy directory trees (agent skills)
+    for src, dest_rel, _description in DIRECTORIES_TO_COPY:
+        dest = target / dest_rel
+
+        if copy_tree(src, dest, dry_run, force):
+            copied += 1
+        else:
             failed += 1
 
     # Update configurations
