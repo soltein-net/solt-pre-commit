@@ -19,7 +19,7 @@ def read_readme():
 
 setup(
     name="solt-pre-commit",
-    version="1.0.0",
+    version="1.1.0",
     license="LGPL-3.0-or-later",
     description="Custom pre-commit hooks for Odoo module validation - Soltein (supports Odoo 17.0, 18.0, 19.0)",
     long_description=read_readme(),
@@ -49,6 +49,8 @@ setup(
         "console_scripts": [
             "solt-check-odoo=solt_pre_commit.checks_odoo_module:main",
             "solt-check-branch=solt_pre_commit.checks_branch_name:main",
+            "solt-test-changed-modules=solt_pre_commit.checks_test_changed_modules:main",
+            "solt-test-module=solt_pre_commit.odoo_test_runner:main",
         ]
     },
 )

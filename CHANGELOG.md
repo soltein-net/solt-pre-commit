@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-21
+
+### Added
+- `solt-test-changed-modules` hook (pre-push stage): runs Odoo tests for the
+  modules changed vs. the base branch, so a push is gated on real test
+  results, not just naming/lint.
+- `odoo_test_runner.py` (`solt-test-module` console script): the actual test
+  execution — scratch DB create/drop, `coverage run odoo-bin ... --test-tags`,
+  dedicated HTTP/gevent ports (so it doesn't conflict with a running
+  interactive dev server), filtered `--log-handler=:WARNING` output, and a
+  pass/fail banner. Centralized here instead of duplicated per consuming repo.
+  Paths resolve relative to the git superproject working tree when the
+  consuming repo is a submodule (e.g. a solt-* addon repo under a
+  soltein-suite super-repo).
+- New `.solt-hooks.yaml` keys: `test_odoo_bin`, `test_odoo_conf`,
+  `test_db_host`/`test_db_port`/`test_db_user`/`test_db_password`,
+  `test_http_port`/`test_gevent_port`, `test_harness_script` (escape hatch to
+  use a repo-provided script instead of the built-in runner).
+- `_detect_base_branch()` now also recognizes an Odoo version embedded in the
+  current branch name (e.g. `feature/17.0-x` -> `origin/17.0`), ahead of the
+  main/master/develop fallback - the actual convention for repos on a
+  branch-per-version model rather than a single trunk.
+
+### Fixed
+- `checks_odoo_module`: when no staged files match an Odoo module (e.g.
+  `pre-commit run --all-files` with nothing staged), skip cleanly instead of
+  falling back to validating the repo root itself as a module (which always
+  failed with a confusing "could not be loaded" error).
+- `OdooVersionDetector.normalize_version`: coerce non-string input (e.g. a
+  bare `17.0` in YAML, which parses as a float, not a string) instead of
+  crashing on `.lower()`.
+
 ## [1.0.1] - 2025-01-23
 
 ### Added
