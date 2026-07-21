@@ -17,8 +17,27 @@ odoo_version: auto
 # - full: Validate entire repository
 validation_scope: changed
 
-# Base branch for detecting changed files (auto-detected if not set)
+# Base branch for detecting changed files (auto-detected if not set: tries the
+# Odoo version embedded in the current branch name first, e.g. feature/17.0-x
+# -> origin/17.0, then main/master/develop, then HEAD~1)
 # base_branch: main
+
+# Odoo test-run settings (solt-test-changed-modules / solt-test-module), used
+# by the built-in runner - paths are relative to the git superproject working
+# tree when this repo is a submodule (e.g. a solt-* addon repo checked out
+# under a soltein-suite super-repo), otherwise this repo's own root.
+# test_odoo_bin: odoo/odoo-bin
+# test_odoo_conf: .devcontainer/dev_17/odoo.conf   # default: derived from odoo_version
+# test_db_host: localhost      # default: $DB_HOST or localhost
+# test_db_port: 5432           # default: $DB_PORT or 5432
+# test_db_user: odoo           # default: $DB_USER or odoo
+# test_db_password: odoo       # default: $DB_PASSWORD or odoo
+# test_http_port: 18069        # dedicated port, distinct from an interactive dev server
+# test_gevent_port: 18072
+
+# Use a repo-provided script instead of the built-in runner, for a test setup
+# unusual enough that the built-in runner's assumptions don't fit.
+# test_harness_script: scripts/test-module.sh
 
 # =============================================================================
 # DISABLED CHECKS
