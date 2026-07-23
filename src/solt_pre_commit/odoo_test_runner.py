@@ -99,10 +99,14 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
         subprocess.run(
             [
                 "dropdb",
-                "-h", config.test_db_host,
-                "-p", config.test_db_port,
-                "-U", config.test_db_user,
-                "--if-exists", scratch_db,
+                "-h",
+                config.test_db_host,
+                "-p",
+                config.test_db_port,
+                "-U",
+                config.test_db_user,
+                "--if-exists",
+                scratch_db,
             ],
             env=env,
             capture_output=True,
@@ -112,9 +116,12 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
     createdb = subprocess.run(
         [
             "createdb",
-            "-h", config.test_db_host,
-            "-p", config.test_db_port,
-            "-U", config.test_db_user,
+            "-h",
+            config.test_db_host,
+            "-p",
+            config.test_db_port,
+            "-U",
+            config.test_db_user,
             scratch_db,
         ],
         env=env,
@@ -134,9 +141,13 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
         # are already logged at WARNING/ERROR, so nothing evidentiary is lost, just the noise.
         proc = subprocess.Popen(
             [
-                "coverage", "run", str(odoo_bin),
-                "-c", str(odoo_conf),
-                "-d", scratch_db,
+                "coverage",
+                "run",
+                str(odoo_bin),
+                "-c",
+                str(odoo_conf),
+                "-d",
+                scratch_db,
                 f"--db_host={config.test_db_host}",
                 f"--db_port={config.test_db_port}",
                 f"--db_user={config.test_db_user}",
@@ -147,7 +158,8 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
                 "--log-handler=:WARNING",
                 f"--test-tags={test_tags}",
                 "--stop-after-init",
-                "-i", modules_arg,
+                "-i",
+                modules_arg,
             ],
             env=env,
             stdout=subprocess.PIPE,
@@ -199,8 +211,12 @@ def _report_coverage(modules: list, env_root: Path) -> None:
     print("\nCoverage:")
     try:
         subprocess.run(["coverage", "report", "-m", f"--include={include}"], cwd=str(env_root))
-        subprocess.run(["coverage", "xml", f"--include={include}", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True)
-        subprocess.run(["coverage", "html", f"--include={include}", "-d", "htmlcov"], cwd=str(env_root), capture_output=True)
+        subprocess.run(
+            ["coverage", "xml", f"--include={include}", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True
+        )
+        subprocess.run(
+            ["coverage", "html", f"--include={include}", "-d", "htmlcov"], cwd=str(env_root), capture_output=True
+        )
         print(f"HTML report: {env_root / 'htmlcov' / 'index.html'}")
         print("coverage.xml written -- VS Code's Coverage Gutters picks this up automatically.")
     except FileNotFoundError:

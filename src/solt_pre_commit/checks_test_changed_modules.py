@@ -63,7 +63,9 @@ def main():
         harness_path = env_root / harness_rel
         if not harness_path.exists():
             if not args.quiet:
-                print(f"[solt-test-changed-modules] test_harness_script set to {harness_rel}, but it doesn't exist there.")
+                print(
+                    f"[solt-test-changed-modules] test_harness_script set to {harness_rel}, but it doesn't exist there."
+                )
             sys.exit(1)
         result = subprocess.run([str(harness_path), ",".join(module_names)], cwd=str(env_root))
         sys.exit(result.returncode)
