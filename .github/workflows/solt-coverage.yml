@@ -39,28 +39,25 @@ on:
         required: false
         type: string
         default: '3.10'
-      gist-id:
-        description: 'Gist ID for badge storage (default: Soltein central gist)'
-        required: false
-        type: string
-        default: '147d543a086f6735d1ffa02172766e86'
-      badge-filename-prefix:
-        description: 'Prefix for badge filenames in gist (default: repository name)'
-        required: false
-        type: string
-        default: ''
     secrets:
       CHECKOUT_TOKEN:
         description: 'Token with read access to sibling-repos. Only needed when sibling-repos is set.'
         required: false
-      GIST_SECRET:
-        description: 'Token with write access to the badge gist.'
-        required: false
+    outputs:
+      test-result:
+        description: 'Test result: "0" (pass) or a nonzero exit code (fail)'
+        value: ${{ jobs.Coverage.outputs.test_result }}
+      coverage-pct:
+        description: 'Coverage percentage (integer, e.g. "40")'
+        value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
 jobs:
   Coverage:
     name: Run tests + coverage
     runs-on: ubuntu-latest
+    outputs:
+      test_result: ${{ steps.test.outputs.result }}
+      coverage_pct: ${{ steps.report.outputs.coverage_pct }}
     services:
       postgres:
         image: postgres:15
@@ -171,6 +168,7 @@ jobs:
           exit "$RESULT"
 
       - name: Coverage report
+        id: report
         if: always()
         run: |
           IFS=',' read -ra MODULE_ARR <<< "${{ inputs.modules }}"
@@ -188,6 +186,9 @@ jobs:
           coverage html --include="$INCLUDE" -d htmlcov
           coverage json --include="$INCLUDE" -o coverage.json
 
+          COV=$(python3 -c "import json; print(round(json.load(open('coverage.json'))['totals']['percent_covered']))" 2>/dev/null || echo "0")
+          echo "coverage_pct=$COV" >> "$GITHUB_OUTPUT"
+
       - name: Upload HTML coverage report
         if: always()
         uses: actions/upload-artifact@v4
@@ -195,40 +196,3 @@ jobs:
           name: coverage-html-${{ github.run_id }}
           path: htmlcov/
           retention-days: 30
-
-      - name: Update coverage + tests badges (Gist)
-        if: always()
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GIST_SECRET }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::GIST_SECRET not provided, skipping badge update"
-            exit 0
-          fi
-          PREFIX="${{ inputs.badge-filename-prefix }}"
-          if [ -z "$PREFIX" ]; then PREFIX="${{ github.event.repository.name }}"; fi
-          VERSION="${{ inputs.odoo-version }}"
-
-          COV=$(python3 -c "import json; print(round(json.load(open('coverage.json'))['totals']['percent_covered']))" 2>/dev/null || echo "0")
-          if [ "$COV" -ge 80 ]; then COV_COLOR="brightgreen";
-          elif [ "$COV" -ge 60 ]; then COV_COLOR="yellow";
-          elif [ "$COV" -ge 40 ]; then COV_COLOR="orange";
-          else COV_COLOR="red"; fi
-
-          TEST_RESULT="${{ steps.test.outputs.result }}"
-          if [ "$TEST_RESULT" = "0" ]; then TEST_MSG="passing"; TEST_COLOR="brightgreen";
-          else TEST_MSG="failing"; TEST_COLOR="red"; fi
-
-          COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "${COV}%" --arg c "$COV_COLOR" \
-            '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
-          TEST_CONTENT=$(jq -nc --arg l "tests (${VERSION})" --arg m "$TEST_MSG" --arg c "$TEST_COLOR" \
-            '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
-
-          jq -n \
-            --arg cf "${PREFIX}-${VERSION}-coverage.json" --arg cc "$COV_CONTENT" \
-            --arg tf "${PREFIX}-${VERSION}-tests.json" --arg tc "$TEST_CONTENT" \
-            '{files: {($cf): {content: $cc}, ($tf): {content: $tc}}}' | \
-          gh api --method PATCH "/gists/${{ inputs.gist-id }}" --input - \
-            && echo "Updated badges: coverage=${COV}%, tests=${TEST_MSG}" \
-            || echo "::warning::Could not update badges (non-fatal)"
