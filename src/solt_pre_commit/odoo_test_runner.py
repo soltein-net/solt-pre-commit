@@ -178,7 +178,33 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
         print(f"  (exit code {result} -- see output above for the failing test/traceback)")
     print("=" * 60)
 
+    _report_coverage(modules, env_root)
+
     return result
+
+
+def _report_coverage(modules: list, env_root: Path) -> None:
+    """Surface what `coverage run` just collected: a terminal summary right away,
+    plus coverage.xml/htmlcov so an editor extension (VS Code's Coverage Gutters
+    reads coverage.xml automatically) or a browser can show it. `*/<module>/*`
+    (not a bare `*<module>*`) because coverage's include/omit patterns follow
+    gitignore semantics: a pattern with no `/` matches only the file's basename,
+    not any substring of its path - a slash-free pattern here would silently
+    match nothing. The leading `*/` also covers both the super-repo's nested
+    addons/<repo>/<module> paths and a standalone addon repo checkout (module
+    at the repo root), since this same runner executes in both contexts.
+    Best-effort: a reporting hiccup here must never turn a passing test run red.
+    """
+    include = ",".join(f"*/{m}/*" for m in modules)
+    print("\nCoverage:")
+    try:
+        subprocess.run(["coverage", "report", "-m", f"--include={include}"], cwd=str(env_root))
+        subprocess.run(["coverage", "xml", f"--include={include}", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True)
+        subprocess.run(["coverage", "html", f"--include={include}", "-d", "htmlcov"], cwd=str(env_root), capture_output=True)
+        print(f"HTML report: {env_root / 'htmlcov' / 'index.html'}")
+        print("coverage.xml written -- VS Code's Coverage Gutters picks this up automatically.")
+    except FileNotFoundError:
+        print("[solt-test-module] `coverage` not on PATH, skipping report.", file=sys.stderr)
 
 
 def main():
