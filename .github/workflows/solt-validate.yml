@@ -51,6 +51,23 @@ on:
         required: false
         type: boolean
         default: false
+      gist-id:
+        description: 'Gist ID for badge storage (default: Soltein central gist). Only used if GIST_SECRET is provided.'
+        required: false
+        type: string
+        default: '147d543a086f6735d1ffa02172766e86'
+      badge-filename-prefix:
+        description: 'Prefix for badge filenames in gist (default: repository name)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      GIST_SECRET:
+        description: |
+          Token with write access to the badge gist. Optional - omit to skip
+          the Pylint-Odoo/Solt-Check/Ruff badge update (validation itself is
+          unaffected either way).
+        required: false
     outputs:
       validation-result:
         description: 'Validation result (success/failure)'
@@ -382,6 +399,54 @@ jobs:
           echo "missing_docstring=$MISSING_DOCSTRING" >> $GITHUB_OUTPUT
           echo "missing_string=$MISSING_STRING" >> $GITHUB_OUTPUT
           echo "missing_help=$MISSING_HELP" >> $GITHUB_OUTPUT
+
+      - name: Update check badges (Gist)
+        if: always() && steps.summary.outputs.is_empty_repo != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GIST_SECRET }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::GIST_SECRET not provided, skipping Pylint-Odoo/Solt-Check/Ruff badge update"
+            exit 0
+          fi
+          PREFIX="${{ inputs.badge-filename-prefix }}"
+          if [ -z "$PREFIX" ]; then PREFIX="${{ github.event.repository.name }}"; fi
+          VERSION="${{ steps.detect-version.outputs.odoo_version }}"
+
+          # "Soltein Validation" (the workflow-level status badge) bundles branch
+          # naming + solt-check-odoo + Ruff + Pylint-Odoo into one ambiguous
+          # passing/failing - these three are the same underlying data, exposed
+          # as separate, individually-labeled badges instead of one catch-all.
+          ERRORS="${{ steps.summary.outputs.errors }}"
+          PYLINT_COUNT="${{ steps.summary.outputs.pylint_changed }}"
+          RUFF_COUNT="${{ steps.summary.outputs.ruff_changed }}"
+          PYLINT_BLOCKING="${{ inputs.fail-on-warnings && inputs.pylint-blocking }}"
+          RUFF_BLOCKING="${{ inputs.fail-on-warnings && inputs.ruff-blocking }}"
+
+          badge_json() {
+            local label="$1" count="$2" blocking="$3"
+            local msg color plural=""
+            if [ "$count" != "1" ]; then plural="s"; fi
+            if [ "$count" -eq 0 ]; then msg="passing"; color="brightgreen";
+            elif [ "$blocking" = "true" ]; then msg="${count} issue${plural}"; color="red";
+            else msg="${count} issue${plural} (info)"; color="yellow"; fi
+            jq -nc --arg l "$label" --arg m "$msg" --arg c "$color" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}'
+          }
+
+          SOLT_CHECK_CONTENT=$(badge_json "solt-check (${VERSION})" "$ERRORS" "true")
+          PYLINT_CONTENT=$(badge_json "pylint-odoo (${VERSION})" "$PYLINT_COUNT" "$PYLINT_BLOCKING")
+          RUFF_CONTENT=$(badge_json "ruff (${VERSION})" "$RUFF_COUNT" "$RUFF_BLOCKING")
+
+          jq -n \
+            --arg sf "${PREFIX}-${VERSION}-solt-check.json" --arg sc "$SOLT_CHECK_CONTENT" \
+            --arg pf "${PREFIX}-${VERSION}-pylint.json" --arg pc "$PYLINT_CONTENT" \
+            --arg rf "${PREFIX}-${VERSION}-ruff.json" --arg rc "$RUFF_CONTENT" \
+            '{files: {($sf): {content: $sc}, ($pf): {content: $pc}, ($rf): {content: $rc}}}' | \
+          gh api --method PATCH "/gists/${{ inputs.gist-id }}" --input - \
+            && echo "Updated badges: solt-check=${ERRORS} errors, pylint=${PYLINT_COUNT}, ruff=${RUFF_COUNT}" \
+            || echo "::warning::Could not update check badges (non-fatal)"
 
       - name: Extract issues for PR comment
         id: extract-issues

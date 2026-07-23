@@ -1,0 +1,234 @@
+# =============================================================================
+# SOLT PRE-COMMIT - Test + Coverage (Reusable)
+# =============================================================================
+# Runs a repo's own Odoo module tests with coverage, in that repo's own CI -
+# proves "this module works against the dependency versions it declares",
+# not "this module integrates with everything a client might combine it with"
+# (that's the super-repo's job, testing whatever's actually pinned together).
+#
+# Odoo core (odoo/odoo) is checked out fresh each run since it's public. Any
+# OTHER Odoo module dependency this repo's manifest declares (e.g. solt-crm
+# depending on solt-base) has to be checked out as a sibling too, via
+# `sibling-repos` - and if that sibling repo is private, checkout-token needs
+# read access to it. actions/checkout can't loop over a dynamic list of repos,
+# so siblings are cloned with plain `git clone` instead.
+# =============================================================================
+name: Coverage (test) - Reusable
+
+on:
+  workflow_call:
+    inputs:
+      modules:
+        description: 'Comma-separated Odoo module names to test (e.g. "solt_crm")'
+        required: true
+        type: string
+      sibling-repos:
+        description: |
+          Newline-separated additional module repos this depends on, each
+          "owner/repo@ref:path" (e.g. "soltein-net/solt-base@17.0:solt-base").
+          Leave empty if this repo's modules only depend on Odoo core.
+        required: false
+        type: string
+        default: ''
+      odoo-version:
+        description: 'Odoo core branch to check out (also used as the badge version label)'
+        required: false
+        type: string
+        default: '17.0'
+      python-version:
+        required: false
+        type: string
+        default: '3.10'
+      gist-id:
+        description: 'Gist ID for badge storage (default: Soltein central gist)'
+        required: false
+        type: string
+        default: '147d543a086f6735d1ffa02172766e86'
+      badge-filename-prefix:
+        description: 'Prefix for badge filenames in gist (default: repository name)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      CHECKOUT_TOKEN:
+        description: 'Token with read access to sibling-repos. Only needed when sibling-repos is set.'
+        required: false
+      GIST_SECRET:
+        description: 'Token with write access to the badge gist.'
+        required: false
+
+jobs:
+  Coverage:
+    name: Run tests + coverage
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: odoo
+          POSTGRES_PASSWORD: odoo
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          path: repo
+          fetch-depth: 1
+
+      - name: Checkout Odoo core (public)
+        uses: actions/checkout@v4
+        with:
+          repository: odoo/odoo
+          ref: ${{ inputs.odoo-version }}
+          path: odoo
+          fetch-depth: 1
+
+      - name: Checkout sibling repos (declared module dependencies)
+        if: inputs.sibling-repos != ''
+        env:
+          CHECKOUT_TOKEN: ${{ secrets.CHECKOUT_TOKEN }}
+        run: |
+          if [ -z "$CHECKOUT_TOKEN" ]; then
+            echo "::error::sibling-repos is set but no CHECKOUT_TOKEN secret was provided - cannot clone private dependency repos"
+            exit 1
+          fi
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            repo_ref="${line%%:*}"
+            path="${line##*:}"
+            repo="${repo_ref%%@*}"
+            ref="${repo_ref##*@}"
+            echo "Cloning $repo@$ref into $path"
+            git clone --depth 1 --branch "$ref" "https://x-access-token:${CHECKOUT_TOKEN}@github.com/${repo}.git" "$path"
+          done <<< "${{ inputs.sibling-repos }}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: 'pip'
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3-dev libpq-dev postgresql-client \
+            libxml2-dev libxslt1-dev libldap2-dev libsasl2-dev \
+            libssl-dev libffi-dev zlib1g-dev libjpeg-dev
+
+      - name: Install Odoo + coverage
+        run: |
+          pip install --upgrade pip
+          pip install -r odoo/requirements.txt
+          pip install coverage
+
+      - name: Build addons-path
+        id: addons_path
+        run: |
+          PATH_LIST="$GITHUB_WORKSPACE/odoo/odoo/addons,$GITHUB_WORKSPACE/odoo/addons,$GITHUB_WORKSPACE/repo"
+          if [ -n "${{ inputs.sibling-repos }}" ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              path="${line##*:}"
+              PATH_LIST="$PATH_LIST,$GITHUB_WORKSPACE/$path"
+            done <<< "${{ inputs.sibling-repos }}"
+          fi
+          echo "value=$PATH_LIST" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests with coverage
+        id: test
+        env:
+          PGPASSWORD: odoo
+          ADDONS_PATH: ${{ steps.addons_path.outputs.value }}
+        run: |
+          IFS=',' read -ra MODULE_ARR <<< "${{ inputs.modules }}"
+          TEST_TAGS=""
+          for m in "${MODULE_ARR[@]}"; do TEST_TAGS="${TEST_TAGS}/${m},"; done
+          TEST_TAGS="${TEST_TAGS%,}"
+
+          createdb -h localhost -p 5432 -U odoo ci_coverage
+
+          set +e
+          coverage run "$GITHUB_WORKSPACE/odoo/odoo-bin" \
+            --addons-path="$ADDONS_PATH" \
+            -d ci_coverage \
+            --db_host=localhost --db_port=5432 --db_user=odoo --db_password=odoo \
+            --http-port=8069 --gevent-port=8072 \
+            --log-handler=:WARNING \
+            --test-tags="$TEST_TAGS" --stop-after-init \
+            -i "${{ inputs.modules }}" 2>&1 | tee test_output.txt
+          RESULT=${PIPESTATUS[0]}
+          set -e
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          exit "$RESULT"
+
+      - name: Coverage report
+        if: always()
+        run: |
+          IFS=',' read -ra MODULE_ARR <<< "${{ inputs.modules }}"
+          INCLUDE=""
+          for m in "${MODULE_ARR[@]}"; do INCLUDE="${INCLUDE}*/${m}/*,"; done
+          INCLUDE="${INCLUDE%,}"
+          coverage report --include="$INCLUDE" | tee coverage_report.txt
+          {
+            echo "## Coverage Report (${{ inputs.modules }})"
+            echo ""
+            echo '```'
+            cat coverage_report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          coverage html --include="$INCLUDE" -d htmlcov
+          coverage json --include="$INCLUDE" -o coverage.json
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-${{ github.run_id }}
+          path: htmlcov/
+          retention-days: 30
+
+      - name: Update coverage + tests badges (Gist)
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GIST_SECRET }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::GIST_SECRET not provided, skipping badge update"
+            exit 0
+          fi
+          PREFIX="${{ inputs.badge-filename-prefix }}"
+          if [ -z "$PREFIX" ]; then PREFIX="${{ github.event.repository.name }}"; fi
+          VERSION="${{ inputs.odoo-version }}"
+
+          COV=$(python3 -c "import json; print(round(json.load(open('coverage.json'))['totals']['percent_covered']))" 2>/dev/null || echo "0")
+          if [ "$COV" -ge 80 ]; then COV_COLOR="brightgreen";
+          elif [ "$COV" -ge 60 ]; then COV_COLOR="yellow";
+          elif [ "$COV" -ge 40 ]; then COV_COLOR="orange";
+          else COV_COLOR="red"; fi
+
+          TEST_RESULT="${{ steps.test.outputs.result }}"
+          if [ "$TEST_RESULT" = "0" ]; then TEST_MSG="passing"; TEST_COLOR="brightgreen";
+          else TEST_MSG="failing"; TEST_COLOR="red"; fi
+
+          COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "${COV}%" --arg c "$COV_COLOR" \
+            '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
+          TEST_CONTENT=$(jq -nc --arg l "tests (${VERSION})" --arg m "$TEST_MSG" --arg c "$TEST_COLOR" \
+            '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
+
+          jq -n \
+            --arg cf "${PREFIX}-${VERSION}-coverage.json" --arg cc "$COV_CONTENT" \
+            --arg tf "${PREFIX}-${VERSION}-tests.json" --arg tc "$TEST_CONTENT" \
+            '{files: {($cf): {content: $cc}, ($tf): {content: $tc}}}' | \
+          gh api --method PATCH "/gists/${{ inputs.gist-id }}" --input - \
+            && echo "Updated badges: coverage=${COV}%, tests=${TEST_MSG}" \
+            || echo "::warning::Could not update badges (non-fatal)"
