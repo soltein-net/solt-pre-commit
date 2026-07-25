@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `github_pr.py`: checks whether the current branch has an open GitHub PR
+  (via `gh` CLI, falling back to `GITHUB_TOKEN`/`GH_TOKEN` + the REST API).
+- `solt-test-changed-modules` now only runs when the current branch has an
+  open PR - a push to a branch with no PR yet is exempt, per
+  soltein/docs/pipeline-strategy.md's "Pipeline at a glance" (the Test tier
+  fires on "PR opened/updated", not every push, including this local-Docker
+  instantiation of it). If PR state can't be determined at all, it fails open
+  and runs the tests rather than silently skipping. New `.solt-hooks.yaml`
+  key: `test_require_open_pr` (default `true`; set `false` for the old
+  unconditional-on-push behavior).
+
 ## [1.1.0] - 2026-07-21
 
 ### Added

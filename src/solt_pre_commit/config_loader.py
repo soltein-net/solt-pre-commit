@@ -741,6 +741,11 @@ class SoltConfig:
         # script instead of using the built-in runner (odoo_test_runner.py) - for repos with
         # a test setup unusual enough that the built-in runner's assumptions don't fit.
         self.test_harness_script: str | None = self.config.get("test_harness_script")
+        # Gate the pre-push test run on an open PR existing for the current branch
+        # (docs/pipeline-strategy.md: the Test tier fires on "PR opened/updated", not
+        # every push - including this local instantiation of it). Default True; set
+        # False to always run on push regardless of PR state (old behavior).
+        self.test_require_open_pr: bool = bool(self.config.get("test_require_open_pr", True))
 
         # Changed files detector (lazy init)
         self._changed_detector: ChangedFilesDetector | None = None

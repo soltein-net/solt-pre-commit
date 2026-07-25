@@ -6,9 +6,9 @@
 [![Odoo 17.0-19.0](https://img.shields.io/badge/odoo-17.0--19.0-purple.svg)](https://www.odoo.com/)
 [![License: LGPL-3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-Custom pre-commit hooks for Odoo module validation with comprehensive documentation coverage analysis. Catches errors and runtime warnings **before** starting the server.
+Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches errors and runtime warnings before they reach production.** Blocks non-test-passing code at the pre-push stage.
 
-**Supports Odoo 17.0, 18.0, and 19.0** with automatic version detection.
+**Supports Odoo 17.0, 18.0, and 19.0** with automatic version detection and module-aware testing.
 
 ---
 
@@ -19,85 +19,285 @@ Custom pre-commit hooks for Odoo module validation with comprehensive documentat
 | 17.0 | 3.10+ | ✅ Fully Supported |
 | 18.0 | 3.10+ | ✅ Fully Supported |
 | 19.0 | 3.11+ | ✅ Fully Supported |
+| 20.0+ | 3.12+ | ✅ Fully Supported |
 
 ---
 
 ## 🚀 Quick Start
 
-### For New Repositories
+### Automatic Setup (Recommended)
 
 ```bash
-# Clone solt-pre-commit
-git clone https://github.com/soltein-net/solt-pre-commit.git
+# Setup your Odoo repository (auto-detects modules, dependencies, Odoo version)
+python solt-pre-commit/scripts/setup-repo.py /path/to/your-odoo-repo
 
-# Setup your Odoo repository (auto-detects version)
-python solt-pre-commit/setup-repo.py /path/to/your-odoo-repo
-
-# Or specify version explicitly
-python solt-pre-commit/setup-repo.py /path/to/your-odoo-repo --odoo-version 18.0
-
-# Batch setup multiple repos
-python solt-pre-commit/setup-repo.py --batch repos.txt
-
-# Done! The script creates all necessary files
+# Generates:
+# - .github/workflows/solt-validate.yml (auto-filled with detected modules)
+# - README.md or injects badges into existing README
+# - .pre-commit-config.yaml, .solt-hooks.yaml, pyproject.toml
+# - Installs pre-commit hooks
 ```
 
-### For Existing Repositories
+### Batch Setup
 
-Add to your `.pre-commit-config.yaml`:
+```bash
+# Create repos.txt with one repo per line
+echo /path/to/solt-crm >> repos.txt
+echo /path/to/solt-base >> repos.txt
+
+# Setup all at once
+python solt-pre-commit/scripts/setup-repo.py --batch repos.txt
+```
+
+### Update Existing Repos
+
+```bash
+# Update version pin only
+python solt-pre-commit/scripts/setup-repo.py --update-only --batch repos.txt
+
+# Regenerate workflows based on current modules
+python solt-pre-commit/scripts/setup-repo.py --update-only --regenerate /path/to/repo
+
+# Inject badges into existing README
+python solt-pre-commit/scripts/setup-repo.py --badge-only /path/to/repo
+```
+
+### Manual Setup (For Existing Repos)
+
+If you prefer to add solt-pre-commit to an existing `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.0.1  # Supports Odoo 17.0, 18.0, 19.0
+    rev: v1.1.0  # Supports Odoo 17.0, 18.0, 19.0, 20.0+
     hooks:
       - id: solt-check-branch
       - id: solt-check-odoo
 ```
 
-Install and run:
+---
+
+## ✨ Key Features
+
+### Pre-Commit Validation (Blocks Commits)
+
+| Check | Description | Stage |
+|-------|-------------|-------|
+| **Branch Names** | Enforces naming conventions (must include Odoo version) | pre-commit |
+| **Odoo Runtime Warnings** | Detects issues that cause Odoo warnings | pre-commit |
+| **XML Validations** | Syntax, duplicate IDs, deprecated attributes | pre-commit |
+| **Python Quality** | Docstrings, field attributes, decorators | pre-commit |
+
+### Pre-Push Testing (Blocks Pushes)
+
+| Check | Description | Stage |
+|-------|-------------|-------|
+| **Module Tests** | Runs tests for changed modules (blocks if tests fail) | pre-push |
+| **Cross-Repo Deps** | Checkouts & tests sibling repos (auto-detected) | pre-push |
+| **Coverage Report** | Generates code coverage metrics | pre-push |
+
+### CI/CD Workflows (GitHub Actions)
+
+| Job | Purpose | When |
+|-----|---------|------|
+| **Lint** | Code quality checks on PR | Every PR |
+| **Test** | Runs Odoo tests with coverage | Every PR |
+| **Badges** | Reports results to Gist badges | Every PR |
+| **Docstrings** | Weekly docstring coverage update | Mondays |
+
+---
+
+## 🔧 How It Works
+
+### Automatic Module & Dependency Detection
+
+`setup-repo.py` scans your repository for `__manifest__.py` files and:
+- Detects all Odoo modules
+- Parses `depends:` to find external repos (e.g., `solt_base` → `soltein-net/solt-base@17.0`)
+- Detects Odoo version from manifest or branch name
+- Maps to correct Python version
+
+### Branch Handling for Sibling Repos (Per-Module PR/Branch CI)
+
+**Scope**: this only applies to a module repo's own CI (e.g. `solt-crm`'s `solt-validate.yml`, triggered on a PR against `solt-crm`). It answers "does my branch work against sibling repos' version branch" — not "does this exact release work".
 
 ```bash
-pip install pre-commit
-pre-commit install
-pre-commit run --all-files
+# Feature/hotfix branch (local to this repo)
+git checkout feature/17.0-first-test  # solt-crm
+# Sibling repos use: soltein-net/solt-base@17.0 (version extracted)
+
+# Version branch
+git checkout 17.0  # solt-crm
+# Sibling repos use: soltein-net/solt-base@17.0
+```
+
+Sibling repos always use the **version branch** (the latest of `@17.0`, `@18.0`, etc.) — never a tag, never an attempt to reconstruct "what my feature branch was developed against". That's the industry-standard approach for cross-repo PR testing: test against the current target branch of your dependencies, because that's what's true after merge.
+
+**This does NOT apply to release tags** (`17.0-2026.07.17-00`). Those are created only on the `soltein` super-repo (see `scripts/cut-release.sh`) and never exist in individual module repos, so a module's own CI never encounters one. Release tags also don't correspond to any one branch: a super-repo release pins each submodule to whatever commit SHA it had checked out at the time — which can be an **unmerged hotfix commit**, not anything reachable from that module's version branch. Substituting the version branch for a release tag would silently test different code than what was actually released.
+
+**Testing "exactly what a release pins" is a separate, super-repo-level concern** — not something `sibling-repos` can solve. The correct mechanism: check out the super-repo at the release tag with `submodules: recursive` (or `git submodule update --init --recursive` after `git checkout <tag>`). That alone reproduces the exact pinned commit of every submodule — no branch/tag guessing required. See `docs/RELEASE-TAG-STRATEGY.md` for the proposed super-repo regression workflow.
+
+### Generated Workflow Files
+
+The `.github/workflows/solt-validate.yml` is **auto-generated** with:
+```yaml
+Test:
+  uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@v1.1.0
+  with:
+    modules: 'solt_crm solt_crm_services solt_crm_project ...'  # auto-detected
+    sibling-repos: 'soltein-net/solt-base@17.0:solt-base ...'   # auto-detected
+    odoo-version: '17.0'
+    python-version: '3.10'  # pinned to Odoo's minimum supported version - see note below
+```
+
+**Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.10.x`). It is **not** a "minimum version" check — CI will not test on 3.11 or 3.12 unless a matrix is added. We deliberately pin to Odoo's documented *minimum* supported Python (3.10 for 17.0-19.0, 3.12 for 20.0+) so CI catches any accidental use of syntax/stdlib features newer than what's guaranteed to be available in production.
+
+
+### Pre-Push Test Blocking
+
+When you push, the pre-push hook runs tests. **If tests fail, the push is blocked:**
+
+```bash
+$ git push
+Running Odoo tests for changed modules...
+FAIL: solt_crm
+Error: AssertionError in test_lead_creation
+
+❌ Pre-push hook failed - tests must pass
+Push blocked. Fix tests and try again.
 ```
 
 ---
 
-## ✨ Features
+## ⚙️ Configuration
 
-### Comprehensive Validation
-
-| Check Type | Description | Blocks PR |
-|------------|-------------|-----------|
-| **Branch Names** | Enforces naming conventions | ✅ |
-| **Odoo Runtime Warnings** | Detects issues before server start | ✅ |
-| **XML Validations** | Syntax, duplicates, deprecations | ✅ |
-| **Python Quality** | Docstrings, field attributes | Configurable |
-| **CSV/PO Files** | Duplicate IDs, translation errors | ✅ |
-| **Documentation Coverage** | Detailed reports with trends | ℹ️ Informative |
-
-### Configuration
+### Odoo Version & Scope
 
 ```yaml
 # .solt-hooks.yaml
-validation_scope: changed  # or 'full'
+odoo_version: auto           # or '17.0', '18.0', '19.0'
+validation_scope: changed    # or 'full' to validate everything
+```
 
+### Severity Levels
+
+```yaml
+# .solt-hooks.yaml
 severity:
-  python_field_missing_string: warning
-  python_method_missing_docstring: warning
+  python_field_missing_string: warning      # Non-blocking
+  python_method_missing_docstring: info     # Informational
+  python_duplicate_field_label: error       # Blocking
+```
+
+### Skip Lists
+
+```yaml
+# .solt-hooks.yaml
+skip_string_fields:
+  - active
+  - name
+  - sequence
 
 skip_docstring_methods:
   - create
   - write
+  - unlink
 ```
 
-### 🔄 Centralized Workflows
+### Cross-Repo Testing
 
-Use our reusable GitHub Actions workflow:
+If your modules depend on external repos, configure secrets:
 
-```yaml
+```bash
+# Set in GitHub repository settings
+SOLT_CROSS_REPO_TOKEN  # PAT for accessing sibling repos
+GIST_SECRET            # PAT for updating badges gist
+```
+
+---
+
+## 🎯 Available Hooks
+
+| Hook ID | Purpose | Files |
+|---------|---------|-------|
+| `solt-check-branch` | Validate branch naming | (all) |
+| `solt-check-odoo` | Full module validation | Python, XML, CSV |
+| `solt-check-xml` | XML-only validation | XML |
+| `solt-check-python` | Python-only validation | Python |
+
+---
+
+## 📚 Pre-Push Test Blocking Explained
+
+The `solt-test-changed-modules` hook at the **pre-push stage**:
+
+1. Detects which modules changed vs. base branch
+2. Creates a **scratch database** (temporary)
+3. Installs the Odoo modules
+4. **Runs tests** for those modules (via `pytest` or Odoo's test suite)
+5. If **any test fails** → **push is blocked** ❌
+6. Drops the scratch database
+7. Reports coverage metrics to badges
+
+This ensures **only tested code reaches the repository.**
+
+---
+
+## 🐛 Debugging Failed Pre-Push Tests
+
+If a push fails:
+
+```bash
+# See which modules changed
+git diff --name-only origin/17.0...HEAD
+
+# Run tests manually (same way pre-push does)
+python scripts/setup-repo.py /path/to/repo  # setup if needed
+
+# Run specific module tests
+solt-test-module solt_crm
+
+# Check test output in .git/hooks/pre-push logs
+cat .git/hooks/pre-push
+```
+
+---
+
+## 📖 Documentation Checks Detected
+
+### Python Issues
+- Duplicate field labels
+- Missing field.string attributes
+- Missing method docstrings
+- Inconsistent compute_sudo usage
+- Tracking without mail_thread inheritance
+
+### XML Issues
+- Parse errors & invalid XML
+- Duplicate record IDs
+- Deprecated attributes (active_id, etc.)
+- Missing accessibility attributes (role on alerts)
+
+### CSV Issues
+- Syntax errors
+- Duplicate record IDs
+
+### PO/Translation Issues
+- Syntax errors
+- Duplicate message definitions
+- Printf/format string errors
+
+---
+
+## 🤝 Contributing
+
+Issues, suggestions, or improvements? Open an issue on GitHub.
+
+---
+
+## 📄 License
+
+LGPL-3 or later. See LICENSE file.
 # .github/workflows/validate.yml
 jobs:
   validate:
@@ -111,14 +311,14 @@ jobs:
 
 ## 🪝 Available Hooks
 
-| Hook ID | Description | Use Case |
-|---------|-------------|----------|
-| `solt-check-branch` | Branch naming validation | All repos |
-| `solt-check-odoo` | Full module validation | Primary hook |
-| `solt-check-xml` | XML files only | Targeted checks |
-| `solt-check-csv` | CSV files only | Data validation |
-| `solt-check-po` | Translation files only | i18n checks |
-| `solt-check-python` | Python files only | Code quality |
+| Hook ID | Description |
+|---------|-------------|
+| `solt-check-branch` | Branch naming validation (pre-commit + pre-push stages) |
+| `solt-check-odoo` | Full module validation (Python, XML, CSV, PO files) |
+| `solt-check-xml` | XML-only validation |
+| `solt-check-python` | Python-only validation |
+
+**Note**: `solt-test-changed-modules` runs at pre-push stage only (not listed in hooks, auto-configured).
 
 ---
 

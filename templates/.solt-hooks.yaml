@@ -39,6 +39,12 @@ validation_scope: changed
 # unusual enough that the built-in runner's assumptions don't fit.
 # test_harness_script: scripts/test-module.sh
 
+# Only run the pre-push test when the current branch has an open PR (checked
+# via `gh` CLI, falling back to GITHUB_TOKEN/GH_TOKEN + the REST API) - a push
+# to a branch with no PR yet is exempt. Set to false to always run on push
+# regardless of PR state.
+# test_require_open_pr: true
+
 # =============================================================================
 # DISABLED CHECKS
 # =============================================================================

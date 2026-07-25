@@ -54,7 +54,7 @@ else:
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
 # Current version of solt-pre-commit
-CURRENT_VERSION = "v1.0.1"
+CURRENT_VERSION = "v1.1.0"
 SOLT_REPO_URL = "https://github.com/soltein-net/solt-pre-commit"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -526,6 +526,37 @@ def setup_single_repo(
         if replacements:
             update_file_content(solt_hooks_file, replacements, dry_run)
 
+    # NEW in v1.1.0: Auto-detect modules and generate workflow
+    if not quiet:
+        print_step("🔍", "Detecting modules and dependencies...")
+
+    detected_modules = detect_modules(target)
+    detected_odoo_version = (
+        odoo_version if odoo_version != "auto" else detect_odoo_version_from_branch(repo_path=target)
+    )
+    detected_sibling_repos = detect_sibling_repos(detected_modules, target)  # Pass repo_path, not version
+
+    if not quiet and detected_modules:
+        print_step("✅", f"Found {len(detected_modules)} module(s): {', '.join(sorted(detected_modules.keys()))}")
+        if detected_sibling_repos:
+            print_step("📦", f"External repos: {len(detected_sibling_repos)}")
+
+    # Generate workflow file
+    if generate_workflow_file(target, detected_modules, detected_odoo_version, detected_sibling_repos, dry_run):
+        copied += 1
+    else:
+        failed += 1
+
+    # Inject/create badges in README
+    github_org = "soltein-net"  # TODO: detect from git remote
+    inject_badges_to_readme(
+        target,
+        target.name,
+        github_org=github_org,
+        odoo_version=detected_odoo_version,
+        dry_run=dry_run,
+    )
+
     # Install hooks
     install_precommit_hooks(target, dry_run)
 
@@ -626,6 +657,367 @@ def autoupdate_batch(repos_file: str, dry_run: bool = False) -> None:
     if failed > 0:
         print(f"❌ Failed: {failed} repositories")
     print(f"{'=' * 60}\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODULE & DEPENDENCY DETECTION (NEW in v1.1.0)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def detect_modules(repo_path: Path) -> dict[str, dict]:
+    """Scan repository for Odoo modules and return {module_name: info}."""
+    modules = {}
+    repo_path = Path(repo_path).resolve()
+
+    for manifest_file in repo_path.rglob("__manifest__.py"):
+        module_dir = manifest_file.parent
+        module_name = module_dir.name
+
+        if module_name.startswith(".") or module_name in ("__pycache__",):
+            continue
+
+        try:
+            import ast
+
+            manifest_data = ast.literal_eval(manifest_file.read_text())
+            if isinstance(manifest_data, dict):
+                modules[module_name] = {
+                    "path": module_dir,
+                    "version": manifest_data.get("version"),
+                    "depends": manifest_data.get("depends", []),
+                    "summary": manifest_data.get("summary", module_name),
+                }
+        except (SyntaxError, ValueError):
+            pass
+
+    return modules
+
+
+def detect_odoo_version_from_branch(branch_name: str | None = None, repo_path: Path | None = None) -> str:
+    """Detect Odoo version from branch name or manifest."""
+    if branch_name:
+        match = re.search(r"(\d+\.\d+)", branch_name)
+        if match:
+            return match.group(1)
+
+    if repo_path:
+        modules = detect_modules(repo_path)
+        for module_info in modules.values():
+            version_str = module_info.get("version", "")
+            match = re.search(r"(\d+\.\d+)", version_str)
+            if match:
+                return match.group(1)
+
+    return "17.0"
+
+
+def get_python_version(odoo_version: str) -> str:
+    """Map Odoo version to MINIMUM Python version (per official Odoo requirements).
+
+    Reference: https://www.odoo.com/documentation
+    - Odoo 17.0, 18.0, 19.0: Require minimum Python 3.10
+    - Odoo 20.0+: Require minimum Python 3.12
+    """
+    mapping = {
+        "17.0": "3.10",  # Odoo 17.0 minimum Python 3.10
+        "18.0": "3.10",  # Odoo 18.0 minimum Python 3.10
+        "19.0": "3.10",  # Odoo 19.0 minimum Python 3.10
+        "20.0": "3.12",  # Odoo 20.0 minimum Python 3.12
+    }
+    return mapping.get(odoo_version, "3.10")
+
+
+def get_git_branch(repo_path: Path) -> str:
+    """Get current git branch of repo, for use as the sibling-repos ref.
+
+    Returns:
+    - Feature/hotfix branches (feature/17.0-..., hotfix/17.0-...) → extract version (17.0)
+    - Version branches (17.0, 18.0) → return exact branch
+    - Fallback → extract from manifest
+
+    Scope note: this is ONLY for per-module PR/branch CI (this repo's own
+    solt-validate.yml, testing "does my branch work against sibling repos'
+    version branch"). It intentionally does NOT special-case release tags:
+    - Release tags (17.0-2026.07.17-00) are created only on the `soltein`
+      super-repo, never on individual module repos - so `git describe --tags`
+      here will never match one; there is nothing to special-case.
+    - Even if it could match, falling back to the version branch would be
+      WRONG: a super-repo release pins each submodule to whatever commit SHA
+      it happened to have checked out (e.g. an unmerged hotfix branch), not
+      necessarily anything reachable from that module's version branch.
+    Release/regression testing of "exactly what a release pins" is a
+    different problem, solved at the super-repo level (checkout the release
+    tag with `submodules: recursive` - that alone reproduces the exact pinned
+    commits, no branch/tag guessing needed). See docs/RELEASE-TAG-STRATEGY.md.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+
+            # If on a feature/release branch, extract version
+            # Examples: 'feature/17.0-first-test' → '17.0', 'hotfix/17.0-xyz' → '17.0'
+            if "/" in branch:
+                match = re.search(r"(\d+\.\d+)", branch)
+                if match:
+                    return match.group(1)
+
+            # Otherwise use exact branch name ('17.0', '18.0', etc.)
+            return branch
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+
+    # Fallback: extract from manifest
+    return detect_odoo_version_from_branch(repo_path)
+
+
+def generate_module_table(modules: dict[str, dict]) -> str:
+    """Generate markdown table rows for modules."""
+    if not modules:
+        return "| (none detected) | – |"
+
+    rows = []
+    for name in sorted(modules.keys()):
+        summary = modules[name].get("summary", name)
+        rows.append(f"| `{name}` | {summary} |")
+
+    return "\n".join(rows)
+
+
+def generate_dependencies_string(modules: dict[str, dict]) -> str:
+    """Extract external dependencies from modules."""
+    odoo_core = {
+        "base",
+        "crm",
+        "sale",
+        "purchase",
+        "account",
+        "stock",
+        "hr",
+        "web",
+        "website",
+        "project",
+        "mail",
+        "calendar",
+        "digest",
+        "survey",
+        "sale_crm",
+        "web_editor",
+    }
+
+    all_deps = set()
+    for module_info in modules.values():
+        all_deps.update(module_info.get("depends", []))
+
+    # Filter out core Odoo and local modules
+    external = [d for d in sorted(all_deps) if d not in odoo_core and d not in modules]
+    return ", ".join(external) if external else "base"
+
+
+def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]:
+    """Detect external repos needed from module dependencies.
+
+    Args:
+        modules: detected module dict
+        repo_path: path to the repo being set up (to extract git branch/tag)
+
+    Returns list of sibling-repo strings for workflow input, e.g.:
+        ['soltein-net/solt-base@17.0:solt-base', 'soltein-net/solt-base@17.0-2026.07.17-00:solt-base']
+
+    CRITICAL: Uses the SAME branch/tag as the target repo, not a hardcoded version.
+    Example: if repo is on tag '17.0-2026.07.17-00', sibling repos will use that tag too.
+    """
+    all_deps = set()
+    for module_info in modules.values():
+        all_deps.update(module_info.get("depends", []))
+
+    # Map known soltein external deps (future: use GitHub API)
+    known_mappings = {
+        "solt_base": "soltein-net/solt-base",
+        "solt_base_product": "soltein-net/solt-base-product",
+        "solt_account": "soltein-net/solt-account",
+        "solt_crm": "soltein-net/solt-crm",
+        "solt_stock": "soltein-net/solt-stock",
+        "solt_sale": "soltein-net/solt-sale",
+        "solt_purchase": "soltein-net/solt-purchase",
+        "solt_web": "soltein-net/solt-web",
+        "solt_project": "soltein-net/solt-project",
+        "solt_hr": "soltein-net/solt-hr",
+    }
+
+    # Extract the git branch/tag from the target repo (CRITICAL: not hardcoded)
+    target_branch = get_git_branch(repo_path)
+
+    sibling_repos = []
+    for dep in sorted(all_deps):
+        if dep in known_mappings:
+            repo = known_mappings[dep]
+            repo_name = repo.split("/")[1]
+            # Use the SAME branch/tag as target repo, not a fixed version
+            sibling_repos.append(f"{repo}@{target_branch}:{repo_name}")
+
+    return sibling_repos
+
+
+def generate_workflow_file(
+    repo_path: Path,
+    modules: dict[str, dict],
+    odoo_version: str,
+    sibling_repos: list[str],
+    dry_run: bool = False,
+) -> bool:
+    """Generate .github/workflows/solt-validate.yml from template."""
+    workflow_dest = repo_path / ".github" / "workflows" / "solt-validate.yml"
+    workflow_template = TEMPLATES_DIR / "github-workflows" / "solt-validate.yml"
+
+    if not workflow_template.exists():
+        print_step("⚠️ ", f"Template not found: {workflow_template}")
+        return False
+
+    try:
+        content = workflow_template.read_text()
+
+        # Replace placeholders
+        python_version = get_python_version(odoo_version)
+        module_names = " ".join(sorted(modules.keys()))
+
+        replacements = {
+            "{{ MODULES }}": module_names or "unknown",
+            "{{ SIBLING_REPOS }}": " ".join(sibling_repos) if sibling_repos else "",
+            "{{ ODOO_VERSION }}": odoo_version,
+            "{{ PYTHON_VERSION }}": python_version,
+        }
+
+        for placeholder, value in replacements.items():
+            content = content.replace(placeholder, value)
+
+        if dry_run:
+            print_step("📄", f"Would create: {workflow_dest}")
+            return True
+
+        workflow_dest.parent.mkdir(parents=True, exist_ok=True)
+        workflow_dest.write_text(content)
+        print_step("✅", f"Generated: {workflow_dest}")
+        return True
+
+    except Exception as e:
+        print_step("❌", f"Error generating workflow: {e}")
+        return False
+
+
+def inject_badges_to_readme(
+    repo_path: Path,
+    repo_name: str,
+    github_org: str = "soltein-net",
+    gist_owner: str = "SolteinCorp",
+    gist_id: str = "147d543a086f6735d1ffa02172766e86",
+    odoo_version: str = "17.0",
+    dry_run: bool = False,
+) -> bool:
+    """Inject badges into README or create minimal README if none exists."""
+    readme_path = repo_path / "README.md"
+    badges_template = TEMPLATES_DIR / "BADGES-TEMPLATE.md"
+
+    if not badges_template.exists():
+        print_step("⚠️ ", f"Badge template not found: {badges_template}")
+        return False
+
+    try:
+        badges_content = badges_template.read_text()
+
+        # Replace badge placeholders
+        badge_replacements = {
+            "{{ GITHUB_ORG }}": github_org,
+            "{{ REPO_NAME }}": repo_name,
+            "{{ GIST_OWNER }}": gist_owner,
+            "{{ GIST_ID }}": gist_id,
+            "{{ ODOO_VERSION }}": odoo_version,
+        }
+
+        for placeholder, value in badge_replacements.items():
+            badges_content = badges_content.replace(placeholder, value)
+
+        if readme_path.exists():
+            # Inject badges into existing README
+            content = readme_path.read_text()
+
+            # Check if badges already exist
+            if "SOLTEIN_BADGES_START" in content:
+                # Replace existing badges
+                import re
+
+                content = re.sub(
+                    r"<!-- SOLTEIN_BADGES_START -->.*?<!-- SOLTEIN_BADGES_END -->",
+                    badges_content,
+                    content,
+                    flags=re.DOTALL,
+                )
+            else:
+                # Prepend badges to top
+                content = badges_content + "\n\n" + content
+
+            if dry_run:
+                print_step("📄", f"Would update: {readme_path}")
+                return True
+
+            readme_path.write_text(content)
+            print_step("✅", f"Updated: {readme_path}")
+        else:
+            # Create minimal README from template
+            minimal_template = TEMPLATES_DIR / "README-template-minimal.md"
+            if minimal_template.exists():
+                content = minimal_template.read_text()
+
+                # Fill placeholders
+                modules = detect_modules(repo_path)
+                module_table = generate_module_table(modules)
+                dependencies = generate_dependencies_string(modules)
+                python_version = get_python_version(odoo_version)
+
+                readme_replacements = {
+                    "{{ GITHUB_ORG }}": github_org,
+                    "{{ REPO_NAME }}": repo_name,
+                    "{{ REPO_DESCRIPTION }}": f"Odoo {odoo_version} modules",
+                    "{{ MODULE_TABLE }}": module_table,
+                    "{{ ODOO_VERSION }}": odoo_version,
+                    "{{ PYTHON_VERSION }}": python_version,
+                    "{{ DEPENDENCIES }}": dependencies,
+                    "{{ GIST_OWNER }}": gist_owner,
+                    "{{ GIST_ID }}": gist_id,
+                }
+
+                for placeholder, value in readme_replacements.items():
+                    content = content.replace(placeholder, value)
+
+                # Prepend badges
+                content = badges_content + "\n\n" + content
+
+                if dry_run:
+                    print_step("📄", f"Would create: {readme_path}")
+                    return True
+
+                readme_path.write_text(content)
+                print_step("✅", f"Created: {readme_path}")
+            else:
+                # Just inject badges if no template
+                if dry_run:
+                    print_step("📄", f"Would create: {readme_path}")
+                    return True
+
+                readme_path.write_text(badges_content + "\n\n# Your Repository\n\nAdd content here.\n")
+                print_step("✅", f"Created minimal: {readme_path}")
+
+        return True
+
+    except Exception as e:
+        print_step("❌", f"Error with badges/README: {e}")
+        return False
 
 
 def main() -> None:
@@ -729,6 +1121,33 @@ Examples:
         help="Run pre-commit autoupdate for solt-pre-commit",
     )
 
+    # New in v1.1.0: Auto-detection and generation
+    parser.add_argument(
+        "--regenerate",
+        action="store_true",
+        help="Regenerate workflow file from detected modules (with --update-only)",
+    )
+    parser.add_argument(
+        "--badge-only",
+        action="store_true",
+        help="Only inject/create badges in README (no other setup)",
+    )
+    parser.add_argument(
+        "--inject-badges",
+        action="store_true",
+        help="Inject badges into existing README",
+    )
+    parser.add_argument(
+        "--gist-id",
+        default="147d543a086f6735d1ffa02172766e86",
+        help="GitHub Gist ID for badges (default: SolteinCorp gist)",
+    )
+    parser.add_argument(
+        "--gist-owner",
+        default="SolteinCorp",
+        help="GitHub Gist owner (default: SolteinCorp)",
+    )
+
     args = parser.parse_args()
 
     # Handle global clean (no path required)
@@ -758,12 +1177,54 @@ Examples:
 
     # Handle update-only mode
     if args.update_only:
-        if args.batch:
-            update_version_batch(args.batch, args.version, args.dry_run)
-        elif args.path:
-            update_version_single(args.path, args.version, args.dry_run)
+        if args.regenerate:
+            # Update-only with regenerate: update version AND regenerate workflow
+            if args.batch:
+                for repo_line in Path(args.batch).read_text().splitlines():
+                    repo = repo_line.strip()
+                    if repo and not repo.startswith("#"):
+                        repo_path = Path(repo).resolve()
+                        modules = detect_modules(repo_path)
+                        odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
+                        sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
+                        generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
+                        update_version_single(repo, args.version, args.dry_run)
+                        print_step("✅", f"Regenerated: {repo}")
+            elif args.path:
+                repo_path = Path(args.path).resolve()
+                modules = detect_modules(repo_path)
+                odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
+                sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
+                generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
+                update_version_single(args.path, args.version, args.dry_run)
+                print_step("✅", f"Regenerated: {args.path}")
+            else:
+                parser.error("--update-only --regenerate requires a path or --batch")
         else:
-            parser.error("--update-only requires a path or --batch")
+            # Standard update-only (just version pins)
+            if args.batch:
+                update_version_batch(args.batch, args.version, args.dry_run)
+            elif args.path:
+                update_version_single(args.path, args.version, args.dry_run)
+            else:
+                parser.error("--update-only requires a path or --batch")
+        return
+
+    # Handle badge-only mode (NEW in v1.1.0)
+    if args.badge_only or args.inject_badges:
+        if args.path:
+            inject_badges_to_readme(
+                Path(args.path),
+                Path(args.path).name,
+                github_org="soltein-net",
+                gist_owner=args.gist_owner,
+                gist_id=args.gist_id,
+                odoo_version=detect_odoo_version_from_branch(repo_path=Path(args.path)),
+                dry_run=args.dry_run,
+            )
+            print_step("✅", "Badges processed")
+        else:
+            parser.error("--badge-only/--inject-badges requires a path")
         return
 
     # Validate arguments for setup mode

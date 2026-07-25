@@ -12,6 +12,17 @@ then fall back to the CI-style base-branch diff. That fallback is exactly the
 git pre-push stdin parsing of its own - it just asks SoltConfig for the
 changed files the same way solt-check-odoo does for staged files.
 
+Runs only when the current branch has an open PR (github_pr.py), per
+docs/pipeline-strategy.md's "Pipeline at a glance": the Test tier fires on
+"PR opened/updated", not on every push, and that includes this local-Docker
+instantiation of the tier, not just CI. The first, PR-less push of a branch
+is exempt; every push after a PR exists runs the suite before it even leaves
+the machine. If PR state can't be determined at all (no `gh` session, no
+GITHUB_TOKEN, remote isn't GitHub), this fails open and runs the tests rather
+than silently skipping on an answer it doesn't actually have. Set
+`test_require_open_pr: false` in .solt-hooks.yaml to always run regardless of
+PR state (the old, unconditional behavior).
+
 Test execution itself lives in odoo_test_runner.py (creates a scratch DB,
 runs `coverage run odoo-bin ... --test-tags=/<module>,...`, drops the DB),
 called in-process here rather than shelling out to a script - every repo
@@ -26,7 +37,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import odoo_test_runner
+from . import github_pr, odoo_test_runner
 from .checks_odoo_module import _detect_modules_from_paths
 from .config_loader import SoltConfig
 
@@ -41,6 +52,22 @@ def main():
     args = parser.parse_args()
 
     config = SoltConfig(args.config)
+
+    if config.test_require_open_pr:
+        pr_open = github_pr.has_open_pull_request()
+        if pr_open is False:
+            if not args.quiet:
+                print(
+                    "[solt-test-changed-modules] No open PR for this branch yet - "
+                    "skipping the test run (it'll run once a PR is open and you push again)."
+                )
+            sys.exit(0)
+        if pr_open is None and not args.quiet:
+            print(
+                "[solt-test-changed-modules] Could not determine PR state "
+                "(no authenticated `gh` session or GITHUB_TOKEN) - running tests to be safe."
+            )
+
     changed_files = config.changed_detector.get_changed_files()
 
     if not changed_files:
