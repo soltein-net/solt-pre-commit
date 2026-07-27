@@ -71,6 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   printf/`.format()` placeholder validation between msgid and msgstr,
   duplicate msgid detection) - coverage for this module went from 21% to
   100%.
+- `tests/test_checks_odoo_module_python.py`: expanded with characterization
+  tests for `ChecksOdooModulePython`/`OdooFieldVisitor` (Odoo-model
+  detection, field/method AST extraction including translation calls and
+  decorator variants, duplicate field labels, inconsistent `compute_sudo`,
+  selection-on-related, missing string/help, docstring quality, and config
+  overrides) - coverage for this module went from 46% to 100%.
 
 ### Fixed
 - `checks_odoo_module_xml.py`: `_visit_xml_record` unpacked
