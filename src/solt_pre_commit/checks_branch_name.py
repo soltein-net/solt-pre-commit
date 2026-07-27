@@ -70,7 +70,7 @@ ODOO_VERSION_PATTERN = r"\d+\.0"
 # Default protected patterns (Odoo version branches)
 DEFAULT_PROTECTED_PATTERNS = [
     rf"^{ODOO_VERSION_PATTERN}$",  # 17.0, 18.0
-    rf"^{ODOO_VERSION_PATTERN}\.\d+.*$",  # 17.0.1, 17.0.1.0, 17.0-stable
+    rf"^{ODOO_VERSION_PATTERN}\.\d+.*$",  # 17.0.1, 17.0.1.0 (requires <version>.<digit> - "17.0-stable" does NOT match)
 ]
 
 
@@ -204,7 +204,11 @@ class BranchNameValidator:
         self.patterns["version-type"] = re.compile(rf"^{ODOO_VERSION_PATTERN}-({types_pattern})-.+$")
 
         # GitHub auto-generated revert branches: revert-123-feature/17.0-something
-        self.patterns["github-revert"] = re.compile(r"^revert-\d+-.+$")
+        # Still requires an Odoo version somewhere in the wrapped name, consistent
+        # with every other pattern's "version is REQUIRED" policy - GitHub only
+        # supplies the "revert-<PR number>-" prefix, so a version-less name here
+        # means the original branch shouldn't have passed validation either.
+        self.patterns["github-revert"] = re.compile(rf"^revert-\d+-.*{ODOO_VERSION_PATTERN}.*$")
 
     def get_current_branch(self) -> Optional[str]:
         """Get current git branch name."""

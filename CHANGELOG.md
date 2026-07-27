@@ -48,6 +48,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   main/master/develop fallback - the actual convention for repos on a
   branch-per-version model rather than a single trunk.
 
+### Added
+- `tests/test_checks_branch_name.py`: characterization tests for
+  `BranchNameValidator` (protected-branch detection, Odoo-version
+  extraction, flexible/strict validation, config loading, and the
+  `solt-check-branch` CLI) - coverage for this module went from 16% to 94%.
+
+### Fixed
+- `checks_branch_name.py`: a misleading comment on
+  `DEFAULT_PROTECTED_PATTERNS` claimed `17.0-stable` was an example of a
+  protected branch; the pattern actually only matches `<version>.<digit>...`
+  (e.g. `17.0.1`), not `<version>-word`, so `17.0-stable` was never
+  protected. Corrected the comment to state the real match rule.
+- `checks_branch_name.py`: the `github-revert` pattern
+  (`^revert-\d+-.+$`) accepted any GitHub-generated revert branch
+  unconditionally, bypassing the "Odoo version is REQUIRED" policy every
+  other pattern in this module enforces. Tightened it to
+  `^revert-\d+-.*<odoo-version>.*$` so a version-less revert branch is
+  rejected too, consistent with the rest of the policy.
+
 ### Fixed
 - `ODOO_PYTHON_REQUIREMENTS` (`config_loader.py`) had 18.0 pinned to Python
   3.11, and the README's "Supported Versions" table repeated the same number.
