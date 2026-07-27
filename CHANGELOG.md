@@ -57,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ChecksOdooModuleCSV` (duplicate record-id detection scoped per
   `data_section`, missing-file handling) - coverage for this module went
   from 22% to 100%.
+- `tests/test_checks_odoo_module_xml_advanced.py`: characterization tests
+  for `ChecksOdooModuleXMLAdvanced` (deprecated `active_id`/`t-raw` usage,
+  alert-role, hardcoded-id, and duplicate-view-priority detectors) -
+  coverage for this module went from 15% to 100%.
 
 ### Fixed
 - `checks_branch_name.py`: a misleading comment on
