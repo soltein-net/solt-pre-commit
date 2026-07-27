@@ -2,6 +2,20 @@
 
 Thank you for your interest in contributing to solt-pre-commit!
 
+- [Contributing to Solt Pre-commit](#contributing-to-solt-pre-commit)
+  - [Development Setup](#development-setup)
+  - [Project Structure](#project-structure)
+  - [Adding a New Check](#adding-a-new-check)
+  - [Severity Levels](#severity-levels)
+  - [Testing](#testing)
+  - [Code Style](#code-style)
+  - [Pull Request Process](#pull-request-process)
+    - [Commit Message Format](#commit-message-format)
+  - [Releasing](#releasing)
+  - [Configuration Priority](#configuration-priority)
+  - [Questions?](#questions)
+
+
 ## Development Setup
 
 1. Clone the repository:
