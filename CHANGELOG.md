@@ -66,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module names, per-model visitors for views/users/filters, deprecated
   `<data>`/`<openerp>`/QWeb-directive detection, invalid link chars) -
   coverage for this module went from 18% to 100%.
+- `tests/test_checks_odoo_module_po.py`: characterization tests for
+  `ChecksOdooModulePO` (PO/POT parsing, `#. module:` comment requirement,
+  printf/`.format()` placeholder validation between msgid and msgstr,
+  duplicate msgid detection) - coverage for this module went from 21% to
+  100%.
 
 ### Fixed
 - `checks_odoo_module_xml.py`: `_visit_xml_record` unpacked
