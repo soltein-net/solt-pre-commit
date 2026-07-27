@@ -77,6 +77,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decorator variants, duplicate field labels, inconsistent `compute_sudo`,
   selection-on-related, missing string/help, docstring quality, and config
   overrides) - coverage for this module went from 46% to 100%.
+- `tests/test_checks_odoo_module.py`: expanded with characterization tests
+  for the main orchestrator - module/path detection helpers, `CheckResult`,
+  `ResultPrinter`, the `installable` decorator, `ChecksOdooModule`'s
+  manifest parsing, version detection, file discovery/exclusion, all
+  `check_*` delegation methods, `_print_global_coverage_metrics`, and the
+  `run()`/`main()` entry points (CLI flags, module auto-detection, JSON
+  report generation) - coverage for this module went from 18% to 99%.
+  Overall repo test coverage: 39% -> 92%.
 
 ### Fixed
 - `checks_odoo_module_xml.py`: `_visit_xml_record` unpacked

@@ -63,9 +63,7 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
     - [Running Tests](#running-tests)
     - [Linting \& Formatting](#linting--formatting)
     - [Local Testing](#local-testing)
-  - [📄 License](#-license)
-  - [🤝 Contributing](#-contributing)
-  - [📞 Support](#-support)
+  - [� Support](#-support)
 
 
 ## 📋 Supported Versions
@@ -696,28 +694,9 @@ solt-check-odoo test_module
 
 ---
 
-## 📄 License
-
-LGPL-3.0-or-later. See LICENSE file.
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch: `feature/17.0-ISSUE-123-description` (version + ticket recommended)
-3. Ensure all checks pass: `pre-commit run --all-files`
-4. Create a Pull Request
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
----
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/soltein-net/solt-pre-commit/issues)
 - **Email**: soporte@soltein.mx
 
 ---
