@@ -61,8 +61,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for `ChecksOdooModuleXMLAdvanced` (deprecated `active_id`/`t-raw` usage,
   alert-role, hardcoded-id, and duplicate-view-priority detectors) -
   coverage for this module went from 15% to 100%.
+- `tests/test_checks_odoo_module_xml.py`: characterization tests for
+  `ChecksOdooModuleXML` (duplicate record-id/field detection, redundant
+  module names, per-model visitors for views/users/filters, deprecated
+  `<data>`/`<openerp>`/QWeb-directive detection, invalid link chars) -
+  coverage for this module went from 18% to 100%.
 
 ### Fixed
+- `checks_odoo_module_xml.py`: `_visit_xml_record` unpacked
+  `record_id.split(".")` into exactly 2 variables, so a record id with two
+  or more dots (e.g. `<record id="a.b.c">`) raised `ValueError` and crashed
+  `check_xml_records()` for the whole file. Changed to `split(".", 1)` -
+  an xmlid is `<module>.<identifier>`, and the identifier itself may
+  legitimately contain further dots, so only the first dot should ever be
+  treated as the module separator.
 - `checks_branch_name.py`: a misleading comment on
   `DEFAULT_PROTECTED_PATTERNS` claimed `17.0-stable` was an example of a
   protected branch; the pattern actually only matches `<version>.<digit>...`

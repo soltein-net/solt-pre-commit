@@ -101,7 +101,10 @@ class ChecksOdooModuleXML:
     def _visit_xml_record(self, manifest_data, record):
         """Detect redundant module name in xmlid."""
         record_id = record.get("id")
-        xmlid_module, xmlid_name = record_id.split(".") if "." in record_id else ["", record_id]
+        # maxsplit=1: an xmlid is "<module>.<identifier>" - the identifier
+        # itself may legitimately contain further dots, and splitting on
+        # all of them would raise ValueError on unpacking (e.g. "a.b.c").
+        xmlid_module, xmlid_name = record_id.split(".", 1) if "." in record_id else ["", record_id]
         if xmlid_module == self.module_name:
             self.checks_errors["xml_redundant_module_name"].append(
                 f"{manifest_data['filename']}:{record.sourceline} "
