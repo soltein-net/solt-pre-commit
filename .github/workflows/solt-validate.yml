@@ -67,6 +67,12 @@ on:
       detected-python-version:
         description: 'Detected Python version'
         value: ${{ jobs.Validate.outputs.python_version }}
+      pylint-changed:
+        description: 'Number of Pylint-Odoo issues in changed files'
+        value: ${{ jobs.Validate.outputs.pylint_changed }}
+      ruff-changed:
+        description: 'Number of Ruff issues in changed files'
+        value: ${{ jobs.Validate.outputs.ruff_changed }}
 
 jobs:
   Validate:
@@ -81,6 +87,8 @@ jobs:
       warnings: ${{ steps.summary.outputs.warnings }}
       odoo_version: ${{ steps.detect-version.outputs.odoo_version }}
       python_version: ${{ steps.detect-version.outputs.python_version }}
+      pylint_changed: ${{ steps.summary.outputs.pylint_changed }}
+      ruff_changed: ${{ steps.summary.outputs.ruff_changed }}
 
     steps:
       - uses: actions/checkout@v4

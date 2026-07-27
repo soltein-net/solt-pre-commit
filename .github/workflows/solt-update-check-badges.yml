@@ -1,0 +1,139 @@
+# =============================================================================
+# SOLT PRE-COMMIT - Update Check Badges (Reusable)
+# =============================================================================
+# Writes the Solt-Check / Pylint-Odoo / Ruff / Tests / Coverage badges to the
+# shared gist, from values other jobs already computed. Deliberately does NO
+# checkout, no Python/Odoo setup - the whole point of splitting this out of
+# solt-validate.yml/solt-coverage.yml is that "report a result as a badge" and
+# "produce the result" are different jobs, so this one is as cheap as a job
+# can be (just jq + gh api). Call it with `needs: [Lint, Test]` and
+# `if: always()` so it runs whether the other jobs passed or failed.
+#
+# Docstring coverage is intentionally NOT here - that's solt-update-badges.yml,
+# a separate, unrelated concern (a full-repo scan on its own weekly schedule,
+# not a per-PR result).
+# =============================================================================
+name: Update Check Badges (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      odoo-version:
+        required: true
+        type: string
+      gist-id:
+        description: 'Gist ID for badge storage (default: Soltein central gist)'
+        required: false
+        type: string
+        default: '147d543a086f6735d1ffa02172766e86'
+      badge-filename-prefix:
+        description: 'Prefix for badge filenames in gist (default: repository name)'
+        required: false
+        type: string
+        default: ''
+      solt-check-errors:
+        description: 'Number of solt-check-odoo blocking errors'
+        required: false
+        type: string
+        default: '0'
+      pylint-changed:
+        description: 'Number of Pylint-Odoo issues in changed files'
+        required: false
+        type: string
+        default: '0'
+      pylint-blocking:
+        description: 'Whether Pylint-Odoo issues actually block this PR'
+        required: false
+        type: boolean
+        default: false
+      ruff-changed:
+        description: 'Number of Ruff issues in changed files'
+        required: false
+        type: string
+        default: '0'
+      ruff-blocking:
+        description: 'Whether Ruff issues actually block this PR'
+        required: false
+        type: boolean
+        default: false
+      test-result:
+        description: 'Test job result: "0" (pass) or nonzero (fail). Omit if there is no test job.'
+        required: false
+        type: string
+        default: ''
+      coverage-pct:
+        description: 'Coverage percentage. Omit if there is no test job.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      GIST_SECRET:
+        description: 'Token with write access to the badge gist. Optional - omit to skip this job entirely.'
+        required: false
+
+jobs:
+  Badges:
+    name: Update Check Badges
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update badges (Gist)
+        env:
+          GH_TOKEN: ${{ secrets.GIST_SECRET }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::GIST_SECRET not provided, skipping badge update"
+            exit 0
+          fi
+          PREFIX="${{ inputs.badge-filename-prefix }}"
+          if [ -z "$PREFIX" ]; then PREFIX="${{ github.event.repository.name }}"; fi
+          VERSION="${{ inputs.odoo-version }}"
+
+          badge_json() {
+            local label="$1" count="$2" blocking="$3"
+            local msg color plural=""
+            if [ "$count" != "1" ]; then plural="s"; fi
+            if [ "$count" -eq 0 ]; then msg="passing"; color="brightgreen";
+            elif [ "$blocking" = "true" ]; then msg="${count} issue${plural}"; color="red";
+            else msg="${count} issue${plural} (info)"; color="yellow"; fi
+            jq -nc --arg l "$label" --arg m "$msg" --arg c "$color" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}'
+          }
+
+          FILES_JSON="{}"
+          add_file() {
+            FILES_JSON=$(echo "$FILES_JSON" | jq --arg f "$1" --arg c "$2" '. + {($f): {content: $c}}')
+          }
+
+          SOLT_CHECK_CONTENT=$(badge_json "solt-check (${VERSION})" "${{ inputs.solt-check-errors }}" "true")
+          add_file "${PREFIX}-${VERSION}-solt-check.json" "$SOLT_CHECK_CONTENT"
+
+          PYLINT_CONTENT=$(badge_json "pylint-odoo (${VERSION})" "${{ inputs.pylint-changed }}" "${{ inputs.pylint-blocking }}")
+          add_file "${PREFIX}-${VERSION}-pylint.json" "$PYLINT_CONTENT"
+
+          RUFF_CONTENT=$(badge_json "ruff (${VERSION})" "${{ inputs.ruff-changed }}" "${{ inputs.ruff-blocking }}")
+          add_file "${PREFIX}-${VERSION}-ruff.json" "$RUFF_CONTENT"
+
+          TEST_RESULT="${{ inputs.test-result }}"
+          if [ -n "$TEST_RESULT" ]; then
+            if [ "$TEST_RESULT" = "0" ]; then TEST_MSG="passing"; TEST_COLOR="brightgreen";
+            else TEST_MSG="failing"; TEST_COLOR="red"; fi
+            TEST_CONTENT=$(jq -nc --arg l "tests (${VERSION})" --arg m "$TEST_MSG" --arg c "$TEST_COLOR" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
+            add_file "${PREFIX}-${VERSION}-tests.json" "$TEST_CONTENT"
+          fi
+
+          COV="${{ inputs.coverage-pct }}"
+          if [ -n "$COV" ]; then
+            if [ "$COV" -ge 80 ]; then COV_COLOR="brightgreen";
+            elif [ "$COV" -ge 60 ]; then COV_COLOR="yellow";
+            elif [ "$COV" -ge 40 ]; then COV_COLOR="orange";
+            else COV_COLOR="red"; fi
+            COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "${COV}%" --arg c "$COV_COLOR" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
+            add_file "${PREFIX}-${VERSION}-coverage.json" "$COV_CONTENT"
+          fi
+
+          jq -n --argjson files "$FILES_JSON" '{files: $files}' | \
+          gh api --method PATCH "/gists/${{ inputs.gist-id }}" --input - \
+            && echo "Updated badges for ${PREFIX} (${VERSION})" \
+            || echo "::warning::Could not update check badges (non-fatal)"

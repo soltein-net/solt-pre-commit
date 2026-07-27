@@ -20,6 +20,42 @@
   stages: [ pre-commit, pre-push ]
 
 # -----------------------------------------------------------------------------
+# TEST CHANGED MODULES - Run Odoo tests for changed modules, pre-push only
+# -----------------------------------------------------------------------------
+# IMPORTANT: This hook runs ONCE, diffs against the base branch (not staged
+# files - there's usually nothing staged by push time), and runs the built-in
+# test runner (odoo_test_runner.py: scratch DB, coverage run odoo-bin
+# --test-tags, drop DB) against whatever modules changed. Paths resolve
+# relative to the git superproject working tree when this repo is a submodule
+# (e.g. a solt-* addon repo under a soltein-suite super-repo), so no
+# per-repo script to maintain. Set test_harness_script in .solt-hooks.yaml to
+# use a repo-provided script instead, for setups the built-in runner doesn't fit.
+# -----------------------------------------------------------------------------
+- id: solt-test-changed-modules
+  name: Soltein - Test Changed Modules
+  description: |
+    Run Odoo tests for modules changed vs. the base branch - only when the
+    current branch has an open PR (checked via `gh` CLI / GITHUB_TOKEN);
+    exempt on a branch's first, PR-less push. Fails open (runs anyway) if PR
+    state can't be determined.
+    Configure in .solt-hooks.yaml:
+    - test_require_open_pr: set false to always run on push regardless of PR
+      state (default true)
+    - base_branch: override auto-detection (defaults to the version branch
+      embedded in the current branch name, e.g. feature/17.0-x -> 17.0)
+    - test_odoo_bin / test_odoo_conf: paths to odoo-bin / odoo.conf (relative
+      to the superproject root if this repo is a submodule)
+    - test_db_host / test_db_port / test_db_user / test_db_password
+    - test_http_port / test_gevent_port: dedicated ports so this doesn't
+      conflict with a running interactive dev server
+    - test_harness_script: use a repo-provided script instead of the built-in runner
+  entry: solt-test-changed-modules
+  language: python
+  always_run: true
+  pass_filenames: false
+  stages: [ pre-push ]
+
+# -----------------------------------------------------------------------------
 # FULL VALIDATION - All checks (XML, CSV, PO, Python, Manifest)
 # -----------------------------------------------------------------------------
 # IMPORTANT: This hook runs ONCE and detects staged files internally

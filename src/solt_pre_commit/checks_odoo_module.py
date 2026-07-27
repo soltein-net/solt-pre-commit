@@ -1052,8 +1052,14 @@ def main():
                     print(f"  -> {Path(mod).name}")
             paths = detected_modules
         else:
-            # Fallback to current directory
-            paths = ["."]
+            # No staged files matched an Odoo module (e.g. `pre-commit run --all-files`
+            # with nothing staged, or a commit touching only non-module files). There is
+            # no repo-wide module discovery in this tool, so falling back to "." previously
+            # tried to validate the repo root itself as a module and failed with a
+            # confusing "could not be loaded" error. Skip cleanly instead.
+            if not args.quiet:
+                print("[solt-check-odoo] No Odoo modules detected from staged files")
+            sys.exit(0)
     # =========================================================================
 
     # Show version being used

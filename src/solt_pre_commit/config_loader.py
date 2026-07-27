@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import fnmatch
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -36,11 +37,15 @@ MINIMUM_SUPPORTED_VERSION = 17
 
 DEFAULT_ODOO_VERSION = "17.0"
 
-# Minimum Python version required per Odoo version
+# Minimum Python version required per Odoo version, per Odoo's own docs
+# (odoo.com/documentation/<version>/administration/on_premise/source.html):
+# the minimum jumped 3.7->3.10 at 17.0 and has stayed 3.10 through 18.0 since -
+# it does NOT bump every version. 19.0/20.0+ are not yet confirmed against
+# Odoo's docs; update once verified rather than assuming another bump.
 ODOO_PYTHON_REQUIREMENTS = {
     "16.0": "3.10",
     "17.0": "3.10",
-    "18.0": "3.11",
+    "18.0": "3.10",
     "19.0": "3.12",
     # Future versions default to Python 3.12
     "default": "3.12",
@@ -181,7 +186,10 @@ class OdooVersionDetector:
 
         Supports both explicit SUPPORTED_ODOO_VERSIONS and future versions (X.0 where X >= 17)
         """
-        version = version.lower().strip().lstrip("v")
+        # A bare "17.0" in YAML parses as a float, not a string (e.g. odoo_version: 17.0
+        # in .solt-hooks.yaml without quotes) - coerce defensively rather than requiring
+        # every config author to remember to quote it.
+        version = str(version).lower().strip().lstrip("v")
 
         # Handle single number (e.g., "17" -> "17.0")
         if version.isdigit():
@@ -438,8 +446,11 @@ class ChangedFilesDetector:
         Priority:
         1. SOLT_BASE_BRANCH environment variable (set by CI workflow)
         2. GITHUB_BASE_REF environment variable (GitHub Actions PR context)
-        3. Auto-detect from known branch names (main, master, develop)
-        4. Fallback to HEAD~1
+        3. Odoo version embedded in the current branch name (e.g.
+           feature/17.0-add-invoice -> origin/17.0) - this suite's actual
+           long-lived branches are version branches, not main/develop
+        4. Auto-detect from known branch names (main, master, develop)
+        5. Fallback to HEAD~1
         """
         # 1. Check explicit environment variable from workflow
         solt_base = os.environ.get("SOLT_BASE_BRANCH")
@@ -454,7 +465,12 @@ class ChangedFilesDetector:
         if github_base:
             return f"origin/{github_base}"
 
-        # 3. Auto-detect from known branches
+        # 3. Odoo version embedded in the current branch name
+        version_ref = self._version_branch_from_current_branch()
+        if version_ref:
+            return version_ref
+
+        # 4. Auto-detect from known branches
         candidates = ["main", "master", "develop"]
         for branch in candidates:
             try:
@@ -467,8 +483,39 @@ class ChangedFilesDetector:
             except subprocess.CalledProcessError:
                 continue
 
-        # 4. Fallback
+        # 5. Fallback
         return "HEAD~1"
+
+    @staticmethod
+    def _version_branch_from_current_branch() -> str | None:
+        """If the current branch name embeds an Odoo version (17.0, 19.0, ...),
+        return origin/<version> when that branch actually exists remotely.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            current_branch = result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
+        match = re.search(r"(\d+\.0)", current_branch)
+        if not match:
+            return None
+        version = match.group(1)
+
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--verify", f"origin/{version}"],
+                capture_output=True,
+                check=True,
+            )
+            return f"origin/{version}"
+        except subprocess.CalledProcessError:
+            return None
 
     def _ensure_base_branch_available(self) -> bool:
         """Ensure the base branch ref is available for diff."""
@@ -680,6 +727,29 @@ class SoltConfig:
 
         # Path exclusions
         self.exclude_paths: list[str] = self.config.get("exclude_paths", DEFAULT_EXCLUDE_PATHS)
+
+        # Odoo test-run settings (solt-test-changed-modules / solt-test-module). Paths are
+        # relative to the Odoo environment root: the git superproject working tree when the
+        # consuming repo is a submodule (e.g. a solt-* addon repo checked out under a
+        # soltein-suite super-repo), otherwise the repo's own root.
+        self.test_odoo_bin: str = self.config.get("test_odoo_bin", "odoo/odoo-bin")
+        # None means "derive from the detected Odoo version" (e.g. .devcontainer/dev_17/odoo.conf)
+        self.test_odoo_conf: str | None = self.config.get("test_odoo_conf")
+        self.test_db_host: str = self.config.get("test_db_host") or os.environ.get("DB_HOST", "localhost")
+        self.test_db_port: str = str(self.config.get("test_db_port") or os.environ.get("DB_PORT", "5432"))
+        self.test_db_user: str = self.config.get("test_db_user") or os.environ.get("DB_USER", "odoo")
+        self.test_db_password: str = self.config.get("test_db_password") or os.environ.get("DB_PASSWORD", "odoo")
+        self.test_http_port: str = str(self.config.get("test_http_port", 18069))
+        self.test_gevent_port: str = str(self.config.get("test_gevent_port", 18072))
+        # Escape hatch: if set, solt-test-changed-modules shells out to this repo-relative
+        # script instead of using the built-in runner (odoo_test_runner.py) - for repos with
+        # a test setup unusual enough that the built-in runner's assumptions don't fit.
+        self.test_harness_script: str | None = self.config.get("test_harness_script")
+        # Gate the pre-push test run on an open PR existing for the current branch
+        # (docs/pipeline-strategy.md: the Test tier fires on "PR opened/updated", not
+        # every push - including this local instantiation of it). Default True; set
+        # False to always run on push regardless of PR state (old behavior).
+        self.test_require_open_pr: bool = bool(self.config.get("test_require_open_pr", True))
 
         # Changed files detector (lazy init)
         self._changed_detector: ChangedFilesDetector | None = None

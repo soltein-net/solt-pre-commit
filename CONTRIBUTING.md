@@ -2,6 +2,20 @@
 
 Thank you for your interest in contributing to solt-pre-commit!
 
+- [Contributing to Solt Pre-commit](#contributing-to-solt-pre-commit)
+  - [Development Setup](#development-setup)
+  - [Project Structure](#project-structure)
+  - [Adding a New Check](#adding-a-new-check)
+  - [Severity Levels](#severity-levels)
+  - [Testing](#testing)
+  - [Code Style](#code-style)
+  - [Pull Request Process](#pull-request-process)
+    - [Commit Message Format](#commit-message-format)
+  - [Releasing](#releasing)
+  - [Configuration Priority](#configuration-priority)
+  - [Questions?](#questions)
+
+
 ## Development Setup
 
 1. Clone the repository:
@@ -30,26 +44,33 @@ pre-commit install
 
 ```
 solt-pre-commit/
-├── checks_odoo_module.py           # Main orchestrator
-├── checks_odoo_module_csv.py       # CSV validations
-├── checks_odoo_module_po.py        # PO/POT validations
-├── checks_odoo_module_python.py    # Python validations
-├── checks_odoo_module_xml.py       # Basic XML validations
-├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
-├── checks_branch_name.py           # Branch naming validation
-├── config_loader.py                # Configuration management
-├── doc_coverage.py                 # Documentation coverage analysis
-├── setup-repo.py                   # Initialize hooks in client repos
-├── _pylintrc                       # Pylint config for Odoo
-├── _pre-commit-config.yaml         # Pre-commit hooks template
-├── _pre-commit-config-local.yaml   # Local pre-commit (monorepo)
-├── _pre-commit-hooks.yaml          # Hook definitions
-├── _solt-hooks.yaml                # Soltein validation settings
-├── _solt-hooks-defaults.yaml       # Default hook settings
-├── pyproject-base.toml             # Base Python tools config
-├── ci.yml                          # Internal CI workflow
-├── solt-validate.yml               # Reusable workflow for clients
-└── README-template.md              # README template for client repos
+├── src/solt_pre_commit/
+│   ├── checks_odoo_module.py           # Main orchestrator
+│   ├── checks_odoo_module_csv.py       # CSV validations
+│   ├── checks_odoo_module_po.py        # PO/POT validations
+│   ├── checks_odoo_module_python.py    # Python validations
+│   ├── checks_odoo_module_xml.py       # Basic XML validations
+│   ├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
+│   ├── checks_branch_name.py           # Branch naming validation
+│   ├── checks_test_changed_modules.py  # Pre-push changed-module test runner
+│   ├── config_loader.py                # Configuration management (incl. DEFAULT_SEVERITY)
+│   ├── doc_coverage.py                 # Documentation coverage analysis
+│   ├── github_pr.py                    # Open-PR detection (gh CLI / REST API)
+│   └── odoo_test_runner.py             # Scratch-DB Odoo test execution
+├── scripts/
+│   ├── setup-repo.py                   # Initialize/maintain hooks in client repos
+│   ├── generate-readme.py              # Generate README.md templates
+│   └── generate-badges.py              # Regenerate badge JSON for the gist
+├── templates/
+│   ├── .pylintrc                       # Pylint config for Odoo
+│   ├── .pre-commit-config.yaml         # Pre-commit hooks template
+│   ├── .pre-commit-config-local.yaml   # Local pre-commit (monorepo)
+│   ├── .solt-hooks.yaml                # Default Soltein validation settings
+│   ├── README-template.md              # README template for client repos
+│   └── github-workflows/solt-validate.yml  # Client-repo workflow template
+├── .pre-commit-hooks.yaml               # Hook definitions for consumers
+├── .github/workflows/                   # ci.yml, solt-coverage.yml, solt-update-badges.yml, ...
+└── tests/                                # pytest test suite
 ```
 
 ## Adding a New Check
@@ -83,7 +104,7 @@ DEFAULT_SEVERITY = {
 
 4. Update the README.md to document the new check
 
-5. Add the check to `_solt-hooks-defaults.yaml` if it needs configurable severity
+5. Add the check to `templates/.solt-hooks.yaml` (the config template `setup-repo.py` installs into client repos) if it needs configurable severity
 
 ## Severity Levels
 
@@ -123,10 +144,10 @@ solt-check-branch invalid-branch  # Should fail
 - Follow PEP 8 with max line length of 120
 - Use type hints where practical
 - Document public methods with docstrings
-- Run checks before committing:
+- Run the same lint + format check CI runs before committing:
 ```bash
-ruff check .
-ruff format .
+scripts/lint.sh          # check only - fails on any violation, same as CI
+scripts/lint.sh --fix    # auto-fix + reformat in place
 ```
 
 ## Pull Request Process
@@ -168,8 +189,10 @@ git push origin v1.x.0
 
 ## Configuration Priority
 
-1. `.solt-hooks.yaml` in client repo (highest priority)
-2. `_solt-hooks-defaults.yaml` in solt-pre-commit (defaults)
+1. `.solt-hooks.yaml` in the client repo (highest priority)
+2. `DEFAULT_SEVERITY` / `DEFAULT_SKIP_*` dicts in `src/solt_pre_commit/config_loader.py` (built-in defaults)
+
+`templates/.solt-hooks.yaml` is the file `setup-repo.py` copies into a new client repo as its starting point — it mirrors the code defaults but is a template, not a second source of truth read at runtime.
 
 ## Questions?
 
