@@ -369,11 +369,24 @@ def update_version_in_file(filepath: Path, new_version: str, dry_run: bool = Fal
     content = filepath.read_text()
     original = content
 
-    # Pattern 1: rev: vX.Y.Z (pre-commit config)
-    content = re.sub(r"(rev:\s*)v\d+\.\d+\.\d+", rf"\g<1>{new_version}", content)
+    # Pattern 1: rev: vX.Y.Z, but only the rev line immediately under the
+    # solt-pre-commit repo entry - .pre-commit-config.yaml has other repos
+    # (ruff-pre-commit, pylint-odoo, pre-commit-hooks, ...) each with their
+    # own unrelated "rev: vX.Y.Z" line that must NOT be touched here.
+    content = re.sub(
+        r"(- repo:\s*https://github\.com/soltein-net/solt-pre-commit\s*\n\s*rev:\s*)v\d+\.\d+\.\d+",
+        rf"\g<1>{new_version}",
+        content,
+    )
 
-    # Pattern 2: @vX.Y.Z (workflow uses clause)
-    content = re.sub(r"(@)v\d+\.\d+\.\d+", rf"\g<1>{new_version}", content)
+    # Pattern 2: @vX.Y.Z, but only on a soltein-net/solt-pre-commit reference
+    # (workflow `uses:` clause) - other actions/reusable workflows pinned by
+    # @vX.Y.Z in the same file are a different project's version, not ours.
+    content = re.sub(
+        r"(soltein-net/solt-pre-commit(?:/[\w./-]+)?@)v\d+\.\d+\.\d+",
+        rf"\g<1>{new_version}",
+        content,
+    )
 
     if content != original:
         if not dry_run:

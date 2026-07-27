@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] - 2025-07-27
+## [Unreleased]
+
+### Fixed
+- `scripts/setup-repo.py`: `update_version_in_file`'s regexes matched
+  `rev: vX.Y.Z` and `@vX.Y.Z` **anywhere** in the file, not scoped to the
+  `solt-pre-commit` repo entry - running `--update-only` against a client
+  repo's `.pre-commit-config.yaml` rewrote every *other* hook's unrelated
+  pin (`ruff-pre-commit`, `OCA/pylint-odoo`, `pre-commit-hooks`, ...) to
+  the same solt-pre-commit version too. Caught live against `solt-llm`.
+  Scoped both patterns to the solt-pre-commit repo block/reference
+  specifically; added `tests/test_setup_repo.py` as a regression guard.
+
+## [1.1.0] - 2026-07-27
 
 <!--
   Everything below stays under [Unreleased] - no dated version heading - until
@@ -47,8 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   current branch name (e.g. `feature/17.0-x` -> `origin/17.0`), ahead of the
   main/master/develop fallback - the actual convention for repos on a
   branch-per-version model rather than a single trunk.
-
-### Added
 - `tests/test_checks_branch_name.py`: characterization tests for
   `BranchNameValidator` (protected-branch detection, Odoo-version
   extraction, flexible/strict validation, config loading, and the
@@ -128,8 +138,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other pattern in this module enforces. Tightened it to
   `^revert-\d+-.*<odoo-version>.*$` so a version-less revert branch is
   rejected too, consistent with the rest of the policy.
-
-### Fixed
 - `ODOO_PYTHON_REQUIREMENTS` (`config_loader.py`) had 18.0 pinned to Python
   3.11, and the README's "Supported Versions" table repeated the same number.
   Odoo's own docs (`administration/on_premise/source.html`) confirm the
