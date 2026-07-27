@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<!--
+  Everything below stays under [Unreleased] - no dated version heading - until
+  a v*.*.* tag/GitHub Release actually exists for it. A version number here
+  before that point describes work in progress, not something anyone can
+  actually install; the release step (bump pyproject.toml, rename this heading
+  to "## [x.y.z] - <real date>", tag) should be its own small, separate action
+  at cut time, not backdated inside the feature PR that adds the work.
+-->
+
 ### Added
 - `github_pr.py`: checks whether the current branch has an open GitHub PR
   (via `gh` CLI, falling back to `GITHUB_TOKEN`/`GH_TOKEN` + the REST API).
@@ -18,10 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and runs the tests rather than silently skipping. New `.solt-hooks.yaml`
   key: `test_require_open_pr` (default `true`; set `false` for the old
   unconditional-on-push behavior).
-
-## [1.1.0] - 2026-07-21
-
-### Added
 - `solt-test-changed-modules` hook (pre-push stage): runs Odoo tests for the
   modules changed vs. the base branch, so a push is gated on real test
   results, not just naming/lint.
@@ -36,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `.solt-hooks.yaml` keys: `test_odoo_bin`, `test_odoo_conf`,
   `test_db_host`/`test_db_port`/`test_db_user`/`test_db_password`,
   `test_http_port`/`test_gevent_port`, `test_harness_script` (escape hatch to
-  use a repo-provided script instead of the built-in runner).
+  use a repo-provided script instead of the built-in runner), and
+  `test_require_open_pr`.
 - `_detect_base_branch()` now also recognizes an Odoo version embedded in the
   current branch name (e.g. `feature/17.0-x` -> `origin/17.0`), ahead of the
   main/master/develop fallback - the actual convention for repos on a

@@ -30,7 +30,6 @@ import argparse
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from .config_loader import SoltConfig
@@ -82,12 +81,20 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
     odoo_bin = env_root / config.test_odoo_bin
     odoo_conf = _resolve_odoo_conf(config, env_root)
 
-    if not odoo_bin.exists():
-        print(f"[solt-test-module] No odoo-bin at {odoo_bin}, cannot run tests.", file=sys.stderr)
-        return 1
-    if not odoo_conf.exists():
-        print(f"[solt-test-module] No odoo.conf at {odoo_conf}, cannot run tests.", file=sys.stderr)
-        return 1
+    if not odoo_bin.exists() or not odoo_conf.exists():
+        # A missing local Odoo environment is a setup problem, not a test
+        # failure - it shouldn't block the push the way a real failure does.
+        # `SKIP=solt-test-changed-modules git push` (pre-commit's own
+        # built-in mechanism) bypasses this hook entirely if that's what's
+        # actually wanted instead.
+        missing = odoo_bin if not odoo_bin.exists() else odoo_conf
+        print(
+            f"[solt-test-module] SKIPPED - no Odoo environment found ({missing} doesn't exist). "
+            "Not a test failure - set test_odoo_bin/test_odoo_conf in .solt-hooks.yaml if this "
+            "path is wrong for your setup.",
+            file=sys.stderr,
+        )
+        return 0
 
     test_tags = ",".join(f"/{m}" for m in modules)
     scratch_db = f"test_scratch_{os.getpid()}"
@@ -112,6 +119,10 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
             capture_output=True,
         )
 
+    # Drop first too: self-heals from a prior run that got killed before its
+    # own cleanup ran and left a same-named scratch DB behind.
+    _dropdb()
+
     print(f"Creating scratch database: {scratch_db}")
     createdb = subprocess.run(
         [
@@ -132,50 +143,54 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
     modules_arg = ",".join(modules)
     print(f"Running tests for: {modules_arg} (test-tags: {test_tags})")
 
-    result_log = tempfile.NamedTemporaryFile(mode="w+", delete=False)
     try:
-        # --logfile= (empty) overrides the conf's `logfile` setting so output lands here,
-        # not in a shared log file an interactive dev server might also be writing to.
-        # --log-handler=:WARNING drops the INFO-level "Loading module X (n/N)" firehose -
-        # per-test FAIL/ERROR lines and the final "N failed, M error(s) of K tests" summary
-        # are already logged at WARNING/ERROR, so nothing evidentiary is lost, just the noise.
-        proc = subprocess.Popen(
-            [
-                "coverage",
-                "run",
-                str(odoo_bin),
-                "-c",
-                str(odoo_conf),
-                "-d",
-                scratch_db,
-                f"--db_host={config.test_db_host}",
-                f"--db_port={config.test_db_port}",
-                f"--db_user={config.test_db_user}",
-                f"--db_password={config.test_db_password}",
-                f"--http-port={config.test_http_port}",
-                f"--gevent-port={config.test_gevent_port}",
-                "--logfile=",
-                "--log-handler=:WARNING",
-                f"--test-tags={test_tags}",
-                "--stop-after-init",
-                "-i",
-                modules_arg,
-            ],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        try:
+            # --logfile= (empty) overrides the conf's `logfile` setting so output lands here,
+            # not in a shared log file an interactive dev server might also be writing to.
+            # --log-handler=:WARNING drops the INFO-level "Loading module X (n/N)" firehose -
+            # per-test FAIL/ERROR lines and the final "N failed, M error(s) of K tests" summary
+            # are already logged at WARNING/ERROR, so nothing evidentiary is lost, just the noise.
+            # No --db_password here: PGPASSWORD is already set in env above, and psycopg2
+            # (via libpq) picks it up the same way createdb/dropdb do - passing the password
+            # as a plain CLI arg would otherwise make it visible to anyone on the box via
+            # `ps aux`.
+            proc = subprocess.Popen(
+                [
+                    "coverage",
+                    "run",
+                    str(odoo_bin),
+                    "-c",
+                    str(odoo_conf),
+                    "-d",
+                    scratch_db,
+                    f"--db_host={config.test_db_host}",
+                    f"--db_port={config.test_db_port}",
+                    f"--db_user={config.test_db_user}",
+                    f"--http-port={config.test_http_port}",
+                    f"--gevent-port={config.test_gevent_port}",
+                    "--logfile=",
+                    "--log-handler=:WARNING",
+                    f"--test-tags={test_tags}",
+                    "--stop-after-init",
+                    "-i",
+                    modules_arg,
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except FileNotFoundError:
+            print("[solt-test-module] `coverage` not on PATH, cannot run tests.", file=sys.stderr)
+            return 1
+
         summary = ""
         for line in proc.stdout:
             print(line, end="")
-            result_log.write(line)
             if "failed," in line and "error(s) of" in line and "tests" in line:
                 summary = line.strip()
         result = proc.wait()
     finally:
-        result_log.close()
-        os.unlink(result_log.name)
         _dropdb()
 
     print("=" * 60)

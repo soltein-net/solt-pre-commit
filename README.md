@@ -1,6 +1,8 @@
 # Solt Pre-commit
 
 [![CI](https://github.com/soltein-net/solt-pre-commit/workflows/CI/badge.svg)](https://github.com/soltein-net/solt-pre-commit/actions)
+[![Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-core-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-core-coverage.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 [![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Odoo 17.0-19.0](https://img.shields.io/badge/odoo-17.0--19.0-purple.svg)](https://www.odoo.com/)

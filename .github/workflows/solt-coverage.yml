@@ -92,6 +92,7 @@ jobs:
         if: inputs.sibling-repos != ''
         env:
           CHECKOUT_TOKEN: ${{ secrets.CHECKOUT_TOKEN }}
+          SIBLING_REPOS: ${{ inputs.sibling-repos }}
         run: |
           if [ -z "$CHECKOUT_TOKEN" ]; then
             echo "::error::sibling-repos is set but no CHECKOUT_TOKEN secret was provided - cannot clone private dependency repos"
@@ -105,7 +106,7 @@ jobs:
             ref="${repo_ref##*@}"
             echo "Cloning $repo@$ref into $path"
             git clone --depth 1 --branch "$ref" "https://x-access-token:${CHECKOUT_TOKEN}@github.com/${repo}.git" "$path"
-          done <<< "${{ inputs.sibling-repos }}"
+          done <<< "$SIBLING_REPOS"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -129,14 +130,16 @@ jobs:
 
       - name: Build addons-path
         id: addons_path
+        env:
+          SIBLING_REPOS: ${{ inputs.sibling-repos }}
         run: |
           PATH_LIST="$GITHUB_WORKSPACE/odoo/odoo/addons,$GITHUB_WORKSPACE/odoo/addons,$GITHUB_WORKSPACE/repo"
-          if [ -n "${{ inputs.sibling-repos }}" ]; then
+          if [ -n "$SIBLING_REPOS" ]; then
             while IFS= read -r line; do
               [ -z "$line" ] && continue
               path="${line##*:}"
               PATH_LIST="$PATH_LIST,$GITHUB_WORKSPACE/$path"
-            done <<< "${{ inputs.sibling-repos }}"
+            done <<< "$SIBLING_REPOS"
           fi
           echo "value=$PATH_LIST" >> "$GITHUB_OUTPUT"
 
@@ -145,8 +148,9 @@ jobs:
         env:
           PGPASSWORD: odoo
           ADDONS_PATH: ${{ steps.addons_path.outputs.value }}
+          MODULES: ${{ inputs.modules }}
         run: |
-          IFS=',' read -ra MODULE_ARR <<< "${{ inputs.modules }}"
+          IFS=',' read -ra MODULE_ARR <<< "$MODULES"
           TEST_TAGS=""
           for m in "${MODULE_ARR[@]}"; do TEST_TAGS="${TEST_TAGS}/${m},"; done
           TEST_TAGS="${TEST_TAGS%,}"
@@ -161,7 +165,7 @@ jobs:
             --http-port=8069 --gevent-port=8072 \
             --log-handler=:WARNING \
             --test-tags="$TEST_TAGS" --stop-after-init \
-            -i "${{ inputs.modules }}" 2>&1 | tee test_output.txt
+            -i "$MODULES" 2>&1 | tee test_output.txt
           RESULT=${PIPESTATUS[0]}
           set -e
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"
@@ -170,14 +174,16 @@ jobs:
       - name: Coverage report
         id: report
         if: always()
+        env:
+          MODULES: ${{ inputs.modules }}
         run: |
-          IFS=',' read -ra MODULE_ARR <<< "${{ inputs.modules }}"
+          IFS=',' read -ra MODULE_ARR <<< "$MODULES"
           INCLUDE=""
           for m in "${MODULE_ARR[@]}"; do INCLUDE="${INCLUDE}*/${m}/*,"; done
           INCLUDE="${INCLUDE%,}"
           coverage report --include="$INCLUDE" | tee coverage_report.txt
           {
-            echo "## Coverage Report (${{ inputs.modules }})"
+            echo "## Coverage Report ($MODULES)"
             echo ""
             echo '```'
             cat coverage_report.txt
@@ -186,8 +192,12 @@ jobs:
           coverage html --include="$INCLUDE" -d htmlcov
           coverage json --include="$INCLUDE" -o coverage.json
 
-          COV=$(python3 -c "import json; print(round(json.load(open('coverage.json'))['totals']['percent_covered']))" 2>/dev/null || echo "0")
-          echo "coverage_pct=$COV" >> "$GITHUB_OUTPUT"
+          if [ -s coverage.json ] && COV=$(python3 -c "import json,sys; d=json.load(open('coverage.json')); print(round(d['totals']['percent_covered']))" 2>/tmp/coverage_parse_err); then
+            echo "coverage_pct=$COV" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Could not parse coverage.json ($(cat /tmp/coverage_parse_err 2>/dev/null)) - reporting coverage as unknown, not 0%"
+            echo "coverage_pct=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload HTML coverage report
         if: always()

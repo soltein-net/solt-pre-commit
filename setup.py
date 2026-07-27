@@ -4,12 +4,22 @@
 
 """Setup for solt-pre-commit."""
 
+import re
+
 from setuptools import find_packages, setup
 
 
-def read_requirements():
-    with open("requirements.txt", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+def read_dependencies():
+    """Single source of truth is pyproject.toml's [project].dependencies -
+    parsed as plain text (not tomllib) so this doesn't need a TOML-parsing
+    dependency just to read one array, and still works on Python 3.10
+    (tomllib is 3.11+)."""
+    with open("pyproject.toml", encoding="utf-8") as f:
+        content = f.read()
+    match = re.search(r"dependencies\s*=\s*\[(.*?)\]", content, re.DOTALL)
+    if not match:
+        raise RuntimeError("dependencies not found in pyproject.toml")
+    return re.findall(r'"([^"]+)"', match.group(1))
 
 
 def read_readme():
@@ -17,9 +27,20 @@ def read_readme():
         return f.read()
 
 
+def read_version():
+    """Single source of truth is pyproject.toml's [project].version - parsed as
+    plain text (not tomllib) so this doesn't need a TOML-parsing dependency just
+    to read one line, and still works on Python 3.10 (tomllib is 3.11+)."""
+    with open("pyproject.toml", encoding="utf-8") as f:
+        for line in f:
+            if line.strip().startswith("version"):
+                return line.split("=", 1)[1].strip().strip('"')
+    raise RuntimeError("version not found in pyproject.toml")
+
+
 setup(
     name="solt-pre-commit",
-    version="1.1.0",
+    version=read_version(),
     license="LGPL-3.0-or-later",
     description="Custom pre-commit hooks for Odoo module validation - Soltein (supports Odoo 17.0, 18.0, 19.0)",
     long_description=read_readme(),
@@ -44,7 +65,7 @@ setup(
         "Framework :: Odoo",
     ],
     python_requires=">=3.10",
-    install_requires=read_requirements(),
+    install_requires=read_dependencies(),
     entry_points={
         "console_scripts": [
             "solt-check-odoo=solt_pre_commit.checks_odoo_module:main",
