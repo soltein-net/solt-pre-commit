@@ -16,10 +16,14 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
 
 ## 📋 Supported Versions
 
+<!-- Per Odoo's own docs (odoo.com/documentation/<version>/administration/on_premise/source.html):
+     the Python minimum jumped 3.7->3.10 at 17.0 and held through 18.0 - it does
+     NOT bump every version. 19.0/20.0 below are not yet confirmed against Odoo's
+     docs; verify before assuming another bump. -->
 | Odoo Version | Python | Status |
 |--------------|--------|--------|
 | 17.0 | 3.10+ | ✅ Fully Supported |
-| 18.0 | 3.11+ | ✅ Fully Supported |
+| 18.0 | 3.10+ | ✅ Fully Supported |
 | 19.0 | 3.12+ | ✅ Fully Supported |
 | 20.0+ | 3.12+ | ✅ Fully Supported |
 
@@ -152,7 +156,7 @@ Test:
     python-version: '3.10'  # pinned to Odoo's minimum supported version - see note below
 ```
 
-**Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.10.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. We deliberately pin to Odoo's documented *minimum* supported Python per version — 3.10 for 17.0, 3.11 for 18.0, 3.12 for 19.0 and 20.0+ (see `ODOO_PYTHON_REQUIREMENTS` in `config_loader.py`) — so CI catches any accidental use of syntax/stdlib features newer than what's guaranteed to be available in production.
+**Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.10.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. We deliberately pin to Odoo's documented *minimum* supported Python per version — 3.10 for 17.0 and 18.0, 3.12 for 19.0 and 20.0+ (see `ODOO_PYTHON_REQUIREMENTS` in `config_loader.py`) — so CI catches any accidental use of syntax/stdlib features newer than what's guaranteed to be available in production.
 
 ### Pre-Push Test Blocking
 
@@ -604,6 +608,15 @@ pytest tests/ -v
 
 # Run with coverage
 pytest tests/ --cov=solt_pre_commit --cov-report=html
+```
+
+### Linting & Formatting
+
+`scripts/lint.sh` is the single source of truth for lint/format - it's what the `lint` job in `ci.yml` runs, so running it locally reproduces that CI check exactly instead of guessing which `ruff` invocation it uses:
+
+```bash
+scripts/lint.sh          # check only - exits non-zero on any violation, same as CI
+scripts/lint.sh --fix    # apply ruff's autofixes and reformat in place
 ```
 
 ### Local Testing

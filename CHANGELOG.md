@@ -49,6 +49,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branch-per-version model rather than a single trunk.
 
 ### Fixed
+- `ODOO_PYTHON_REQUIREMENTS` (`config_loader.py`) had 18.0 pinned to Python
+  3.11, and the README's "Supported Versions" table repeated the same number.
+  Odoo's own docs (`administration/on_premise/source.html`) confirm the
+  minimum jumped 3.7->3.10 once, at 17.0, and held at 3.10 through 18.0 - it
+  does not bump every version. Corrected both to 3.10; 19.0/20.0 (3.12) were
+  left as-is since Odoo's 19.0 docs weren't confirmable at fix time.
+- `github_pr.py`: reformatted to satisfy `ruff format --check` (the `gh pr
+  list` arg list and the REST API URL string were failing CI's format gate).
+- CI's lint job and local dev now run the exact same `scripts/lint.sh`
+  instead of two hand-maintained copies of the same `ruff check`/`ruff
+  format` invocations - previously `ci.yml` was ahead of what `CONTRIBUTING.md`
+  told contributors to run.
+- Removed the dead `[tool.isort]` section from `pyproject.toml` (isort was
+  replaced by ruff's `I` rule; nothing invoked isort). Its `known_first_party`
+  setting moved to the ruff-native `[tool.ruff.lint.isort]`.
 - `checks_odoo_module`: when no staged files match an Odoo module (e.g.
   `pre-commit run --all-files` with nothing staged), skip cleanly instead of
   falling back to validating the repo root itself as a module (which always

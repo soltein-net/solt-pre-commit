@@ -37,11 +37,15 @@ MINIMUM_SUPPORTED_VERSION = 17
 
 DEFAULT_ODOO_VERSION = "17.0"
 
-# Minimum Python version required per Odoo version
+# Minimum Python version required per Odoo version, per Odoo's own docs
+# (odoo.com/documentation/<version>/administration/on_premise/source.html):
+# the minimum jumped 3.7->3.10 at 17.0 and has stayed 3.10 through 18.0 since -
+# it does NOT bump every version. 19.0/20.0+ are not yet confirmed against
+# Odoo's docs; update once verified rather than assuming another bump.
 ODOO_PYTHON_REQUIREMENTS = {
     "16.0": "3.10",
     "17.0": "3.10",
-    "18.0": "3.11",
+    "18.0": "3.10",
     "19.0": "3.12",
     # Future versions default to Python 3.12
     "default": "3.12",

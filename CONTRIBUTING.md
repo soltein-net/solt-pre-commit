@@ -130,10 +130,10 @@ solt-check-branch invalid-branch  # Should fail
 - Follow PEP 8 with max line length of 120
 - Use type hints where practical
 - Document public methods with docstrings
-- Run checks before committing:
+- Run the same lint + format check CI runs before committing:
 ```bash
-ruff check .
-ruff format .
+scripts/lint.sh          # check only - fails on any violation, same as CI
+scripts/lint.sh --fix    # auto-fix + reformat in place
 ```
 
 ## Pull Request Process

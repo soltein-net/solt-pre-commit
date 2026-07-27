@@ -61,7 +61,7 @@ class TestFeatureDeprecation:
 class TestPythonVersion:
     @pytest.mark.parametrize(
         "odoo_version,expected",
-        [("17.0", "3.10"), ("18.0", "3.11"), ("19.0", "3.12"), ("99.0", "3.12")],
+        [("17.0", "3.10"), ("18.0", "3.10"), ("19.0", "3.12"), ("99.0", "3.12")],
     )
     def test_known_and_default_mappings(self, odoo_version, expected):
         assert OdooVersionDetector.get_python_version(odoo_version) == expected
