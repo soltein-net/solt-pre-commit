@@ -487,6 +487,31 @@ class ChecksOdooModulePython:
                         f"using compute='{compute_method}'"
                     )
 
+    def check_tracking_without_mail_thread(self):
+        """Detect tracking=True on fields of models that don't inherit mail.thread.
+
+        Odoo Warning: tracking value will be ignored
+
+        Only applies to classes that declare a new model (`_name` set): a
+        `_inherit`-only extension of an existing core/other-module model
+        (e.g. `_inherit = "sale.order"`) commonly doesn't repeat the mixin
+        because the base model already provides it elsewhere, so flagging
+        those would be mostly false positives from this file's perspective.
+        """
+        for model_key, fields in self.all_fields.items():
+            model_info = self.all_models[model_key]
+            filename = model_info["filename"]
+
+            if not model_info.get("_name") or model_info.get("has_mail_thread"):
+                continue
+
+            for field in fields:
+                if field.get("tracking"):
+                    self.checks_errors["python_tracking_without_mail_thread"].append(
+                        f'{filename}:{field["lineno"]} Field "{field["name"]}" has tracking '
+                        f'but model "{model_info["name"]}" does not inherit mail.thread (will be ignored)'
+                    )
+
     def check_selection_on_related_field(self):
         """Detect selection on related fields.
 
