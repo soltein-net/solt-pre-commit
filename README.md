@@ -1,11 +1,14 @@
 # Solt Pre-commit
 
 [![CI](https://github.com/soltein-net/solt-pre-commit/workflows/CI/badge.svg)](https://github.com/soltein-net/solt-pre-commit/actions)
-[![Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-core-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+[![Tests (3.10)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-py3.10-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+[![Tests (3.11)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-py3.11-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+[![Tests (3.12)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-py3.12-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-core-coverage.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 [![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Odoo 17.0-19.0](https://img.shields.io/badge/odoo-17.0--19.0-purple.svg)](https://www.odoo.com/)
+[![Integration (17.0)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-odoo17.0-integration.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+[![Integration (18.0)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-odoo18.0-integration.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+[![Integration (19.0)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-odoo19.0-integration.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 [![License: LGPL-3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
 Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches errors and runtime warnings before they reach production.** Blocks non-test-passing code at the pre-push stage.

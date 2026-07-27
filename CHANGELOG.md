@@ -86,7 +86,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report generation) - coverage for this module went from 18% to 99%.
   Overall repo test coverage: 39% -> 92%.
 
+### Changed
+- README badges: split the single `Tests (core)` badge (which only ever
+  reflected the `self-coverage` job's fixed Python 3.11 run) into three -
+  `Tests (3.10)`, `Tests (3.11)`, `Tests (3.12)` - each fed by its own
+  matrix leg in `ci.yml`'s `test` job, so the badge finally represents
+  what actually runs. Removed the static `Python 3.10+` badge next to it,
+  since it was a label, not a live result, and now duplicates information
+  the three real badges already show accurately. `ci.yml`'s `test` job
+  gained a per-leg "Report per-version test badge" step (`if: always()`)
+  that PATCHes `solt-pre-commit-py<version>-tests.json` into the shared
+  gist; the `Coverage` badge is untouched (coverage doesn't meaningfully
+  vary per interpreter, so it stays a single number).
+- README badges: same treatment for the static `Odoo 17.0-19.0` label -
+  replaced with three live `Integration (17.0)`/`(18.0)`/`(19.0)` badges
+  fed by the `integration` job's own matrix legs (a "Report per-version
+  integration badge" step per leg, using `job.status` since that job has
+  several sequential steps rather than one single test command).
+
 ### Fixed
+- `LICENSE`: the repo root file contained the full AGPL-3.0 text, while
+  `pyproject.toml`, `setup.py`, every source/test file's copyright header,
+  and the README all declared LGPL-3.0-or-later. Replaced `LICENSE` with
+  the verbatim LGPL-3.0 text (from gnu.org/licenses/lgpl-3.0.txt) to match
+  the license actually declared everywhere else in the codebase.
 - `checks_odoo_module_xml.py`: `_visit_xml_record` unpacked
   `record_id.split(".")` into exactly 2 variables, so a record id with two
   or more dots (e.g. `<record id="a.b.c">`) raised `ValueError` and crashed

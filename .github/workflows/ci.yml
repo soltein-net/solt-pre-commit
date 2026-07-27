@@ -69,6 +69,7 @@ jobs:
           pip install pytest pytest-cov
 
       - name: Run tests
+        id: pytest
         run: |
           if [ -d "tests" ]; then
             pytest tests/ -v --tb=short --cov=solt_pre_commit --cov-report=xml
@@ -76,6 +77,32 @@ jobs:
             echo "No tests directory found, running basic import test"
             python -c "from solt_pre_commit import ChecksOdooModule, SoltConfig, SUPPORTED_ODOO_VERSIONS; print(f'Import OK - Supported versions: {SUPPORTED_ODOO_VERSIONS}')"
           fi
+
+      # Reports THIS matrix leg's own result, separately from the "Self
+      # Coverage" job's single non-matrix badge below - so the README can show
+      # per-Python-version test status instead of one number that only ever
+      # reflected 3.11.
+      - name: Report per-version test badge
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GIST_SECRET }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::GIST_SECRET not provided, skipping test badge update"
+            exit 0
+          fi
+          if [ "${{ steps.pytest.outcome }}" = "success" ]; then
+            MSG="passing"; COLOR="brightgreen"
+          else
+            MSG="failing"; COLOR="red"
+          fi
+          BADGE_CONTENT=$(jq -nc --arg l "tests (python ${{ matrix.python-version }})" --arg m "$MSG" --arg c "$COLOR" \
+            '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
+          FILENAME="solt-pre-commit-py${{ matrix.python-version }}-tests.json"
+          jq -n --arg f "$FILENAME" --arg c "$BADGE_CONTENT" '{files: {($f): {content: $c}}}' | \
+          gh api --method PATCH "/gists/147d543a086f6735d1ffa02172766e86" --input - \
+            && echo "Updated tests badge for Python ${{ matrix.python-version }}" \
+            || echo "::warning::Could not update test badge (non-fatal)"
 
   # ───────────────────────────────────────────────────────────────────────────
   # SELF BADGES - solt-pre-commit publishes the same tests/coverage badges to
@@ -242,6 +269,32 @@ jobs:
           # Invalid format
           ! solt-check-branch "invalid-branch-name"
           echo "All invalid branch tests passed (correctly rejected)"
+
+      # Reports THIS matrix leg's own result - mirrors the "test" job's
+      # per-version badge step above, so the README can show per-Odoo-version
+      # integration status instead of a static "Odoo 17.0-19.0" label badge.
+      # job.status reflects all preceding steps in this job, not just one.
+      - name: Report per-version integration badge
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GIST_SECRET }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::GIST_SECRET not provided, skipping integration badge update"
+            exit 0
+          fi
+          if [ "${{ job.status }}" = "success" ]; then
+            MSG="passing"; COLOR="brightgreen"
+          else
+            MSG="failing"; COLOR="red"
+          fi
+          BADGE_CONTENT=$(jq -nc --arg l "integration (odoo ${{ matrix.odoo-version }})" --arg m "$MSG" --arg c "$COLOR" \
+            '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
+          FILENAME="solt-pre-commit-odoo${{ matrix.odoo-version }}-integration.json"
+          jq -n --arg f "$FILENAME" --arg c "$BADGE_CONTENT" '{files: {($f): {content: $c}}}' | \
+          gh api --method PATCH "/gists/147d543a086f6735d1ffa02172766e86" --input - \
+            && echo "Updated integration badge for Odoo ${{ matrix.odoo-version }}" \
+            || echo "::warning::Could not update integration badge (non-fatal)"
 
   # ───────────────────────────────────────────────────────────────────────────
   # BUILD & PUBLISH
