@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BranchNameValidator` (protected-branch detection, Odoo-version
   extraction, flexible/strict validation, config loading, and the
   `solt-check-branch` CLI) - coverage for this module went from 16% to 94%.
+- `tests/test_checks_odoo_module_csv.py`: characterization tests for
+  `ChecksOdooModuleCSV` (duplicate record-id detection scoped per
+  `data_section`, missing-file handling) - coverage for this module went
+  from 22% to 100%.
 
 ### Fixed
 - `checks_branch_name.py`: a misleading comment on
