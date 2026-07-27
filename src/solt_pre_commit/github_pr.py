@@ -71,11 +71,17 @@ def _check_via_gh(owner: str, repo: str, branch: str) -> bool | None:
     try:
         result = subprocess.run(
             [
-                "gh", "pr", "list",
-                "--repo", f"{owner}/{repo}",
-                "--head", branch,
-                "--state", "open",
-                "--json", "number",
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                f"{owner}/{repo}",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
             ],
             capture_output=True,
             text=True,
@@ -99,10 +105,7 @@ def _check_via_rest_api(owner: str, repo: str, branch: str) -> bool | None:
     if not token:
         return None
 
-    url = (
-        f"https://api.github.com/repos/{owner}/{repo}/pulls"
-        f"?head={owner}:{branch}&state=open"
-    )
+    url = f"https://api.github.com/repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open"
     request = urllib.request.Request(
         url,
         headers={

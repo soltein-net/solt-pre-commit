@@ -63,14 +63,6 @@ py-modules = [
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml"]
 
-[tool.black]
-line-length = 120
-
-[tool.isort]
-profile = "black"
-line_length = 120
-known_first_party = ["solt_pre_commit"]
-
 [tool.ruff]
 line-length = 120
 target-version = "py310"
@@ -78,6 +70,12 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "B", "C4"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["solt_pre_commit"]
+
+[tool.ruff.format]
+# Defaults match; explicit so the formatting contract lives in one place.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
