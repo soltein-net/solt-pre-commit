@@ -29,6 +29,15 @@ repos:
         types: [ python ]
         additional_dependencies: [ lxml, polib, pyyaml ]
 
+      - id: solt-check-requirements
+        name: Soltein - Verify requirements.txt matches manifests
+        entry: python -m solt_pre_commit.checks_requirements
+        language: python
+        files: (__manifest__|__openerp__)\.py$
+        pass_filenames: false
+        require_serial: true
+        additional_dependencies: [ manifestoo, packaging ]
+
   # ─────────────────────────────────────────────────────────────────────────
   # PYTHON CODE QUALITY - Ruff (linter only, NO autofix, NO formatter)
   # Uses configuration from pyproject.toml

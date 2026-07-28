@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.1] - 2026-07-27
 
+### Added
+- `solt-check-requirements` hook: verifies (or `--fix` regenerates) a repo's
+  root `requirements.txt` against every installable addon's
+  `__manifest__.py` `external_dependencies["python"]`, read via
+  [manifestoo](https://github.com/acsone/manifestoo). Fails closed on drift
+  instead of rewriting the file at commit time; also fails on two addons
+  declaring conflicting version constraints for the same package rather than
+  silently picking one. New dependencies: `manifestoo`, `packaging`.
+
+## [1.1.1] - 2026-07-27
+
 ### Fixed
 - `scripts/setup-repo.py`: `update_version_in_file`'s regexes matched
   `rev: vX.Y.Z` and `@vX.Y.Z` **anywhere** in the file, not scoped to the
