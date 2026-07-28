@@ -128,7 +128,7 @@ jobs:
           pip install -r odoo/requirements.txt
           pip install coverage
           # Not on PyPI - installed straight from the tagged commit instead.
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.4.0"
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.0"
 
       - name: Build addons-path
         id: addons_path

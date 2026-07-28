@@ -5,9 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0] - 2026-07-28
+## [1.2.0] - 2026-07-28
 
 ### Added
+- `solt-check-requirements` hook: verifies (or `--fix` regenerates) a repo's
+  root `requirements.txt` against every installable addon's
+  `__manifest__.py` `external_dependencies["python"]`, read via
+  [manifestoo](https://github.com/acsone/manifestoo). Fails closed on drift
+  instead of rewriting the file at commit time; also fails on two addons
+  declaring conflicting version constraints for the same package rather than
+  silently picking one. New dependencies: `manifestoo`, `packaging`.
 - `solt-test-module`/`odoo_test_runner.run()` gained an `--addons-path`
   override (`run(..., addons_path=None)`). Omitted by default - local
   and devcontainer callers keep relying on the resolved `odoo.conf`'s own
@@ -25,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now owns scratch-DB create/drop internally, same as it always has for
   local/pre-push callers.
   - Since `solt-pre-commit` isn't published to PyPI, CI installs it via
-    `pip install git+https://github.com/soltein-net/solt-pre-commit.git@v1.4.0`
+    `pip install git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.0`
     rather than a version pin.
   - `odoo_test_runner.run()` requires a conf file to exist before it will
     run anything at all (silently exits 0 otherwise) - CI now writes a
@@ -41,20 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - See `docs/SPEC-consolidate-test-execution.md` for the full spec.
   - **Not verifiable locally**: no Postgres/`odoo` package in this
     sandbox. This change's real test is the next consumer-repo PR that
-    bumps its pin to `v1.4.0` - watch its `Test` job specifically.
-
-## [1.3.0] - 2026-07-28
-
-### Added
-- `solt-check-requirements` hook: verifies (or `--fix` regenerates) a repo's
-  root `requirements.txt` against every installable addon's
-  `__manifest__.py` `external_dependencies["python"]`, read via
-  [manifestoo](https://github.com/acsone/manifestoo). Fails closed on drift
-  instead of rewriting the file at commit time; also fails on two addons
-  declaring conflicting version constraints for the same package rather than
-  silently picking one. New dependencies: `manifestoo`, `packaging`.
-
-## [1.2.0] - 2026-07-28
+    bumps its pin to `v1.2.0` - watch its `Test` job specifically.
 
 ### Removed
 - `setup-repo.py` no longer distributes `addyosmani/agent-skills` into

@@ -19,7 +19,7 @@ Checks included:
 - Python: fields (string, help), docstrings, tracking, compute_sudo
 """
 
-__version__ = "1.4.0"
+__version__ = "1.2.0"
 __author__ = "Soltein SA de CV"
 
 from .checks_branch_name import BranchNameValidator
