@@ -53,8 +53,29 @@ else:
 
 TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
-# Current version of solt-pre-commit
-CURRENT_VERSION = "v1.1.0"
+
+def get_current_version() -> str:
+    """Read solt-pre-commit's own version from pyproject.toml.
+
+    Single source of truth is pyproject.toml's [project].version - parsed as
+    plain text (not tomllib) so this doesn't need a TOML-parsing dependency,
+    and still works on Python 3.10 (tomllib is 3.11+). Mirrors setup.py's
+    read_version() so both stay in sync automatically on every release
+    instead of relying on someone remembering to bump a second constant.
+    """
+    pyproject = PROJECT_ROOT / "pyproject.toml"
+    with pyproject.open(encoding="utf-8") as f:
+        for line in f:
+            if line.strip().startswith("version"):
+                version = line.split("=", 1)[1].strip().strip('"')
+                return f"v{version}"
+    raise RuntimeError(f"version not found in {pyproject}")
+
+
+# Current version of solt-pre-commit - always derived from pyproject.toml so
+# it can't drift behind actual releases (see CHANGELOG for the v1.1.0 vs
+# v1.2.0 drift this replaced).
+CURRENT_VERSION = get_current_version()
 SOLT_REPO_URL = "https://github.com/soltein-net/solt-pre-commit"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -532,6 +553,11 @@ def setup_single_repo(
             copied += 1
         else:
             failed += 1
+
+    # Stamp the current solt-pre-commit version onto the just-copied config,
+    # in case the template's own hardcoded rev (templates/.pre-commit-config.yaml)
+    # has drifted behind CURRENT_VERSION since it was last edited.
+    update_version_single(str(target), CURRENT_VERSION, dry_run, quiet=True)
 
     # Update configurations
     solt_hooks_file = target / ".solt-hooks.yaml"
