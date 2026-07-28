@@ -175,6 +175,76 @@ class TestRunDbLifecycle:
         assert captured["env"]["PGPASSWORD"] == config.test_db_password
 
 
+class TestAddonsPathOverride:
+    def _run_capturing_popen(self, tmp_path, config, **run_kwargs):
+        captured = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = cmd
+            proc = mock.Mock()
+            proc.stdout = iter([])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", side_effect=fake_popen
+        ):
+            otr.run(["fake_module"], config, env_root=tmp_path, **run_kwargs)
+
+        return captured["cmd"]
+
+    def test_appends_the_flag_when_provided(self, fake_env):
+        tmp_path, config = fake_env
+        cmd = self._run_capturing_popen(tmp_path, config, addons_path="/custom/addons")
+        assert "--addons-path=/custom/addons" in cmd
+
+    def test_omitting_it_adds_no_flag_at_all(self, fake_env):
+        # Regression guard: CI-facing callers pass addons_path, but existing
+        # local/pre-push callers don't - they must see byte-for-byte the same
+        # command as before this override existed.
+        tmp_path, config = fake_env
+        cmd = self._run_capturing_popen(tmp_path, config)
+        assert not any(arg.startswith("--addons-path") for arg in cmd)
+
+    def test_explicit_none_is_the_same_as_omitting_it(self, fake_env):
+        tmp_path, config = fake_env
+        cmd = self._run_capturing_popen(tmp_path, config, addons_path=None)
+        assert not any(arg.startswith("--addons-path") for arg in cmd)
+
+
+class TestMainCliAddonsPath:
+    def test_addons_path_flag_reaches_run(self, monkeypatch):
+        captured = {}
+
+        def fake_run(modules, config, **kwargs):
+            captured["addons_path"] = kwargs.get("addons_path")
+            return 0
+
+        monkeypatch.setattr(otr, "run", fake_run)
+        monkeypatch.setattr(
+            "sys.argv", ["solt-test-module", "--addons-path", "/ci/addons", "fake_module"]
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+
+        assert exc_info.value.code == 0
+        assert captured["addons_path"] == "/ci/addons"
+
+    def test_omitting_the_flag_passes_none(self, monkeypatch):
+        captured = {}
+
+        def fake_run(modules, config, **kwargs):
+            captured["addons_path"] = kwargs.get("addons_path")
+            return 0
+
+        monkeypatch.setattr(otr, "run", fake_run)
+        monkeypatch.setattr("sys.argv", ["solt-test-module", "fake_module"])
+        with pytest.raises(SystemExit):
+            otr.main()
+
+        assert captured["addons_path"] is None
+
+
 class TestRunCoverageMissing:
     def test_missing_coverage_binary_returns_1_not_traceback(self, fake_env):
         tmp_path, config = fake_env

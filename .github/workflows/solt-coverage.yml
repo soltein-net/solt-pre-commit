@@ -127,6 +127,8 @@ jobs:
           pip install --upgrade pip
           pip install -r odoo/requirements.txt
           pip install coverage
+          # Not on PyPI - installed straight from the tagged commit instead.
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.0"
 
       - name: Build addons-path
         id: addons_path
@@ -146,26 +148,28 @@ jobs:
       - name: Run tests with coverage
         id: test
         env:
-          PGPASSWORD: odoo
           ADDONS_PATH: ${{ steps.addons_path.outputs.value }}
           MODULES: ${{ inputs.modules }}
+          SOLT_ODOO_VERSION: ${{ inputs.odoo-version }}
         run: |
-          IFS=',' read -ra MODULE_ARR <<< "$MODULES"
-          TEST_TAGS=""
-          for m in "${MODULE_ARR[@]}"; do TEST_TAGS="${TEST_TAGS}/${m},"; done
-          TEST_TAGS="${TEST_TAGS%,}"
+          # solt-test-module (odoo_test_runner.py) requires a conf file to
+          # exist at .devcontainer/dev_<major>/odoo.conf before it will run
+          # anything - its content barely matters here since every real
+          # setting (db host/port/user/password, ports, addons-path) is
+          # still supplied via env vars/CLI flags, same as before this
+          # migration. SOLT_ODOO_VERSION makes the derived <major> match
+          # inputs.odoo-version deterministically instead of relying on
+          # manifest auto-detection, which could disagree with it.
+          MAJOR="${SOLT_ODOO_VERSION%%.*}"
+          mkdir -p ".devcontainer/dev_${MAJOR}"
+          echo "[options]" > ".devcontainer/dev_${MAJOR}/odoo.conf"
 
-          createdb -h localhost -p 5432 -U odoo ci_coverage
-
+          # DB_HOST/DB_PORT/DB_USER/DB_PASSWORD are not set here - SoltConfig's
+          # own defaults (localhost/5432/odoo/odoo) already match the postgres
+          # service above exactly. Scratch-DB create/drop is now handled
+          # internally by solt-test-module, not this workflow.
           set +e
-          coverage run "$GITHUB_WORKSPACE/odoo/odoo-bin" \
-            --addons-path="$ADDONS_PATH" \
-            -d ci_coverage \
-            --db_host=localhost --db_port=5432 --db_user=odoo --db_password=odoo \
-            --http-port=8069 --gevent-port=8072 \
-            --log-handler=:WARNING \
-            --test-tags="$TEST_TAGS" --stop-after-init \
-            -i "$MODULES" 2>&1 | tee test_output.txt
+          solt-test-module "$MODULES" --addons-path "$ADDONS_PATH" 2>&1 | tee test_output.txt
           RESULT=${PIPESTATUS[0]}
           set -e
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"
