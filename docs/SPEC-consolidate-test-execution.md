@@ -139,8 +139,8 @@ do beyond "swap one command for another":
 
 1. **`solt-pre-commit` is not published to PyPI** (confirmed: no
    `twine upload` step anywhere in `ci.yml`). `pip install
-   solt-pre-commit==1.2.0` would simply fail. CI installs it via
-   `pip install git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.0`
+   solt-pre-commit==1.4.0` would simply fail. CI installs it via
+   `pip install git+https://github.com/soltein-net/solt-pre-commit.git@v1.4.0`
    instead - installing straight from the tagged commit, no PyPI needed.
 2. **`odoo_test_runner.run()` requires a conf file to exist** before it
    runs anything - it silently exits 0 (treated as an unconfigured local

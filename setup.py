@@ -70,6 +70,7 @@ setup(
         "console_scripts": [
             "solt-check-odoo=solt_pre_commit.checks_odoo_module:main",
             "solt-check-branch=solt_pre_commit.checks_branch_name:main",
+            "solt-check-requirements=solt_pre_commit.checks_requirements:main",
             "solt-test-changed-modules=solt_pre_commit.checks_test_changed_modules:main",
             "solt-test-module=solt_pre_commit.odoo_test_runner:main",
         ]

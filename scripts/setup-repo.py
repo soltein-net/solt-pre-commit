@@ -67,15 +67,20 @@ FILES_TO_COPY = [
     (TEMPLATES_DIR / ".pylintrc", ".pylintrc", "Pylint configuration"),
     (TEMPLATES_DIR / "pyproject.toml", "pyproject.toml", "Python project configuration"),
     (TEMPLATES_DIR / ".solt-hooks.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
-    (TEMPLATES_DIR / "skills-lock.json", "skills-lock.json", "Agent skills lock file"),
+    (TEMPLATES_DIR / "CONTRIBUTING-template.md", "CONTRIBUTING.md", "Contributor guide (dev setup, branch naming, optional AI tooling)"),
 ]
 
 # Directories copied wholesale (source_path, destination_relative_path, description).
 # Only .claude/skills is copied under .claude/ (not the whole .claude/ tree) so a
 # repo's own .claude/agents, .claude/commands, or settings are never touched.
+# Deliberately NOT distributing addyosmani/agent-skills here (removed - see
+# CHANGELOG): that's a third-party AI-agent tooling product with its own
+# install path (Claude Code's `/plugin marketplace add` + `/plugin install`),
+# not something an Odoo-module CI/QA tool should be vendoring and keeping in
+# sync. GitNexus (unrelated, this repo's own code-intelligence skill) still
+# ships via the entry below.
 DIRECTORIES_TO_COPY = [
-    (TEMPLATES_DIR / ".agents", ".agents", "Shared agent skills (addyosmani/agent-skills)"),
-    (TEMPLATES_DIR / ".claude" / "skills", ".claude/skills", "Claude Code skill symlinks"),
+    (TEMPLATES_DIR / ".claude" / "skills", ".claude/skills", "GitNexus skill"),
 ]
 
 # Pre-commit config (depends on --local flag)

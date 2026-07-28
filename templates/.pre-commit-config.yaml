@@ -18,6 +18,8 @@ repos:
         # args: [--show-info] # Uncomment to see info-level issues
         # args: [--scope, full]  # Uncomment to validate entire repo
         # args: [--odoo-version, 18.0]  # Uncomment to force specific version
+      - id: solt-check-requirements
+        # args: [--fix]  # Uncomment to auto-regenerate instead of just checking
 
   # ─────────────────────────────────────────────────────────────────────────
   # PYTHON CODE QUALITY - Ruff (linter only, NO autofix, NO formatter)

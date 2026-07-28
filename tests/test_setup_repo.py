@@ -85,5 +85,30 @@ class TestUpdateVersionInFile:
         assert setup_repo.update_version_in_file(missing, "v1.1.0") is False
 
 
+class TestFilesToCopy:
+    """Regression guard for what setup-repo.py distributes into consumer
+    repos - catches exactly the kind of drift this suite exists to prevent
+    (a file that's copied but shouldn't be, or should be but isn't)."""
+
+    def test_does_not_distribute_the_agent_skills_lockfile(self):
+        # Removed deliberately - solt-pre-commit doesn't vendor/distribute
+        # third-party AI-agent tooling (addyosmani/agent-skills has its own
+        # install path via Claude Code's own plugin system).
+        destinations = [dest for _src, dest, _desc in setup_repo.FILES_TO_COPY]
+        assert "skills-lock.json" not in destinations
+
+    def test_distributes_a_contributing_md_from_the_template(self):
+        matches = [
+            (src, dest) for src, dest, _desc in setup_repo.FILES_TO_COPY if dest == "CONTRIBUTING.md"
+        ]
+        assert len(matches) == 1
+        (src, _dest) = matches[0]
+        assert src.name == "CONTRIBUTING-template.md"
+
+    def test_does_not_distribute_the_addyosmani_agents_directory(self):
+        destinations = [dest for _src, dest, _desc in setup_repo.DIRECTORIES_TO_COPY]
+        assert ".agents" not in destinations
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

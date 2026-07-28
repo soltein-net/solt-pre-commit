@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "solt-pre-commit"
-version = "1.2.0"
+version = "1.4.0"
 description = "Custom pre-commit hooks for Odoo module validation - Soltein (supports Odoo 17.0, 18.0, 19.0)"
 readme = "README.md"
 license = {text = "LGPL-3.0-or-later"}
@@ -25,6 +25,8 @@ classifiers = [
 ]
 dependencies = [
     "lxml>=4.9.0",
+    "manifestoo>=1.0.0",
+    "packaging>=21.0",
     "polib>=1.1.0",
     "pyyaml>=6.0",
 ]
@@ -39,6 +41,7 @@ dev = [
 [project.scripts]
 solt-check-branch = "solt_pre_commit.checks_branch_name:main"
 solt-check-odoo = "solt_pre_commit.checks_odoo_module:main"
+solt-check-requirements = "solt_pre_commit.checks_requirements:main"
 solt-test-changed-modules = "solt_pre_commit.checks_test_changed_modules:main"
 solt-test-module = "solt_pre_commit.odoo_test_runner:main"
 
