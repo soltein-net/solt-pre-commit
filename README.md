@@ -148,6 +148,7 @@ repos:
 | **Odoo Runtime Warnings** | Detects issues that cause Odoo warnings | pre-commit |
 | **XML Validations** | Syntax, duplicate IDs, deprecated attributes | pre-commit |
 | **Python Quality** | Docstrings, field attributes, decorators | pre-commit |
+| **requirements.txt Sync** | Verifies root requirements.txt matches manifests' `external_dependencies` | pre-commit |
 
 ### Pre-Push Testing (Blocks Pushes)
 
@@ -177,6 +178,17 @@ repos:
 - Parses `depends:` to find external repos (e.g., `solt_base` → `soltein-net/solt-base@17.0`)
 - Detects Odoo version from manifest or branch name
 - Maps to correct Python version
+
+### Keeping requirements.txt in Sync
+
+`solt-check-requirements` uses [manifestoo](https://github.com/acsone/manifestoo) to read `external_dependencies["python"]` from every installable addon's manifest under the repo, then verifies the repo's root `requirements.txt` is an exact match (dedup'd by canonical package name, order-independent, comments ignored). It fails closed - the file is never rewritten automatically at commit time:
+
+```bash
+# After adding/editing a manifest's external_dependencies:
+solt-check-requirements --fix
+```
+
+The manifest stays the single source of truth for a module's Python dependencies (it's what Odoo itself checks before allowing a module to install) - `requirements.txt` is only ever a generated aggregate of it, never edited by hand. If two addons in the repo declare different version constraints for the same package, the check fails with both constraints shown instead of silently picking one.
 
 ### Branch Handling for Sibling Repos (Per-Module PR/Branch CI)
 
@@ -276,6 +288,7 @@ cat .git/hooks/pre-push
 | `solt-check-csv` | CSV-only validation | CSV |
 | `solt-check-po` | PO/POT-only validation | PO, POT |
 | `solt-check-python` | Python-only validation | Python |
+| `solt-check-requirements` | Verify (or `--fix` regenerate) root requirements.txt from manifests | `__manifest__.py` |
 
 **Note**: `solt-test-changed-modules` runs at pre-push stage only (not listed above, auto-configured by the generated `.pre-commit-config.yaml`).
 
