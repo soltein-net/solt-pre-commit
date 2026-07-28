@@ -646,7 +646,7 @@ solt-pre-commit/
 │   ├── README-template.md                  # README template for client repos
 │   ├── README-template-minimal.md          # Minimal README template
 │   ├── BADGES-TEMPLATE.md                  # Badge block template
-│   ├── skills-lock.json                    # Pinned skills manifest
+│   ├── CONTRIBUTING-template.md            # Contributor guide for client repos
 │   └── github-workflows/
 │       └── solt-validate.yml               # Client-repo workflow template
 ├── docs/
