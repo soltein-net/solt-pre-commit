@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `solt-test-module`/`odoo_test_runner.run()` gained an `--addons-path`
+  override (`run(..., addons_path=None)`). Omitted by default - local
+  and devcontainer callers keep relying on the resolved `odoo.conf`'s own
+  `addons_path`; CI now passes its dynamically-assembled sibling-repo
+  addons-path explicitly instead.
+
+### Changed
+- `solt-coverage.yml` (the reusable CI `Test` job) now calls the shared
+  `solt-test-module` CLI instead of its own independently hand-written
+  `coverage run odoo-bin ...` invocation - eliminating the drift already
+  found between the two: CI was passing `--db_password=odoo` as a plain
+  CLI argument (visible via `ps aux`), while the local runner deliberately
+  uses a `PGPASSWORD` env var specifically to avoid that exposure. CI's
+  own `createdb -d ci_coverage` line is removed too - the shared function
+  now owns scratch-DB create/drop internally, same as it always has for
+  local/pre-push callers.
+  - Since `solt-pre-commit` isn't published to PyPI, CI installs it via
+    `pip install git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.0`
+    rather than a version pin.
+  - `odoo_test_runner.run()` requires a conf file to exist before it will
+    run anything at all (silently exits 0 otherwise) - CI now writes a
+    minimal `.devcontainer/dev_<major>/odoo.conf` and exports
+    `SOLT_ODOO_VERSION` (so the derived major version matches
+    `inputs.odoo-version` deterministically, not manifest auto-detection)
+    before calling `solt-test-module`. Neither of these was anticipated
+    in the original plan - both surfaced only while actually wiring the
+    call together.
+  - CI's fixed ports (8069/8072) are replaced by the shared function's
+    own defaults (18069/18072) - a cosmetic difference only, since
+    nothing else runs in that container to conflict with.
+  - See `docs/SPEC-consolidate-test-execution.md` for the full spec.
+  - **Not verifiable locally**: no Postgres/`odoo` package in this
+    sandbox. This change's real test is the next consumer-repo PR that
+    bumps its pin to `v1.2.0` - watch its `Test` job specifically.
+
 ## [1.1.1] - 2026-07-27
 
 ### Fixed

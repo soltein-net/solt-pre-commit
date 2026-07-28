@@ -73,9 +73,15 @@ def _resolve_odoo_conf(config: SoltConfig, env_root: Path) -> Path:
     return env_root / f".devcontainer/dev_{major}/odoo.conf"
 
 
-def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
+def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_path: str | None = None) -> int:
     """Run the given modules' own tests against a scratch DB. Returns the exit
     code to propagate (0 = pass, nonzero = fail or error).
+
+    addons_path: optional --addons-path override for odoo-bin. Omitted by
+    default (None) - local/devcontainer callers rely on the resolved
+    odoo.conf's own addons_path setting. CI passes this explicitly since its
+    addons-path is assembled fresh each run from cloned sibling repos, not a
+    static conf file.
     """
     env_root = env_root or find_env_root()
     odoo_bin = env_root / config.test_odoo_bin
@@ -154,27 +160,30 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None) -> int:
             # (via libpq) picks it up the same way createdb/dropdb do - passing the password
             # as a plain CLI arg would otherwise make it visible to anyone on the box via
             # `ps aux`.
+            odoo_bin_args = [
+                "coverage",
+                "run",
+                str(odoo_bin),
+                "-c",
+                str(odoo_conf),
+                "-d",
+                scratch_db,
+                f"--db_host={config.test_db_host}",
+                f"--db_port={config.test_db_port}",
+                f"--db_user={config.test_db_user}",
+                f"--http-port={config.test_http_port}",
+                f"--gevent-port={config.test_gevent_port}",
+                "--logfile=",
+                "--log-handler=:WARNING",
+                f"--test-tags={test_tags}",
+                "--stop-after-init",
+            ]
+            if addons_path is not None:
+                odoo_bin_args.append(f"--addons-path={addons_path}")
+            odoo_bin_args += ["-i", modules_arg]
+
             proc = subprocess.Popen(
-                [
-                    "coverage",
-                    "run",
-                    str(odoo_bin),
-                    "-c",
-                    str(odoo_conf),
-                    "-d",
-                    scratch_db,
-                    f"--db_host={config.test_db_host}",
-                    f"--db_port={config.test_db_port}",
-                    f"--db_user={config.test_db_user}",
-                    f"--http-port={config.test_http_port}",
-                    f"--gevent-port={config.test_gevent_port}",
-                    "--logfile=",
-                    "--log-handler=:WARNING",
-                    f"--test-tags={test_tags}",
-                    "--stop-after-init",
-                    "-i",
-                    modules_arg,
-                ],
+                odoo_bin_args,
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -244,6 +253,11 @@ def main():
     )
     parser.add_argument("modules", help="Comma-separated module names, e.g. llm_crm or solt_hr,solt_hr_payroll")
     parser.add_argument("--config", default=None, help="Path to .solt-hooks.yaml")
+    parser.add_argument(
+        "--addons-path",
+        default=None,
+        help="Override --addons-path for odoo-bin (default: use the resolved odoo.conf's own setting)",
+    )
     args = parser.parse_args()
 
     config = SoltConfig(args.config)
@@ -251,7 +265,7 @@ def main():
     if not modules:
         parser.error("no modules given")
 
-    sys.exit(run(modules, config))
+    sys.exit(run(modules, config, addons_path=args.addons_path))
 
 
 if __name__ == "__main__":
