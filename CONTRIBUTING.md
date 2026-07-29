@@ -66,7 +66,8 @@ solt-pre-commit/
 │   ├── .pre-commit-config.yaml         # Pre-commit hooks template
 │   ├── .pre-commit-config-local.yaml   # Local pre-commit (monorepo)
 │   ├── .solt-hooks.yaml                # Default Soltein validation settings
-│   ├── README-template.md              # README template for client repos
+│   ├── README-REPO-template.md         # Client repo's root README (auto-filled by setup-repo.py)
+│   ├── README-MODULE-template.rst      # Per-module README (OCA-style, manual copy)
 │   └── github-workflows/solt-validate.yml  # Client-repo workflow template
 ├── .pre-commit-hooks.yaml               # Hook definitions for consumers
 ├── .github/workflows/                   # ci.yml, solt-coverage.yml, solt-update-badges.yml, ...

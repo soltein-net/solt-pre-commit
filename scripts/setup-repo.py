@@ -1014,7 +1014,7 @@ def inject_badges_to_readme(
             print_step("✅", f"Updated: {readme_path}")
         else:
             # Create minimal README from template
-            minimal_template = TEMPLATES_DIR / "README-template-minimal.md"
+            minimal_template = TEMPLATES_DIR / "README-REPO-template.md"
             if minimal_template.exists():
                 content = minimal_template.read_text()
 

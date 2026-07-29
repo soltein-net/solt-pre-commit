@@ -649,8 +649,8 @@ solt-pre-commit/
 │   ├── .pre-commit-config-local.yaml       # Pre-commit template (local/monorepo)
 │   ├── .pylintrc                           # Pylint configuration for Odoo
 │   ├── .solt-hooks.yaml                    # Default hook settings
-│   ├── README-template.md                  # README template for client repos
-│   ├── README-template-minimal.md          # Minimal README template
+│   ├── README-REPO-template.md             # Client repo's root README (auto-filled by setup-repo.py)
+│   ├── README-MODULE-template.rst          # Per-module README (OCA-style, manual copy)
 │   ├── BADGES-TEMPLATE.md                  # Badge block template
 │   ├── CONTRIBUTING-template.md            # Contributor guide for client repos
 │   └── github-workflows/
