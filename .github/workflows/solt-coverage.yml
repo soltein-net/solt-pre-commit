@@ -38,7 +38,7 @@ on:
       python-version:
         required: false
         type: string
-        default: '3.10'
+        default: '3.11'
     secrets:
       CHECKOUT_TOKEN:
         description: 'Token with read access to sibling-repos. Only needed when sibling-repos is set.'
@@ -123,9 +123,22 @@ jobs:
             libssl-dev libffi-dev zlib1g-dev libjpeg-dev
 
       - name: Install Odoo + coverage
+        env:
+          SIBLING_REPOS: ${{ inputs.sibling-repos }}
         run: |
           pip install --upgrade pip
           pip install -r odoo/requirements.txt
+          pip install -r repo/requirements.txt
+          if [ -n "$SIBLING_REPOS" ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              path="${line##*:}"
+              if [ -f "$path/requirements.txt" ]; then
+                echo "Installing sibling dependencies: $path/requirements.txt"
+                pip install -r "$path/requirements.txt"
+              fi
+            done <<< "$SIBLING_REPOS"
+          fi
           pip install coverage
           # Not on PyPI - installed straight from the tagged commit instead.
           pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.0"

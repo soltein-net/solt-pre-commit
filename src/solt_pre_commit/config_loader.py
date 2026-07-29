@@ -225,7 +225,6 @@ class OdooVersionDetector:
         return MAIL_MIXINS_BY_VERSION.get(version, MAIL_MIXINS_BY_VERSION[DEFAULT_ODOO_VERSION])
 
 
-
 class Severity:
     """Severity levels for checks."""
 
