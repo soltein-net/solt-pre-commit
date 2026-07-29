@@ -79,9 +79,9 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
      docs; verify before assuming another bump. -->
 | Odoo Version | Python | Status |
 |--------------|--------|--------|
-| 17.0 | 3.10+ | ✅ Fully Supported |
-| 18.0 | 3.10+ | ✅ Fully Supported |
-| 19.0 | 3.12+ | ✅ Fully Supported |
+| 17.0 | 3.11+ | ✅ Fully Supported |
+| 18.0 | 3.11+ | ✅ Fully Supported |
+| 19.0 | 3.11+ | ✅ Fully Supported |
 
 ---
 
@@ -263,10 +263,10 @@ Test:
     modules: 'solt_crm solt_crm_services solt_crm_project ...'  # auto-detected
     sibling-repos: 'soltein-net/solt-base@17.0:solt-base ...'   # auto-detected
     odoo-version: '17.0'
-    python-version: '3.10'  # pinned to Odoo's minimum supported version - see note below
+    python-version: '3.11'  # pinned to what's actually deployed - see note below
 ```
 
-**Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.10.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. We deliberately pin to Odoo's documented *minimum* supported Python per version — 3.10 for 17.0 and 18.0, 3.12 for 19.0 and 20.0+ (see `ODOO_PYTHON_REQUIREMENTS` in `config_loader.py`) — so CI catches any accidental use of syntax/stdlib features newer than what's guaranteed to be available in production.
+**Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.11.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. This comes from `get_python_version()` in `scripts/setup-repo.py`, mapped per Odoo version: `3.11` for 17.0-19.0, `3.12` for 20.0+. These track what's actually deployed (devcontainers and production images), not Odoo's documented *minimum* supported Python (3.10 for 17.0-19.0) — pinning to the minimum instead reliably broke CI on an unrelated toolchain mismatch (Odoo's own `requirements.txt` pins a `gevent` build for Python 3.10 that no longer compiles on current GitHub-hosted runners) while catching nothing real, since nothing in this fleet actually runs that minimum. An odoo-version with no entry in the mapping raises immediately when `setup-repo.py` runs, rather than silently guessing a Python version that might be wrong for it.
 
 ### Pre-Push Test Blocking
 

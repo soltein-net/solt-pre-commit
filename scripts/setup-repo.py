@@ -756,19 +756,33 @@ def detect_odoo_version_from_branch(branch_name: str | None = None, repo_path: P
 
 
 def get_python_version(odoo_version: str) -> str:
-    """Map Odoo version to MINIMUM Python version (per official Odoo requirements).
+    """Map Odoo version to the Python version we actually build/test against.
 
-    Reference: https://www.odoo.com/documentation
-    - Odoo 17.0, 18.0, 19.0: Require minimum Python 3.10
-    - Odoo 20.0+: Require minimum Python 3.12
+    Not Odoo's documented *minimum* (17.0-19.0's minimum is 3.10) - that
+    minimum maps to gevent's "Jammy" pin in Odoo's own requirements.txt,
+    which no longer builds on current GitHub-hosted runners (ubuntu-latest
+    moved to Noble/24.04). 3.10 also isn't what any real environment here
+    runs: devcontainers and production images are already on 3.11. Testing
+    at the documented minimum instead of the version we deploy buys no real
+    coverage and reliably breaks CI on an unrelated toolchain mismatch, so
+    this maps to what's actually deployed.
     """
     mapping = {
-        "17.0": "3.10",  # Odoo 17.0 minimum Python 3.10
-        "18.0": "3.10",  # Odoo 18.0 minimum Python 3.10
-        "19.0": "3.10",  # Odoo 19.0 minimum Python 3.10
-        "20.0": "3.12",  # Odoo 20.0 minimum Python 3.12
+        "17.0": "3.11",
+        "18.0": "3.11",
+        "19.0": "3.11",
+        "20.0": "3.12",  # Odoo 20.0 minimum Python 3.12 - nothing deployed yet to override with
     }
-    return mapping.get(odoo_version, "3.10")
+    if odoo_version not in mapping:
+        raise ValueError(
+            f"No known Python version for Odoo {odoo_version!r}. Add it to "
+            "get_python_version()'s mapping in setup-repo.py before generating "
+            "a workflow/README for this version - silently guessing here would "
+            "bake a possibly-wrong Python version into generated CI, and the "
+            "mismatch wouldn't surface until a full, expensive CI run fails on "
+            "what looks like an unrelated dependency error."
+        )
+    return mapping[odoo_version]
 
 
 def get_git_branch(repo_path: Path) -> str:
