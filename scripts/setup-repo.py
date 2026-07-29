@@ -936,6 +936,7 @@ def generate_workflow_file(
             "{{ SIBLING_REPOS }}": " ".join(sibling_repos) if sibling_repos else "",
             "{{ ODOO_VERSION }}": odoo_version,
             "{{ PYTHON_VERSION }}": python_version,
+            "{{ SOLT_VERSION }}": CURRENT_VERSION,
         }
 
         for placeholder, value in replacements.items():
