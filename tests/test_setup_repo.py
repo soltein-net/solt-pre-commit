@@ -16,6 +16,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+import yaml
 
 _SETUP_REPO_PATH = Path(__file__).resolve().parent.parent / "scripts" / "setup-repo.py"
 _spec = importlib.util.spec_from_file_location("setup_repo", _SETUP_REPO_PATH)
@@ -108,6 +109,96 @@ class TestFilesToCopy:
     def test_does_not_distribute_the_addyosmani_agents_directory(self):
         destinations = [dest for _src, dest, _desc in setup_repo.DIRECTORIES_TO_COPY]
         assert ".agents" not in destinations
+
+
+class TestPreCommitTemplateConsistency:
+    """templates/.pre-commit-config.yaml (standalone client repos) and
+    templates/.pre-commit-config-local.yaml (repos, submoduled inside the
+    soltein monorepo) wire the solt-pre-commit hooks differently on purpose -
+    GitHub-pinned repo vs. `repo: local` against the editable install (see
+    setup_repo.PRECOMMIT_REMOTE / PRECOMMIT_LOCAL). But both vendor the SAME
+    third-party tools (ruff, pylint-odoo, pre-commit-hooks), and nothing
+    enforced those staying in sync - they'd already drifted apart (ruff
+    v0.15.10 vs v0.8.4, pylint-odoo v10.0.0 vs v9.3.22, and differing
+    `exclude` patterns on the pre-commit-hooks hooks)."""
+
+    SHARED_REPO_URLS = (
+        "https://github.com/astral-sh/ruff-pre-commit",
+        "https://github.com/OCA/pylint-odoo",
+        "https://github.com/pre-commit/pre-commit-hooks",
+    )
+
+    @staticmethod
+    def _repos_by_url(template_path):
+        config = yaml.safe_load(template_path.read_text())
+        return {r["repo"]: r for r in config["repos"]}
+
+    def test_shared_third_party_pins_match(self):
+        remote = self._repos_by_url(setup_repo.PRECOMMIT_REMOTE[0])
+        local = self._repos_by_url(setup_repo.PRECOMMIT_LOCAL[0])
+
+        mismatches = {
+            url: (remote[url]["rev"], local[url]["rev"])
+            for url in self.SHARED_REPO_URLS
+            if remote[url]["rev"] != local[url]["rev"]
+        }
+        assert mismatches == {}, f"pinned rev drifted between templates: {mismatches}"
+
+    def test_shared_hook_options_match(self):
+        remote = self._repos_by_url(setup_repo.PRECOMMIT_REMOTE[0])
+        local = self._repos_by_url(setup_repo.PRECOMMIT_LOCAL[0])
+
+        for url in self.SHARED_REPO_URLS:
+            remote_hooks = {h["id"]: h for h in remote[url]["hooks"]}
+            local_hooks = {h["id"]: h for h in local[url]["hooks"]}
+            for hook_id in set(remote_hooks) & set(local_hooks):
+                assert remote_hooks[hook_id] == local_hooks[hook_id], (
+                    f"hook {hook_id!r} options differ between templates for {url}"
+                )
+
+    @staticmethod
+    def _solt_hook_ids(template_path):
+        """solt-* hook ids wired up in a template, regardless of whether
+        they live under the GitHub-pinned repo (remote) or `repo: local`
+        (local) block - that block's `repo:` key differs by design, so
+        hook id is the only comparable key across the two files."""
+        config = yaml.safe_load(template_path.read_text())
+        return {
+            hook["id"]
+            for repo in config["repos"]
+            for hook in repo.get("hooks", [])
+            if hook["id"].startswith("solt-")
+        }
+
+    def test_solt_hooks_match_except_documented_exceptions(self):
+        """Every solt-pre-commit hook wired into one template must be wired
+        into the other too, unless explicitly allowlisted here as a known,
+        intentional difference. Catches exactly the kind of silent gap found
+        in the wild: solt-check-branch only in the local template because
+        commit 0e0800c ("move branch name check to PR level with
+        auto-close") removed it from the remote template alone, without a
+        comment explaining why - it read as an oversight, not a decision."""
+        # local-only: 0e0800c moved branch-name enforcement for standalone
+        # client repos to the PR-level solt-validate.yml workflow (which
+        # auto-closes PRs with an invalid branch name), so the remote
+        # template no longer needs it as a local commit-time gate. Monorepo
+        # submodule repos keep it locally too, on top of that same PR-level
+        # check, for faster feedback during day-to-day development.
+        known_local_only_hooks = {"solt-check-branch"}
+        known_remote_only_hooks = set()
+
+        remote_ids = self._solt_hook_ids(setup_repo.PRECOMMIT_REMOTE[0])
+        local_ids = self._solt_hook_ids(setup_repo.PRECOMMIT_LOCAL[0])
+
+        unexplained_local_only = (local_ids - remote_ids) - known_local_only_hooks
+        unexplained_remote_only = (remote_ids - local_ids) - known_remote_only_hooks
+
+        assert unexplained_local_only == set(), (
+            f"hooks only in the local template, not allowlisted: {unexplained_local_only}"
+        )
+        assert unexplained_remote_only == set(), (
+            f"hooks only in the remote template, not allowlisted: {unexplained_remote_only}"
+        )
 
 
 if __name__ == "__main__":

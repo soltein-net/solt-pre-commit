@@ -11,6 +11,12 @@ repos:
   # ─────────────────────────────────────────────────────────────────────────
   - repo: local
     hooks:
+      # Kept here on purpose, unlike templates/.pre-commit-config.yaml (the
+      # standalone-repo variant): standalone repos rely solely on the
+      # PR-level auto-close check in solt-validate.yml, but monorepo
+      # submodule repos also get this immediate local commit-time gate for
+      # faster feedback during day-to-day development - redundant with the
+      # PR-level check, not a leftover.
       - id: solt-check-branch
         name: Soltein - Validate Branch Name
         entry: python -m solt_pre_commit.checks_branch_name
@@ -44,9 +50,9 @@ repos:
   # Note: Ruff is INFORMATIONAL - does not block commits/PRs
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.15.10
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [ --no-fix, --output-format=concise ]
         # Removed: --fix (no autofix)
         # Removed: ruff-format hook (no auto-formatting)
@@ -55,7 +61,7 @@ repos:
   # ODOO-SPECIFIC LINTING (OCA) - BLOCKING with fail-on-warnings
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/OCA/pylint-odoo
-    rev: v9.3.22
+    rev: v10.0.0
     hooks:
       - id: pylint_odoo
         args:
@@ -68,7 +74,9 @@ repos:
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: '\.(key|cer|pem|crt|der|p12|pfx)$'
       - id: end-of-file-fixer
+        exclude: '\.(key|cer|pem|crt|der|p12|pfx)$'
       - id: check-yaml
       - id: check-xml
       - id: check-merge-conflict

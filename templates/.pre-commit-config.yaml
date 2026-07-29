@@ -9,6 +9,11 @@
 repos:
   # ─────────────────────────────────────────────────────────────────────────
   # SOLT PRE-COMMIT HOOKS
+  # No solt-check-branch here on purpose: branch-name enforcement for
+  # standalone repos happens at PR level instead (.github/workflows/
+  # solt-validate.yml, which auto-closes PRs with an invalid branch name),
+  # not as a local commit-time gate. See templates/.pre-commit-config-local.yaml
+  # for the monorepo-submodule variant, which keeps it locally too.
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/soltein-net/solt-pre-commit
     rev: v1.2.0
