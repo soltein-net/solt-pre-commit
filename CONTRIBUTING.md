@@ -140,18 +140,26 @@ Tags: `[IMP]` improvement, `[FIX]` bugfix, `[ADD]` new feature, `[REM]` removal,
 
 ## Releasing
 
-1. Update version in:
-   - `pyproject.toml`
-   - `setup.py`
-   - `__init__.py`
+Version is derived automatically from the git tag (via `setuptools_scm`) -
+there's nothing to hand-edit in `pyproject.toml` or `__init__.py` anymore.
 
-2. Update CHANGELOG.md
+1. Update CHANGELOG.md
+
+2. Bump the self-install pin in `.github/workflows/solt-coverage.yml`
+   (`pip install "git+...@vX.Y.Z"`) - the one version reference that can't
+   be derived automatically, since it's a workflow referencing itself.
 
 3. Create and push a git tag:
 ```bash
 git tag v1.x.0
 git push origin v1.x.0
 ```
+
+4. Everyone consuming this repo picks up the new version by running
+   `setup-repo.py --update-only --batch repos.txt` against their own repos
+   (or `--update-only` for a single repo) - it re-derives the current
+   version from this repo's latest tag and stamps it into each consumer's
+   `.pre-commit-config.yaml` / `solt-validate.yml`.
 
 4. The CI will automatically create a GitHub release
 

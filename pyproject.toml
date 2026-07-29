@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "solt-pre-commit"
-version = "1.2.0"
+dynamic = ["version"]
 description = "Custom pre-commit hooks for Odoo module validation - Soltein (supports Odoo 17.0, 18.0, 19.0)"
 readme = "README.md"
 license = {text = "LGPL-3.0-or-later"}
@@ -50,18 +50,27 @@ Homepage = "https://github.com/soltein-net/solt-pre-commit"
 Repository = "https://github.com/soltein-net/solt-pre-commit"
 Issues = "https://github.com/soltein-net/solt-pre-commit/issues"
 
+[tool.setuptools_scm]
+# Package version is derived from the git tag (e.g. v1.2.0 -> 1.2.0), not a
+# hand-edited string here - single source of truth is the tag itself, so
+# there's nothing to remember to bump in this file at release time.
+# fallback_version applies only if git tag history is unreachable at build
+# time (e.g. a malformed checkout) - degrades to an obviously-fake version
+# instead of hard-failing the install for every repo pulling this package.
+fallback_version = "0.0.0.dev0"
+
 [tool.setuptools]
-py-modules = [
-    "checks_odoo_module",
-    "checks_odoo_module_csv",
-    "checks_odoo_module_po",
-    "checks_odoo_module_python",
-    "checks_odoo_module_xml",
-    "checks_odoo_module_xml_advanced",
-    "checks_branch_name",
-    "config_loader",
-    "doc_coverage",
-]
+# src-layout package discovery - previously supplied by setup.py's
+# packages=find_packages("src")/package_dir={"": "src"} (removed once
+# pyproject.toml's [project] table covered everything setup.py did). The
+# old py-modules list here was leftover from a pre-src-layout flat
+# structure and pointed at files that no longer exist at the repo root -
+# every one of those names is a real submodule under src/solt_pre_commit/
+# now, found via packages.find below instead.
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml"]

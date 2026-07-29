@@ -55,21 +55,27 @@ TEMPLATES_DIR = PROJECT_ROOT / "templates"
 
 
 def get_current_version() -> str:
-    """Read solt-pre-commit's own version from pyproject.toml.
+    """The tag this checkout of solt-pre-commit corresponds to.
 
-    Single source of truth is pyproject.toml's [project].version - parsed as
-    plain text (not tomllib) so this doesn't need a TOML-parsing dependency,
-    and still works on Python 3.10 (tomllib is 3.11+). Mirrors setup.py's
-    read_version() so both stay in sync automatically on every release
-    instead of relying on someone remembering to bump a second constant.
+    pyproject.toml's version is now dynamic (derived from the git tag via
+    setuptools_scm), so there's no static "version = ..." line left to parse
+    here - ask git directly instead, which is the same underlying source of
+    truth setuptools_scm itself uses. --abbrev=0 matters: plain `git
+    describe` appends a "-<n>-g<sha>" suffix when HEAD is past the last tag,
+    which would stamp an unresolvable non-existent ref into every consuming
+    repo's rev:/@ref pins - --abbrev=0 always returns just the nearest real
+    tag name (e.g. "v1.2.0"), matching this function's previous behavior of
+    reporting the last released version even mid-development on the next one.
     """
-    pyproject = PROJECT_ROOT / "pyproject.toml"
-    with pyproject.open(encoding="utf-8") as f:
-        for line in f:
-            if line.strip().startswith("version"):
-                version = line.split("=", 1)[1].strip().strip('"')
-                return f"v{version}"
-    raise RuntimeError(f"version not found in {pyproject}")
+    result = subprocess.run(
+        ["git", "describe", "--tags", "--abbrev=0"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise RuntimeError(f"Could not determine current version via `git describe --tags` in {PROJECT_ROOT}: {result.stderr.strip()}")
+    return result.stdout.strip()
 
 
 # Current version of solt-pre-commit - always derived from pyproject.toml so

@@ -141,6 +141,11 @@ jobs:
           fi
           pip install coverage
           # Not on PyPI - installed straight from the tagged commit instead.
+          # This is the one version pin in the repo that can't be derived
+          # automatically (it references solt-pre-commit from inside its own
+          # workflow file) - bump it by hand alongside pyproject.toml's tag
+          # at every release, or this reusable workflow's *shell logic* ships
+          # at the new tag while the *installed CLI it calls* stays stale.
           pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.0"
 
       - name: Build addons-path
