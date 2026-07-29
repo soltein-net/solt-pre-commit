@@ -128,14 +128,29 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r odoo/requirements.txt
-          pip install -r repo/requirements.txt
+          # -c (not -r): odoo/requirements.txt is a hard ceiling/floor here,
+          # not something to install fresh. Without it, an unpinned addon
+          # dependency (e.g. a Google API client needing a newer `cryptography`
+          # than Odoo's pinned `pyOpenSSL` tolerates) can silently upgrade a
+          # package Odoo already pinned, breaking it at Odoo startup instead
+          # of failing here with a clear resolver conflict.
+          #
+          # psutil excluded from the constraint: every crawlee release back to
+          # its second-ever version (0.0.2) requires psutil>=6.0.0, which
+          # conflicts with Odoo's exact psutil==5.9.4 pin - checked, there is
+          # no compatible crawlee release. Unlike cryptography/pyOpenSSL, this
+          # mismatch is empirically harmless (Odoo doesn't hard-crash on a
+          # newer psutil), so it's excluded rather than left to block every
+          # install that happens to need crawlee.
+          grep -v '^psutil' odoo/requirements.txt > /tmp/odoo-constraints.txt
+          pip install -c /tmp/odoo-constraints.txt -r repo/requirements.txt
           if [ -n "$SIBLING_REPOS" ]; then
             while IFS= read -r line; do
               [ -z "$line" ] && continue
               path="${line##*:}"
               if [ -f "$path/requirements.txt" ]; then
                 echo "Installing sibling dependencies: $path/requirements.txt"
-                pip install -r "$path/requirements.txt"
+                pip install -c /tmp/odoo-constraints.txt -r "$path/requirements.txt"
               fi
             done <<< "$SIBLING_REPOS"
           fi
