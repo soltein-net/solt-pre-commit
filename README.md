@@ -290,8 +290,7 @@ cat .git/hooks/pre-push
 | `solt-check-po` | PO/POT-only validation | PO, POT |
 | `solt-check-python` | Python-only validation | Python |
 | `solt-check-requirements` | Verify (or `--fix` regenerate) root requirements.txt from manifests | `__manifest__.py` |
-
-**Note**: `solt-test-changed-modules` runs at pre-push stage only (not listed above, auto-configured by the generated `.pre-commit-config.yaml`).
+| `solt-test-changed-modules` | Run Odoo tests for changed modules (pre-push stage only) | (all) |
 
 ---
 

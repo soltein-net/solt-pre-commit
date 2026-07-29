@@ -200,6 +200,34 @@ class TestPreCommitTemplateConsistency:
             f"hooks only in the remote template, not allowlisted: {unexplained_remote_only}"
         )
 
+    def test_every_exported_hook_is_wired_or_documented_opt_in(self):
+        """.pre-commit-hooks.yaml is the full menu of hooks solt-pre-commit
+        exports to consumers. Any hook missing from BOTH templates must be
+        explicitly allowlisted here as intentionally opt-in-only, or it's
+        likely just an oversight - exactly what happened to
+        solt-test-changed-modules: exported since v1.1.0 (commit dfcc3ba)
+        but never wired into either default template."""
+        # Deliberately opt-in only: each is a single-file-type subset of
+        # solt-check-odoo (which already runs all of them together), meant
+        # for repos that want e.g. XML-only validation instead of the full
+        # suite - not something every client repo should run by default.
+        known_opt_in_only_hooks = {
+            "solt-check-xml",
+            "solt-check-csv",
+            "solt-check-po",
+            "solt-check-python",
+        }
+
+        exported = yaml.safe_load((setup_repo.PROJECT_ROOT / ".pre-commit-hooks.yaml").read_text())
+        exported_ids = {hook["id"] for hook in exported}
+
+        wired_anywhere = self._solt_hook_ids(setup_repo.PRECOMMIT_REMOTE[0]) | self._solt_hook_ids(
+            setup_repo.PRECOMMIT_LOCAL[0]
+        )
+
+        unwired = exported_ids - wired_anywhere - known_opt_in_only_hooks
+        assert unwired == set(), f"hooks exported but wired into neither template, not allowlisted: {unwired}"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
