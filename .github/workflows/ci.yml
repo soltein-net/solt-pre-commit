@@ -154,6 +154,7 @@ jobs:
           RESULT=$?
           set -e
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          exit "$RESULT"
 
       - name: Coverage percentage
         id: report
