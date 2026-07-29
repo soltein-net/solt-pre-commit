@@ -228,6 +228,29 @@ class TestPreCommitTemplateConsistency:
         unwired = exported_ids - wired_anywhere - known_opt_in_only_hooks
         assert unwired == set(), f"hooks exported but wired into neither template, not allowlisted: {unwired}"
 
+    def test_repo_local_hooks_do_not_use_language_python(self):
+        """`repo: local` + `language: python` makes pre-commit build a
+        throwaway, ISOLATED virtualenv per hook and pip-install only
+        `additional_dependencies` into it - it has no way to obtain
+        solt_pre_commit itself, since there's no repo checkout for
+        pre-commit to pip-install (that's what makes the remote template's
+        `language: python` work: pre-commit clones the real repo at the
+        pinned rev and installs it into the venv). Caught live: every
+        solt-* hook in templates/.pre-commit-config-local.yaml failed with
+        `ModuleNotFoundError: No module named 'solt_pre_commit'` despite the
+        package being editable-installed in the ambient environment -
+        `language: system` is required instead, which skips venv creation
+        and runs `entry` directly against whatever's already on PATH."""
+        config = yaml.safe_load(setup_repo.PRECOMMIT_LOCAL[0].read_text())
+        local_repo = next(r for r in config["repos"] if r["repo"] == "local")
+
+        wrong_language = {
+            hook["id"]: hook.get("language")
+            for hook in local_repo["hooks"]
+            if hook.get("language") != "system"
+        }
+        assert wrong_language == {}, f"repo:local hooks must use language: system, found: {wrong_language}"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

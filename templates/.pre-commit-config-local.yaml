@@ -22,32 +22,35 @@ repos:
       # submodule repos also get this immediate local commit-time gate for
       # faster feedback during day-to-day development - redundant with the
       # PR-level check, not a leftover.
+      # language: system (not python) is required for repo:local - "python"
+      # makes pre-commit build a throwaway, isolated venv per hook with only
+      # additional_dependencies installed, which never has solt_pre_commit
+      # itself. "system" skips venv creation and runs `entry` directly
+      # against the ambient environment - i.e. the editable install
+      # (pip3 install -e ./solt-pre-commit) these hooks depend on.
       - id: solt-check-branch
         name: Soltein - Validate Branch Name
         entry: python -m solt_pre_commit.checks_branch_name
-        language: python
+        language: system
         always_run: true
         pass_filenames: false
         stages: [ pre-commit, pre-push ]
-        additional_dependencies: [ pyyaml ]
 
       - id: solt-check-odoo
         name: Soltein - Validate Odoo Module
         entry: python -m solt_pre_commit.checks_odoo_module
-        language: python
+        language: system
         files: (__manifest__|__openerp__)\.py$
         pass_filenames: true
         types: [ python ]
-        additional_dependencies: [ lxml, polib, pyyaml ]
 
       - id: solt-check-requirements
         name: Soltein - Verify requirements.txt matches manifests
         entry: python -m solt_pre_commit.checks_requirements
-        language: python
+        language: system
         files: (__manifest__|__openerp__)\.py$
         pass_filenames: false
         require_serial: true
-        additional_dependencies: [ manifestoo, packaging ]
 
       - id: solt-test-changed-modules
         name: Soltein - Test Changed Modules
@@ -56,11 +59,10 @@ repos:
         # Configure via .solt-hooks.yaml: test_odoo_bin, test_odoo_conf,
         # test_db_*, test_http_port/test_gevent_port, test_require_open_pr.
         entry: python -m solt_pre_commit.checks_test_changed_modules
-        language: python
+        language: system
         always_run: true
         pass_filenames: false
         stages: [ pre-push ]
-        additional_dependencies: [ pyyaml ]
 
   # ─────────────────────────────────────────────────────────────────────────
   # PYTHON CODE QUALITY - Ruff (linter only, NO autofix, NO formatter)
