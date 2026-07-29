@@ -55,6 +55,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # get_current_version() (scripts/setup-repo.py) and setuptools_scm
+          # both need `git describe --tags` to actually find a tag - the
+          # default shallow fetch-depth: 1 checks out only the tip commit
+          # with no tag history reachable at all, so any test importing
+          # setup-repo.py fails collection with "No names found, cannot
+          # describe anything."
+          fetch-depth: 0
 
       - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -122,6 +130,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Same reason as the `test` job above - git describe needs full
+          # tag history, not the default shallow checkout.
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -142,6 +154,7 @@ jobs:
           RESULT=$?
           set -e
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          exit "$RESULT"
 
       - name: Coverage percentage
         id: report
@@ -307,6 +320,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # setuptools_scm needs full tag history to compute the real
+          # version - without it, the built artifact silently falls back to
+          # the placeholder fallback_version instead of the actual tag.
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5

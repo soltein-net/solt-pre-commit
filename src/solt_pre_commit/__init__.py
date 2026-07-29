@@ -19,7 +19,20 @@ Checks included:
 - Python: fields (string, help), docstrings, tracking, compute_sudo
 """
 
-__version__ = "1.2.0"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
+try:
+    # Derived from the installed distribution's metadata (itself computed by
+    # setuptools_scm from the git tag at build time) - not a separate literal
+    # here, so it can't drift from pyproject.toml's own version the way it
+    # used to.
+    __version__ = _pkg_version("solt-pre-commit")
+except PackageNotFoundError:
+    # Only hit when solt_pre_commit is imported without ever having been
+    # pip-installed (e.g. ad hoc PYTHONPATH tricks against a bare checkout).
+    __version__ = "0.0.0+unknown"
+
 __author__ = "Soltein SA de CV"
 
 from .checks_branch_name import BranchNameValidator

@@ -36,7 +36,7 @@ from .config_loader import (
 # Backward compatibility alias
 SeverityConfig = SoltConfig
 
-DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/main/docs/README_TEMPLATE.rst"
+DFTL_README_TMPL_URL = "https://github.com/soltein-net/solt-pre-commit/blob/main/templates/README-MODULE-template.rst"
 DFTL_README_FILES = ["README.md", "README.txt", "README.rst"]
 DFTL_MANIFEST_DATA_KEYS = ["data", "demo", "demo_xml", "init_xml", "test", "update_xml"]
 MANIFEST_NAMES = ("__openerp__.py", "__manifest__.py")

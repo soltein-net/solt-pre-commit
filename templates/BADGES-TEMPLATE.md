@@ -1,5 +1,8 @@
 <!-- SOLTEIN_BADGES_START -->
-[![Validation Status](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml/badge.svg?branch={{ ODOO_VERSION }})](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml)
 [![Docstring Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/{{ GIST_OWNER }}/{{ GIST_ID }}/raw/{{ REPO_NAME }}-{{ ODOO_VERSION }}-docstrings.json)](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml)
-[![License: LGPL-3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![Solt Check](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/{{ GIST_OWNER }}/{{ GIST_ID }}/raw/{{ REPO_NAME }}-{{ ODOO_VERSION }}-solt-check.json)](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml)
+[![Pylint-Odoo](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/{{ GIST_OWNER }}/{{ GIST_ID }}/raw/{{ REPO_NAME }}-{{ ODOO_VERSION }}-pylint.json)](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/{{ GIST_OWNER }}/{{ GIST_ID }}/raw/{{ REPO_NAME }}-{{ ODOO_VERSION }}-ruff.json)](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml)
+[![Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/{{ GIST_OWNER }}/{{ GIST_ID }}/raw/{{ REPO_NAME }}-{{ ODOO_VERSION }}-tests.json)](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/{{ GIST_OWNER }}/{{ GIST_ID }}/raw/{{ REPO_NAME }}-{{ ODOO_VERSION }}-coverage.json)](https://github.com/{{ GITHUB_ORG }}/{{ REPO_NAME }}/actions/workflows/solt-validate.yml)
 <!-- SOLTEIN_BADGES_END -->

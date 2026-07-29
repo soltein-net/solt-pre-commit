@@ -6,12 +6,22 @@
 # Supports Odoo versions: 17.0, 18.0, 19.0
 # =============================================================================
 
+# Lets a plain `pre-commit install` (no --hook-type flag) install both the
+# pre-commit AND pre-push git hooks in one shot - required for
+# solt-test-changed-modules below to actually run on push.
+default_install_hook_types: [ pre-commit, pre-push ]
+
 repos:
   # ─────────────────────────────────────────────────────────────────────────
   # SOLT PRE-COMMIT HOOKS
+  # No solt-check-branch here on purpose: branch-name enforcement for
+  # standalone repos happens at PR level instead (.github/workflows/
+  # solt-validate.yml, which auto-closes PRs with an invalid branch name),
+  # not as a local commit-time gate. See templates/.pre-commit-config-local.yaml
+  # for the monorepo-submodule variant, which keeps it locally too.
   # ─────────────────────────────────────────────────────────────────────────
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.2.0  # Supports Odoo 17.0, 18.0, 19.0
+    rev: v1.2.0
     hooks:
       - id: solt-check-odoo
         verbose: true
@@ -20,6 +30,11 @@ repos:
         # args: [--odoo-version, 18.0]  # Uncomment to force specific version
       - id: solt-check-requirements
         # args: [--fix]  # Uncomment to auto-regenerate instead of just checking
+      - id: solt-test-changed-modules
+        # Runs Odoo tests for modules changed vs. the base branch - only
+        # when the current branch has an open PR (fails open otherwise).
+        # Configure via .solt-hooks.yaml: test_odoo_bin, test_odoo_conf,
+        # test_db_*, test_http_port/test_gevent_port, test_require_open_pr.
 
   # ─────────────────────────────────────────────────────────────────────────
   # PYTHON CODE QUALITY - Ruff (linter only, NO autofix, NO formatter)
