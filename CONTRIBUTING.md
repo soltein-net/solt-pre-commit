@@ -4,7 +4,6 @@ Thank you for your interest in contributing to solt-pre-commit!
 
 - [Contributing to Solt Pre-commit](#contributing-to-solt-pre-commit)
   - [Development Setup](#development-setup)
-  - [Project Structure](#project-structure)
   - [Adding a New Check](#adding-a-new-check)
   - [Severity Levels](#severity-levels)
   - [Testing](#testing)
@@ -38,40 +37,6 @@ pip install -e ".[dev]"
 4. Install pre-commit hooks:
 ```bash
 pre-commit install
-```
-
-## Project Structure
-
-```
-solt-pre-commit/
-├── src/solt_pre_commit/
-│   ├── checks_odoo_module.py           # Main orchestrator
-│   ├── checks_odoo_module_csv.py       # CSV validations
-│   ├── checks_odoo_module_po.py        # PO/POT validations
-│   ├── checks_odoo_module_python.py    # Python validations
-│   ├── checks_odoo_module_xml.py       # Basic XML validations
-│   ├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
-│   ├── checks_branch_name.py           # Branch naming validation
-│   ├── checks_test_changed_modules.py  # Pre-push changed-module test runner
-│   ├── config_loader.py                # Configuration management (incl. DEFAULT_SEVERITY)
-│   ├── doc_coverage.py                 # Documentation coverage analysis
-│   ├── github_pr.py                    # Open-PR detection (gh CLI / REST API)
-│   └── odoo_test_runner.py             # Scratch-DB Odoo test execution
-├── scripts/
-│   ├── setup-repo.py                   # Initialize/maintain hooks in client repos
-│   ├── generate-readme.py              # Generate README.md templates
-│   └── generate-badges.py              # Regenerate badge JSON for the gist
-├── templates/
-│   ├── .pylintrc                       # Pylint config for Odoo
-│   ├── .pre-commit-config.yaml         # Pre-commit hooks template
-│   ├── .pre-commit-config-local.yaml   # Local pre-commit (monorepo)
-│   ├── .solt-hooks.yaml                # Default Soltein validation settings
-│   ├── README-REPO-template.md         # Client repo's root README (auto-filled by setup-repo.py)
-│   ├── README-MODULE-template.rst      # Per-module README (OCA-style, manual copy)
-│   └── github-workflows/solt-validate.yml  # Client-repo workflow template
-├── .pre-commit-hooks.yaml               # Hook definitions for consumers
-├── .github/workflows/                   # ci.yml, solt-coverage.yml, solt-update-badges.yml, ...
-└── tests/                                # pytest test suite
 ```
 
 ## Adding a New Check
@@ -117,28 +82,30 @@ DEFAULT_SEVERITY = {
 
 ## Testing
 
-Run tests locally:
+Run the unit test suite:
 ```bash
 pytest tests/ -v
+pytest tests/ --cov=solt_pre_commit --cov-report=html   # with coverage
 ```
 
-Test against a real Odoo module:
+Verify a change against a real module - create a scratch one if you don't have a handy target:
 ```bash
-# Basic validation
-solt-check-odoo /path/to/odoo-module
+mkdir -p test_module
+cat > test_module/__manifest__.py << 'EOF'
+{
+    "name": "Test Module",
+    "version": "17.0.1.0.0",
+    "depends": ["base"],
+    "installable": True,
+}
+EOF
 
-# Show all issues including info
-solt-check-odoo /path/to/odoo-module --show-info
-
-# Force full repository validation
-solt-check-odoo /path/to/odoo-module --scope full
-```
-
-Test branch name validation:
-```bash
+solt-check-odoo test_module
 solt-check-branch feature/SOLT-123-my-feature
-solt-check-branch invalid-branch  # Should fail
 ```
+
+See the main [README's CLI Usage](README.md#-cli-usage) section for the full
+flag reference (`--show-info`, `--scope full`, etc.).
 
 ## Code Style
 

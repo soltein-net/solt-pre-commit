@@ -1,6 +1,6 @@
 # Solt Pre-commit
 
-[![CI](https://github.com/soltein-net/solt-pre-commit/workflows/CI/badge.svg)](https://github.com/soltein-net/solt-pre-commit/actions)
+[![Soltein Validations](https://github.com/soltein-net/solt-pre-commit/workflows/CI/badge.svg)](https://github.com/soltein-net/solt-pre-commit/actions)
 
 ---
 
@@ -15,6 +15,8 @@
 ---
 
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-core-coverage.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+
+---
 
 Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches errors and runtime warnings before they reach production.** Blocks non-test-passing code at the pre-push stage.
 
@@ -64,14 +66,7 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
     - [Update Version Only](#update-version-only)
     - [Pre-commit Maintenance](#pre-commit-maintenance)
     - [All Options](#all-options)
-  - [📝 Generate README Template](#-generate-readme-template)
-    - [Examples](#examples)
-    - [Options](#options)
-  - [📂 Repository Structure](#-repository-structure)
-  - [🧪 Development](#-development)
-    - [Running Tests](#running-tests)
-    - [Linting \& Formatting](#linting--formatting)
-    - [Local Testing](#local-testing)
+  - [🤝 Contributing](#-contributing)
   - [📞 Support](#-support)
 
 
@@ -86,7 +81,6 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
 | 17.0 | 3.10+ | ✅ Fully Supported |
 | 18.0 | 3.10+ | ✅ Fully Supported |
 | 19.0 | 3.12+ | ✅ Fully Supported |
-| 20.0+ | 3.12+ | ✅ Fully Supported |
 
 ---
 
@@ -136,10 +130,11 @@ If you prefer to add solt-pre-commit to an existing `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.1.0  # Supports Odoo 17.0, 18.0, 19.0, 20.0+
+    rev: v1.2.0 # check for latest release
     hooks:
       - id: solt-check-branch
       - id: solt-check-odoo
+      - id: solt-check-requirements
 ```
 
 ---
@@ -578,144 +573,14 @@ python setup-repo.py --help
 
 ---
 
-## 📝 Generate README Template
+## 🤝 Contributing
 
-Generate a standardized `README.md` with badges for any Soltein Odoo repository:
-
-```bash
-python scripts/generate-readme.py <repo-name> <odoo-version> "<description>" [options]
-```
-
-### Examples
-
-```bash
-# Default (soltein-net org)
-python scripts/generate-readme.py solt-hr 17.0 "Odoo HR modules for payroll and attendance"
-
-# Custom org
-python scripts/generate-readme.py solt-fc 18.0 "Financial consolidation modules" --org SolteinCorp
-
-# Preview without writing
-python scripts/generate-readme.py solt-base 19.0 "Core base modules" --dry-run
-
-# Write to specific path
-python scripts/generate-readme.py solt-web 17.0 "Web UI enhancements" --output /path/to/README.md
-```
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|--------------|
-| `--org` | `soltein-net` | GitHub organization/user |
-| `--gist-id` | SolteinCorp gist | Gist ID for docstring badge |
-| `--gist-owner` | `SolteinCorp` | Gist owner username |
-| `--output` | `./README.md` | Output file path |
-| `--dry-run` | — | Print to stdout only |
+Want to add a new check, run the test suite, or understand the internal
+source layout (`src/solt_pre_commit/`, `scripts/`, `templates/`)? See
+[CONTRIBUTING.md](CONTRIBUTING.md) - this README only covers using
+solt-pre-commit in a client repo.
 
 ---
-
-## 📂 Repository Structure
-
-```
-solt-pre-commit/
-├── .github/
-│   └── workflows/
-│       ├── ci.yml                          # Internal CI pipeline
-│       ├── solt-coverage.yml               # Reusable test + coverage workflow
-│       ├── solt-update-badges.yml          # Weekly badge updates
-│       ├── solt-update-check-badges.yml    # PR check-status badge updates
-│       └── solt-validate.yml               # Reusable workflow for clients
-├── src/
-│   └── solt_pre_commit/
-│       ├── __init__.py                     # Package exports
-│       ├── checks_branch_name.py           # Branch naming validation
-│       ├── checks_odoo_module.py           # Main orchestrator
-│       ├── checks_odoo_module_csv.py       # CSV validations
-│       ├── checks_odoo_module_po.py        # PO/POT validations
-│       ├── checks_odoo_module_python.py    # Python validations
-│       ├── checks_odoo_module_xml.py       # Basic XML validations
-│       ├── checks_odoo_module_xml_advanced.py  # Advanced XML checks
-│       ├── checks_test_changed_modules.py  # Pre-push changed-module test runner
-│       ├── config_loader.py                # Configuration management
-│       ├── doc_coverage.py                 # Documentation coverage analysis
-│       ├── github_pr.py                    # Open-PR detection (gh CLI / REST API)
-│       └── odoo_test_runner.py             # Scratch-DB Odoo test execution
-├── scripts/
-│   ├── generate-badges.py                  # Regenerate badge JSON for the gist
-│   ├── generate-readme.py                  # Generate README.md templates
-│   └── setup-repo.py                       # Initialize/maintain client repos
-├── templates/
-│   ├── .pre-commit-config.yaml             # Pre-commit template (GitHub)
-│   ├── .pre-commit-config-local.yaml       # Pre-commit template (local/monorepo)
-│   ├── .pylintrc                           # Pylint configuration for Odoo
-│   ├── .solt-hooks.yaml                    # Default hook settings
-│   ├── README-REPO-template.md             # Client repo's root README (auto-filled by setup-repo.py)
-│   ├── README-MODULE-template.rst          # Per-module README (OCA-style, manual copy)
-│   ├── BADGES-TEMPLATE.md                  # Badge block template
-│   ├── CONTRIBUTING-template.md            # Contributor guide for client repos
-│   └── github-workflows/
-│       └── solt-validate.yml               # Client-repo workflow template
-├── docs/
-│   └── RUFF_LEVELS.md
-├── tests/                                  # pytest test suite
-├── .pre-commit-hooks.yaml                  # Hook definitions for consumers
-├── pyproject.toml                          # Package configuration
-├── setup.py                                # setuptools entry point (reads pyproject.toml)
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-├── LICENSE
-└── README.md
-```
-
----
-
-## 🧪 Development
-
-### Running Tests
-
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=solt_pre_commit --cov-report=html
-```
-
-### Linting & Formatting
-
-`scripts/lint.sh` is the single source of truth for lint/format - it's what the `lint` job in `ci.yml` runs, so running it locally reproduces that CI check exactly instead of guessing which `ruff` invocation it uses:
-
-```bash
-scripts/lint.sh          # check only - exits non-zero on any violation, same as CI
-scripts/lint.sh --fix    # apply ruff's autofixes and reformat in place
-```
-
-### Local Testing
-
-```bash
-# Install package locally
-pip install -e .
-
-# Create test module
-mkdir -p test_module
-cat > test_module/__manifest__.py << 'EOF'
-{
-    "name": "Test Module",
-    "version": "17.0.1.0.0",
-    "depends": ["base"],
-    "installable": True,
-}
-EOF
-
-# Run validation
-solt-check-odoo test_module
-```
-
----
-
 
 ## 📞 Support
 
