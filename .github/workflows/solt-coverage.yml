@@ -177,12 +177,23 @@ jobs:
           mkdir -p ".devcontainer/dev_${MAJOR}"
           echo "[options]" > ".devcontainer/dev_${MAJOR}/odoo.conf"
 
+          # inputs.modules is space-separated (how setup-repo.py generates it
+          # into solt-validate.yml's `modules:` value), but solt-test-module's
+          # CLI splits on comma. Passed through as-is, the whole list collapses
+          # into one invalid tag - Odoo loads 0 modules, runs 0 tests, and
+          # since "0 failed, 0 errors" isn't itself a failure, still reports
+          # PASS. Normalize either separator to comma so the CLI actually
+          # receives one module name per entry.
+          MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
+          MODULES_CSV="${MODULES_CSV#,}"
+          MODULES_CSV="${MODULES_CSV%,}"
+
           # DB_HOST/DB_PORT/DB_USER/DB_PASSWORD are not set here - SoltConfig's
           # own defaults (localhost/5432/odoo/odoo) already match the postgres
           # service above exactly. Scratch-DB create/drop is now handled
           # internally by solt-test-module, not this workflow.
           set +e
-          solt-test-module "$MODULES" --addons-path "$ADDONS_PATH" 2>&1 | tee test_output.txt
+          solt-test-module "$MODULES_CSV" --addons-path "$ADDONS_PATH" 2>&1 | tee test_output.txt
           RESULT=${PIPESTATUS[0]}
           set -e
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"
@@ -194,7 +205,12 @@ jobs:
         env:
           MODULES: ${{ inputs.modules }}
         run: |
-          IFS=',' read -ra MODULE_ARR <<< "$MODULES"
+          # Same space-vs-comma normalization as the test step above - see
+          # that step's comment for why this matters.
+          MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
+          MODULES_CSV="${MODULES_CSV#,}"
+          MODULES_CSV="${MODULES_CSV%,}"
+          IFS=',' read -ra MODULE_ARR <<< "$MODULES_CSV"
           INCLUDE=""
           for m in "${MODULE_ARR[@]}"; do INCLUDE="${INCLUDE}*/${m}/*,"; done
           INCLUDE="${INCLUDE%,}"
