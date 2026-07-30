@@ -252,5 +252,68 @@ class TestPreCommitTemplateConsistency:
         assert wrong_language == {}, f"repo:local hooks must use language: system, found: {wrong_language}"
 
 
+class TestDetectSiblingRepos:
+    """Regression test: detect_sibling_repos() must resolve TRANSITIVE
+    dependencies, not just the target repo's own direct ones.
+
+    Real incident: solt-llm's llm_crm manifest only lists
+    solt_crm_landing_quoter (repo solt-crm) as a direct dependency - it
+    never mentions solt_base. But solt_crm_landing_quoter's OWN manifest
+    depends on solt_base (repo solt-base) too. The old single-hop detection
+    only read llm_crm's manifest, so it added solt-crm to sibling-repos but
+    never solt-base. CI cloned solt-crm, then failed installing it because
+    solt_base was missing - a failure that only ever surfaced once a real
+    CI run tried the install.
+    """
+
+    def _build_monorepo(self, tmp_path, repo_layout):
+        addons = tmp_path / "addons"
+        for repo_dir, modules in repo_layout.items():
+            for module_name, depends in modules.items():
+                module_dir = addons / repo_dir / module_name
+                module_dir.mkdir(parents=True)
+                (module_dir / "__manifest__.py").write_text(repr({"name": module_name, "depends": depends}))
+        return tmp_path
+
+    def test_resolves_a_sibling_repo_two_hops_away(self, tmp_path, monkeypatch):
+        superproject_root = self._build_monorepo(
+            tmp_path,
+            {
+                "solt-crm": {
+                    # Mirrors the real solt_crm_landing_quoter manifest:
+                    # llm_crm depends on it directly (hop 1), and it in turn
+                    # depends on solt_base, a module in a THIRD repo (hop 2).
+                    "solt_crm_landing_quoter": ["sale", "solt_base"],
+                },
+                "solt-base": {
+                    "solt_base": ["base"],
+                },
+            },
+        )
+        repo_path = superproject_root / "addons" / "solt-llm"
+        repo_path.mkdir(parents=True)
+
+        monkeypatch.setattr(setup_repo, "find_superproject_root", lambda p: superproject_root)
+        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "17.0")
+
+        modules = {"llm_crm": {"depends": ["solt_crm_landing_quoter"]}}
+        result = setup_repo.detect_sibling_repos(modules, repo_path)
+
+        assert "soltein-net/solt-base@17.0:solt-base" in result
+        assert "soltein-net/solt-crm@17.0:solt-crm" in result
+
+    def test_standalone_checkout_without_superproject_keeps_single_hop_behavior(self, tmp_path, monkeypatch):
+        """No monorepo to scan -> falls back to the static known_mappings,
+        which can only ever resolve one hop. Documents the existing limit
+        rather than silently trying (and failing) to do more."""
+        monkeypatch.setattr(setup_repo, "find_superproject_root", lambda p: None)
+        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "17.0")
+
+        modules = {"solt_crm": {"depends": ["solt_base"]}}
+        result = setup_repo.detect_sibling_repos(modules, tmp_path)
+
+        assert result == ["soltein-net/solt-base@17.0:solt-base"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

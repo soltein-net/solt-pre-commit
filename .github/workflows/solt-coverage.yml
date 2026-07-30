@@ -171,7 +171,7 @@ jobs:
           # workflow file) - bump it by hand alongside pyproject.toml's tag
           # at every release, or this reusable workflow's *shell logic* ships
           # at the new tag while the *installed CLI it calls* stays stale.
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.3"
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.4"
 
       - name: Build addons-path
         id: addons_path
