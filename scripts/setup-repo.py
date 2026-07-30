@@ -933,6 +933,38 @@ def scan_monorepo_module_repos(superproject_root: Path, exclude_dir_name: str) -
     return mapping
 
 
+def scan_monorepo_module_depends(superproject_root: Path, exclude_dir_name: str) -> dict[str, list[str]]:
+    """Build {module_name: depends} for every module on disk under
+    <superproject_root>/addons/, excluding the target repo itself.
+
+    Needed to resolve TRANSITIVE sibling-repo dependencies: a module this
+    repo depends on directly may itself depend on a module that lives in a
+    THIRD repo - e.g. llm_crm depends on solt_crm_landing_quoter (repo
+    solt-crm), which itself depends on solt_crm (same repo) and solt_base
+    (repo solt-base). Only the on-disk manifests hold that second hop; a
+    dependency's own `depends` never appears in the target repo's manifests.
+    """
+    addons_dir = superproject_root / "addons"
+    depends_map: dict[str, list[str]] = {}
+    if not addons_dir.is_dir():
+        return depends_map
+
+    import ast
+
+    for repo_dir in addons_dir.iterdir():
+        if not repo_dir.is_dir() or repo_dir.name == exclude_dir_name:
+            continue
+        for manifest in repo_dir.glob("*/__manifest__.py"):
+            try:
+                manifest_data = ast.literal_eval(manifest.read_text())
+            except (SyntaxError, ValueError):
+                continue
+            if isinstance(manifest_data, dict):
+                depends_map[manifest.parent.name] = manifest_data.get("depends", [])
+
+    return depends_map
+
+
 def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]:
     """Detect external repos needed from module dependencies.
 
@@ -970,6 +1002,22 @@ def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]
         # Dynamic, on-disk mapping wins when available - it's accurate for
         # every module in every repo, not just each repo's "primary" one.
         known_mappings = {**known_mappings, **scan_monorepo_module_repos(superproject_root, repo_path.name)}
+
+        # Walk dependencies-of-dependencies to a fixpoint: a directly-depended
+        # module can itself depend on a module in a THIRD repo (see
+        # scan_monorepo_module_depends' docstring). Without this, CI clones
+        # only the first hop and fails once Odoo tries to install a module
+        # two or more hops away. Standalone checkouts (no superproject) can't
+        # do this - there's no on-disk manifest to read a sibling's depends
+        # from - so they keep the single-hop behavior via known_mappings.
+        depends_map = scan_monorepo_module_depends(superproject_root, repo_path.name)
+        worklist = list(all_deps)
+        while worklist:
+            dep = worklist.pop()
+            for transitive_dep in depends_map.get(dep, []):
+                if transitive_dep not in all_deps:
+                    all_deps.add(transitive_dep)
+                    worklist.append(transitive_dep)
 
     # Extract the git branch/tag from the target repo (CRITICAL: not hardcoded)
     target_branch = get_git_branch(repo_path)
