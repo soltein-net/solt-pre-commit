@@ -98,6 +98,12 @@ jobs:
             echo "::error::sibling-repos is set but no CHECKOUT_TOKEN secret was provided - cannot clone private dependency repos"
             exit 1
           fi
+          # setup-repo.py generates this space-separated (multiple sibling
+          # repos on one line), but this loop reads newline-separated - with
+          # 2+ entries the whole value was read as a single "line", mangling
+          # every repo_ref/path split into one wrong clone. Normalize either
+          # separator to newline so both generator styles parse correctly.
+          SIBLING_REPOS=$(printf '%s' "$SIBLING_REPOS" | tr -s ' ' '\n')
           while IFS= read -r line; do
             [ -z "$line" ] && continue
             repo_ref="${line%%:*}"
@@ -145,6 +151,10 @@ jobs:
           grep -v '^psutil' odoo/requirements.txt > /tmp/odoo-constraints.txt
           pip install -c /tmp/odoo-constraints.txt -r repo/requirements.txt
           if [ -n "$SIBLING_REPOS" ]; then
+            # See the "Checkout sibling repos" step - same space-vs-newline
+            # normalization, needed here too since this is a separate step
+            # re-reading the same raw input.
+            SIBLING_REPOS=$(printf '%s' "$SIBLING_REPOS" | tr -s ' ' '\n')
             while IFS= read -r line; do
               [ -z "$line" ] && continue
               path="${line##*:}"
@@ -161,7 +171,7 @@ jobs:
           # workflow file) - bump it by hand alongside pyproject.toml's tag
           # at every release, or this reusable workflow's *shell logic* ships
           # at the new tag while the *installed CLI it calls* stays stale.
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.2"
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.3"
 
       - name: Build addons-path
         id: addons_path
@@ -170,6 +180,8 @@ jobs:
         run: |
           PATH_LIST="$GITHUB_WORKSPACE/odoo/odoo/addons,$GITHUB_WORKSPACE/odoo/addons,$GITHUB_WORKSPACE/repo"
           if [ -n "$SIBLING_REPOS" ]; then
+            # See the "Checkout sibling repos" step - same normalization.
+            SIBLING_REPOS=$(printf '%s' "$SIBLING_REPOS" | tr -s ' ' '\n')
             while IFS= read -r line; do
               [ -z "$line" ] && continue
               path="${line##*:}"
