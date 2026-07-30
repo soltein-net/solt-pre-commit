@@ -39,6 +39,15 @@ on:
         required: false
         type: string
         default: '3.11'
+      postgres-image:
+        description: |
+          Postgres service image. Override when a module's manifest declares
+          external_dependencies.postgresql needs (e.g. llm_pgvector needs the
+          `vector` extension) - setup-repo.py sets this automatically from
+          that declaration when it regenerates a caller's solt-validate.yml.
+        required: false
+        type: string
+        default: 'postgres:15'
     secrets:
       CHECKOUT_TOKEN:
         description: 'Token with read access to sibling-repos. Only needed when sibling-repos is set.'
@@ -60,7 +69,7 @@ jobs:
       coverage_pct: ${{ steps.report.outputs.coverage_pct }}
     services:
       postgres:
-        image: postgres:15
+        image: ${{ inputs.postgres-image }}
         env:
           POSTGRES_USER: odoo
           POSTGRES_PASSWORD: odoo
@@ -171,7 +180,7 @@ jobs:
           # workflow file) - bump it by hand alongside pyproject.toml's tag
           # at every release, or this reusable workflow's *shell logic* ships
           # at the new tag while the *installed CLI it calls* stays stale.
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.2.4"
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.3.0"
 
       - name: Build addons-path
         id: addons_path
