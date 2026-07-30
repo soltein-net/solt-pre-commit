@@ -315,5 +315,40 @@ class TestDetectSiblingRepos:
         assert result == ["soltein-net/solt-base@17.0:solt-base"]
 
 
+class TestDetectPostgresImage:
+    """detect_postgres_image() must read the postgres-image need straight
+    from a module's own manifest (external_dependencies.postgresql), the
+    same single-source-of-truth pattern solt-check-requirements uses for
+    Python deps - so a hand-edited workflow line isn't the only way to
+    keep the CI Postgres service in sync, and regeneration can't silently
+    revert it back to the plain default.
+    """
+
+    def test_no_modules_need_an_extension_keeps_default(self):
+        modules = {"solt_crm": {"external_dependencies": {"python": ["requests"]}}}
+        assert setup_repo.detect_postgres_image(modules) == setup_repo.DEFAULT_POSTGRES_IMAGE
+
+    def test_module_declaring_vector_extension_picks_pgvector_image(self):
+        modules = {
+            "llm_pgvector": {"external_dependencies": {"python": ["pgvector"], "postgresql": ["vector"]}},
+        }
+        assert setup_repo.detect_postgres_image(modules) == setup_repo.POSTGRES_EXTENSION_IMAGES["vector"]
+
+    def test_module_declaring_vchord_extension_wins_over_plain_vector(self):
+        """vchord's image already CASCADEs pgvector in, so when both are
+        declared across a repo's modules (llm_pgvector + llm_vectorchord,
+        as in solt-llm), the vchord image alone satisfies both - no need to
+        pick one arbitrarily or run two separate Postgres images."""
+        modules = {
+            "llm_pgvector": {"external_dependencies": {"postgresql": ["vector"]}},
+            "llm_vectorchord": {"external_dependencies": {"postgresql": ["vchord"]}},
+        }
+        assert setup_repo.detect_postgres_image(modules) == setup_repo.POSTGRES_EXTENSION_IMAGES["vchord"]
+
+    def test_module_with_no_external_dependencies_key_is_tolerated(self):
+        modules = {"solt_base": {}}
+        assert setup_repo.detect_postgres_image(modules) == setup_repo.DEFAULT_POSTGRES_IMAGE
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

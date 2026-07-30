@@ -59,6 +59,7 @@ jobs:
       sibling-repos: '{{ SIBLING_REPOS }}'
       odoo-version: '{{ ODOO_VERSION }}'
       python-version: '{{ PYTHON_VERSION }}'
+      postgres-image: '{{ POSTGRES_IMAGE }}'
     secrets:
       CHECKOUT_TOKEN: ${{ secrets.SOLT_CROSS_REPO_TOKEN }}
 

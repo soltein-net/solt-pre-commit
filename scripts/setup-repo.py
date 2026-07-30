@@ -736,6 +736,7 @@ def detect_modules(repo_path: Path) -> dict[str, dict]:
                     "version": manifest_data.get("version"),
                     "depends": manifest_data.get("depends", []),
                     "summary": manifest_data.get("summary", module_name),
+                    "external_dependencies": manifest_data.get("external_dependencies", {}),
                 }
         except (SyntaxError, ValueError):
             pass
@@ -1036,6 +1037,37 @@ def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]
     return sorted(seen_repos.values())
 
 
+# Postgres extension -> service image that provides it. vchord's image is
+# listed first and used whenever present since VectorChord's own extension
+# install CASCADEs into pgvector - one image then covers both requirements.
+POSTGRES_EXTENSION_IMAGES = {
+    "vchord": "tensorchord/vchord-postgres:pg15-v1.1.1",
+    "vector": "pgvector/pgvector:pg15",
+}
+DEFAULT_POSTGRES_IMAGE = "postgres:15"
+
+
+def detect_postgres_image(modules: dict[str, dict]) -> str:
+    """Pick the CI Postgres service image from modules' declared needs.
+
+    Single source of truth is each module's own manifest, same as
+    solt-check-requirements does for Python deps: a module that needs a
+    Postgres extension (e.g. llm_pgvector needing `vector`) declares it under
+    `external_dependencies.postgresql`, and this picks the image that
+    provides it - instead of a hand-edited workflow line that regeneration
+    would otherwise silently overwrite back to the plain default.
+    """
+    extensions = set()
+    for module_info in modules.values():
+        extensions.update(module_info.get("external_dependencies", {}).get("postgresql", []))
+
+    for extension, image in POSTGRES_EXTENSION_IMAGES.items():
+        if extension in extensions:
+            return image
+
+    return DEFAULT_POSTGRES_IMAGE
+
+
 def generate_workflow_file(
     repo_path: Path,
     modules: dict[str, dict],
@@ -1064,6 +1096,7 @@ def generate_workflow_file(
             "{{ ODOO_VERSION }}": odoo_version,
             "{{ PYTHON_VERSION }}": python_version,
             "{{ SOLT_VERSION }}": CURRENT_VERSION,
+            "{{ POSTGRES_IMAGE }}": detect_postgres_image(modules),
         }
 
         for placeholder, value in replacements.items():
