@@ -884,6 +884,55 @@ def generate_dependencies_string(modules: dict[str, dict]) -> str:
     return ", ".join(external) if external else "base"
 
 
+def find_superproject_root(repo_path: Path) -> Path | None:
+    """The monorepo this repo is checked out under as a submodule, if any.
+
+    Mirrors odoo_test_runner.find_env_root()'s own superproject detection -
+    same underlying git call, same reasoning: a repo checked out standalone
+    (not under the soltein monorepo) has no superproject, and that's a normal,
+    expected case (e.g. someone cloning just solt-llm on its own), not an error.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-superproject-working-tree"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        superproject = result.stdout.strip()
+        return Path(superproject) if superproject else None
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def scan_monorepo_module_repos(superproject_root: Path, exclude_dir_name: str) -> dict[str, str]:
+    """Build an accurate {module_name: "soltein-net/repo-dir-name"} map by
+    reading every manifest actually on disk under <superproject_root>/addons/,
+    instead of a hand-maintained guess.
+
+    Exists because the old approach (a static dict of one "primary" module
+    name per repo) silently missed any OTHER module in a multi-module repo -
+    e.g. solt-crm ships solt_crm, solt_crm_landing_quoter, and
+    solt_crm_commercial_profile, but the static map only ever knew "solt_crm".
+    A dependency on any of the other two resolved to no sibling-repo at all,
+    which only surfaces once CI actually tries to install that specific
+    module and finds it missing - exactly the failure this replaces.
+    """
+    addons_dir = superproject_root / "addons"
+    mapping: dict[str, str] = {}
+    if not addons_dir.is_dir():
+        return mapping
+
+    for repo_dir in addons_dir.iterdir():
+        if not repo_dir.is_dir() or repo_dir.name == exclude_dir_name:
+            continue
+        for manifest in repo_dir.glob("*/__manifest__.py"):
+            mapping[manifest.parent.name] = f"soltein-net/{repo_dir.name}"
+
+    return mapping
+
+
 def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]:
     """Detect external repos needed from module dependencies.
 
@@ -901,7 +950,8 @@ def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]
     for module_info in modules.values():
         all_deps.update(module_info.get("depends", []))
 
-    # Map known soltein external deps (future: use GitHub API)
+    # Static fallback for repos checked out standalone, with no monorepo
+    # superproject to scan (find_superproject_root returns None there).
     known_mappings = {
         "solt_base": "soltein-net/solt-base",
         "solt_base_product": "soltein-net/solt-base-product",
@@ -915,18 +965,27 @@ def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]
         "solt_hr": "soltein-net/solt-hr",
     }
 
+    superproject_root = find_superproject_root(repo_path)
+    if superproject_root:
+        # Dynamic, on-disk mapping wins when available - it's accurate for
+        # every module in every repo, not just each repo's "primary" one.
+        known_mappings = {**known_mappings, **scan_monorepo_module_repos(superproject_root, repo_path.name)}
+
     # Extract the git branch/tag from the target repo (CRITICAL: not hardcoded)
     target_branch = get_git_branch(repo_path)
 
-    sibling_repos = []
+    # dict, not a list-with-duplicates: multiple dependencies (e.g.
+    # solt_crm_landing_quoter and solt_crm_commercial_profile) commonly map to
+    # the SAME repo, and each would otherwise add its own identical entry.
+    seen_repos: dict[str, str] = {}
     for dep in sorted(all_deps):
         if dep in known_mappings:
             repo = known_mappings[dep]
             repo_name = repo.split("/")[1]
             # Use the SAME branch/tag as target repo, not a fixed version
-            sibling_repos.append(f"{repo}@{target_branch}:{repo_name}")
+            seen_repos[repo] = f"{repo}@{target_branch}:{repo_name}"
 
-    return sibling_repos
+    return sorted(seen_repos.values())
 
 
 def generate_workflow_file(
