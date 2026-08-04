@@ -1,9 +1,13 @@
 # =============================================================================
 # SOLT PRE-COMMIT - Reusable Workflow (Simplified Single Job)
 # =============================================================================
-# Version: set once, in .github/actions/install-solt-pre-commit/action.yml -
-# solt-coverage.yml shares that same action, so that's the only file a
-# release needs to touch. Do not add a new hardcoded "vX.Y.Z" here.
+# Version: env.SOLT_PRE_COMMIT_VERSION below. solt-coverage.yml and
+# solt-update-badges.yml each carry their own identical env block - a
+# composite action referenced by relative path was tried to unify this
+# across files and shipped broken in v1.3.1 (a reusable workflow's job
+# doesn't have its own defining repo checked out by default, so the
+# relative path can't resolve - see the git history for the postmortem).
+# Bump all three files' env block on every release.
 # IMPORTANT: This workflow will FAIL (red) when blocking issues are found.
 #
 # FEATURES:
@@ -75,6 +79,9 @@ on:
       ruff-changed:
         description: 'Number of Ruff issues in changed files'
         value: ${{ jobs.Validate.outputs.ruff_changed }}
+
+env:
+  SOLT_PRE_COMMIT_VERSION: v1.3.2
 
 jobs:
   Validate:
@@ -170,10 +177,9 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        id: install
-        uses: ./.github/actions/install-solt-pre-commit
-        with:
-          extra-packages: 'pylint-odoo ruff'
+        run: |
+          pip install --upgrade pip
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@${SOLT_PRE_COMMIT_VERSION}" pylint-odoo ruff
 
       - name: Validate branch name
         id: branch-check
@@ -547,7 +553,6 @@ jobs:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
           PYTHON_VERSION: ${{ steps.detect-version.outputs.python_version }}
           IS_EMPTY_REPO: ${{ steps.summary.outputs.is_empty_repo }}
-          SOLT_PRE_COMMIT_VERSION: ${{ steps.install.outputs.version }}
         run: |
           # Native GitHub job summary instead of a hand-rolled PR comment: it
           # can't drift from the run that produced it (no separately-stamped

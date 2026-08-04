@@ -60,6 +60,9 @@ on:
         description: 'Coverage percentage (integer, e.g. "40")'
         value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
+env:
+  SOLT_PRE_COMMIT_VERSION: v1.3.2
+
 jobs:
   Coverage:
     name: Run tests + coverage
@@ -174,13 +177,15 @@ jobs:
             done <<< "$SIBLING_REPOS"
           fi
           pip install coverage
-
-      - name: Install solt-pre-commit
-        # Not on PyPI - installed straight from the tagged commit instead, via
-        # the same composite action solt-validate.yml uses. That action's
-        # `version` default is the only place this needs bumping at release
-        # time - not here, and not kept in sync by hand with a second literal.
-        uses: ./.github/actions/install-solt-pre-commit
+          # Not on PyPI - installed straight from the tagged commit instead.
+          # A composite action referenced by relative path was tried here to
+          # share this literal with solt-validate.yml/solt-update-badges.yml,
+          # but shipped broken in v1.3.1 - a reusable workflow's job doesn't
+          # have its own defining repo checked out by default, so the
+          # relative path can't resolve. Back to a plain per-file env var
+          # (env.SOLT_PRE_COMMIT_VERSION below) - bump it here, and in the
+          # identical block in the other two files, on every release.
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@${SOLT_PRE_COMMIT_VERSION}"
 
       - name: Build addons-path
         id: addons_path
