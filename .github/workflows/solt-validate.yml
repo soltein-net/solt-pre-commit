@@ -1,9 +1,9 @@
 # =============================================================================
 # SOLT PRE-COMMIT - Reusable Workflow (Simplified Single Job)
 # =============================================================================
-# Version: see env.SOLT_PRE_COMMIT_VERSION below — the ONLY place this
-# workflow's own version should be written. Bump it there on every release;
-# do not add new hardcoded "vX.Y.Z" literals anywhere else in this file.
+# Version: set once, in .github/actions/install-solt-pre-commit/action.yml -
+# solt-coverage.yml shares that same action, so that's the only file a
+# release needs to touch. Do not add a new hardcoded "vX.Y.Z" here.
 # IMPORTANT: This workflow will FAIL (red) when blocking issues are found.
 #
 # FEATURES:
@@ -75,11 +75,6 @@ on:
       ruff-changed:
         description: 'Number of Ruff issues in changed files'
         value: ${{ jobs.Validate.outputs.ruff_changed }}
-
-env:
-  # Single source of truth for which solt-pre-commit release this workflow
-  # installs and reports on. Bump this on every release — nowhere else.
-  SOLT_PRE_COMMIT_VERSION: v1.3.0
 
 jobs:
   Validate:
@@ -171,9 +166,10 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@${SOLT_PRE_COMMIT_VERSION}" pylint-odoo ruff
+        id: install
+        uses: ./.github/actions/install-solt-pre-commit
+        with:
+          extra-packages: 'pylint-odoo ruff'
 
       - name: Validate branch name
         id: branch-check
@@ -548,6 +544,7 @@ jobs:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
           PYTHON_VERSION: ${{ steps.detect-version.outputs.python_version }}
           IS_EMPTY_REPO: ${{ steps.summary.outputs.is_empty_repo }}
+          SOLT_PRE_COMMIT_VERSION: ${{ steps.install.outputs.version }}
         run: |
           # Native GitHub job summary instead of a hand-rolled PR comment: it
           # can't drift from the run that produced it (no separately-stamped

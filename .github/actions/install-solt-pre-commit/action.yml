@@ -1,0 +1,29 @@
+name: Install solt-pre-commit
+description: >-
+  Installs this pinned solt-pre-commit release. Both solt-validate.yml and
+  solt-coverage.yml call this via a relative path (./.github/actions/...),
+  which GitHub resolves against solt-pre-commit's own repo at whatever ref
+  the caller pinned the reusable workflow to - so this action's version
+  default below is the ONLY literal a release needs to bump. No separate
+  copy in each workflow file to remember.
+inputs:
+  version:
+    description: 'solt-pre-commit git ref to install (tag, branch, or SHA)'
+    required: false
+    default: 'v1.3.0'
+  extra-packages:
+    description: 'Additional pip packages to install in the same command (space-separated)'
+    required: false
+    default: ''
+outputs:
+  version:
+    description: 'The solt-pre-commit version that was installed (for reports/badges)'
+    value: ${{ inputs.version }}
+runs:
+  using: composite
+  steps:
+    - name: Install solt-pre-commit
+      shell: bash
+      run: |
+        pip install --upgrade pip
+        pip install "git+https://github.com/soltein-net/solt-pre-commit.git@${{ inputs.version }}" ${{ inputs.extra-packages }}

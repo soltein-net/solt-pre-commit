@@ -109,15 +109,15 @@ jobs:
           python-version: ${{ steps.detect.outputs.python_version }}
           cache: 'pip'
 
+      - name: Install solt-pre-commit
+        uses: ./.github/actions/install-solt-pre-commit
+
       - name: Collect metrics
         id: metrics
         env:
           ODOO_VERSION: ${{ steps.detect.outputs.odoo_version }}
           REPO_NAME: ${{ steps.detect.outputs.repo_name }}
         run: |
-          pip install --upgrade pip
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1"
-
           MODULES=$(find . -name "__manifest__.py" -o -name "__openerp__.py" | xargs -I {} dirname {} | sort -u | tr '\n' ' ')
           MODULE_COUNT=$(echo "$MODULES" | wc -w | tr -d ' ')
 
