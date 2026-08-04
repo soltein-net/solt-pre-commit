@@ -147,10 +147,15 @@ jobs:
           if [ -n "$INPUT_PYTHON" ]; then
             PYTHON_VERSION="$INPUT_PYTHON"
           else
+            # Mirrors get_python_version() in scripts/setup-repo.py (the
+            # canonical mapping - track what's actually deployed, not Odoo's
+            # documented minimum; see that function's docstring for why).
+            # Keep the two in sync by hand - this fallback only runs when no
+            # explicit `python-version` input was passed to this job.
             case "$ODOO_VERSION" in
-              16.0*|17.0*) PYTHON_VERSION="3.10" ;;
-              18.0*) PYTHON_VERSION="3.11" ;;
-              19.0*|20.0*|21.0*|22.0*|23.0*|24.0*|25.0*) PYTHON_VERSION="3.12" ;;
+              16.0*) PYTHON_VERSION="3.10" ;;
+              17.0*|18.0*|19.0*) PYTHON_VERSION="3.11" ;;
+              20.0*|21.0*|22.0*|23.0*|24.0*|25.0*) PYTHON_VERSION="3.12" ;;
               *) PYTHON_VERSION="3.11" ;;
             esac
           fi
