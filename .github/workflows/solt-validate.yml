@@ -1,7 +1,9 @@
 # =============================================================================
 # SOLT PRE-COMMIT - Reusable Workflow (Simplified Single Job)
 # =============================================================================
-# Version: 1.0.1
+# Version: set once, in .github/actions/install-solt-pre-commit/action.yml -
+# solt-coverage.yml shares that same action, so that's the only file a
+# release needs to touch. Do not add a new hardcoded "vX.Y.Z" here.
 # IMPORTANT: This workflow will FAIL (red) when blocking issues are found.
 #
 # FEATURES:
@@ -145,10 +147,14 @@ jobs:
           if [ -n "$INPUT_PYTHON" ]; then
             PYTHON_VERSION="$INPUT_PYTHON"
           else
+            # Mirrors get_python_version() in scripts/setup-repo.py (the
+            # canonical mapping - track what's actually deployed, not Odoo's
+            # documented minimum; see that function's docstring for why).
+            # Keep the two in sync by hand - this fallback only runs when no
+            # explicit `python-version` input was passed to this job.
             case "$ODOO_VERSION" in
-              16.0*|17.0*) PYTHON_VERSION="3.10" ;;
-              18.0*) PYTHON_VERSION="3.11" ;;
-              19.0*|20.0*|21.0*|22.0*|23.0*|24.0*|25.0*) PYTHON_VERSION="3.12" ;;
+              17.0*|18.0*|19.0*) PYTHON_VERSION="3.11" ;;
+              20.0*|21.0*|22.0*|23.0*|24.0*|25.0*) PYTHON_VERSION="3.12" ;;
               *) PYTHON_VERSION="3.11" ;;
             esac
           fi
@@ -164,9 +170,10 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@v1.0.1" pylint-odoo ruff
+        id: install
+        uses: ./.github/actions/install-solt-pre-commit
+        with:
+          extra-packages: 'pylint-odoo ruff'
 
       - name: Validate branch name
         id: branch-check
@@ -298,7 +305,6 @@ jobs:
           }
           PYLINT_ARGS="--load-plugins=pylint_odoo --exit-zero"
           case "$ODOO_VERSION" in
-            16.0*) PYLINT_ARGS="$PYLINT_ARGS --valid-odoo-versions=16.0" ;;
             17.0*) PYLINT_ARGS="$PYLINT_ARGS --valid-odoo-versions=17.0" ;;
             18.0*) PYLINT_ARGS="$PYLINT_ARGS --valid-odoo-versions=18.0" ;;
           esac
@@ -391,21 +397,42 @@ jobs:
           echo "missing_string=$MISSING_STRING" >> $GITHUB_OUTPUT
           echo "missing_help=$MISSING_HELP" >> $GITHUB_OUTPUT
 
-      - name: Extract issues for PR comment
+      - name: Extract issues & annotate diff
         id: extract-issues
         if: always() && steps.find-modules.outputs.count != '0'
         run: |
           python3 << 'PYEOF'
-          import os, re, json
+          import re, json
           MAX_ERRORS = 10
+          MAX_ANNOTATIONS = 50  # GitHub Checks API caps annotations per run; stop well short.
+          annotation_count = 0
           result = {'errors': [], 'warnings': [], 'total_errors': 0, 'total_warnings': 0, 'pylint_errors': [], 'pylint_errors_count': 0, 'ruff_errors': [], 'ruff_errors_count': 0}
+
           def strip_ansi(text):
               return re.compile(r'\x1b\[[0-9;]*m|\[0m|\[1;[0-9]*m|\[35m').sub('', text)
+
           def escape_html(text):
               return strip_ansi(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
           def shorten_path(filepath):
               parts = filepath.replace('\\', '/').split('/')
               return '/'.join(parts[-2:]) if len(parts) > 2 else filepath
+
+          def annotate(level, filepath, line, message):
+              # Inline check-run annotation, rendered directly on the diff in
+              # "Files changed" — this is what replaces the old PR-comment
+              # table; see workflow-commands escaping rules (%, \r, \n).
+              global annotation_count
+              if annotation_count >= MAX_ANNOTATIONS:
+                  return
+              safe_msg = strip_ansi(message).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              if filepath:
+                  safe_file = filepath.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A').replace(',', '%2C').replace(':', '%3A')
+                  print(f"::{level} file={safe_file},line={line or 1}::{safe_msg}")
+              else:
+                  print(f"::{level}::{safe_msg}")
+              annotation_count += 1
+
           try:
               with open('reports/validation.txt', 'r', encoding='utf-8', errors='replace') as f:
                   content = f.read()
@@ -422,16 +449,24 @@ jobs:
                   if line.startswith('    - ') and current_severity in ('error', 'warning'):
                       msg_content = line[6:]
                       file_match = re.match(r'^([^\s:]+):(\d+)\s+(.+)$', msg_content)
-                      entry = {'file': shorten_path(file_match.group(1)), 'line': file_match.group(2), 'message': escape_html(file_match.group(3)[:120])} if file_match else {'file': '', 'line': '', 'message': escape_html(msg_content[:150])}
-                      if current_severity == 'error' and len(result['errors']) < MAX_ERRORS: result['errors'].append(entry)
-                      elif current_severity == 'warning' and len(result['warnings']) < MAX_ERRORS: result['warnings'].append(entry)
+                      raw_file, raw_line, raw_msg = (shorten_path(file_match.group(1)), file_match.group(2), file_match.group(3)[:120]) if file_match else ('', '', msg_content[:150])
+                      entry = {'file': raw_file, 'line': raw_line, 'message': escape_html(raw_msg)}
+                      if current_severity == 'error' and len(result['errors']) < MAX_ERRORS:
+                          result['errors'].append(entry)
+                          annotate('error', raw_file, raw_line, raw_msg)
+                      elif current_severity == 'warning' and len(result['warnings']) < MAX_ERRORS:
+                          result['warnings'].append(entry)
+                          annotate('warning', raw_file, raw_line, raw_msg)
           except FileNotFoundError: pass
           try:
               with open('reports/pylint-changed.txt', 'r', encoding='utf-8', errors='replace') as f:
                   for line in f.read().split('\n'):
                       match = re.match(r'^(.+?\.py):(\d+):\s*(?:\d+:\s*)?\[([A-Z]\d+)\(([^)]+)\),\s*([^\]]*)\]\s*(.+)$', line.strip())
                       if match:
-                          result['pylint_errors'].append({'file': shorten_path(match.group(1)), 'line': match.group(2), 'message': escape_html(f"[{match.group(3)}] {match.group(6)}"[:120]), 'code': match.group(3)})
+                          raw_file, raw_line = shorten_path(match.group(1)), match.group(2)
+                          raw_msg = f"[{match.group(3)}] {match.group(6)}"[:120]
+                          result['pylint_errors'].append({'file': raw_file, 'line': raw_line, 'message': escape_html(raw_msg), 'code': match.group(3)})
+                          annotate('warning', raw_file, raw_line, raw_msg)
               result['pylint_errors_count'] = len(result['pylint_errors'])
           except FileNotFoundError: pass
           try:
@@ -439,23 +474,67 @@ jobs:
                   for line in f.read().split('\n'):
                       match = re.match(r'^(.+?\.py):(\d+):(\d+):\s*([A-Z]+\d+)\s+(.+)$', line.strip())
                       if match:
-                          filepath = re.sub(r'/home/runner/work/[^/]+/', '', shorten_path(match.group(1)))
-                          result['ruff_errors'].append({'file': filepath, 'line': match.group(2), 'message': escape_html(f"[{match.group(4)}] {match.group(5)[:100]}"), 'code': match.group(4)})
+                          raw_file = re.sub(r'/home/runner/work/[^/]+/', '', shorten_path(match.group(1)))
+                          raw_line = match.group(2)
+                          raw_msg = f"[{match.group(4)}] {match.group(5)[:100]}"
+                          result['ruff_errors'].append({'file': raw_file, 'line': raw_line, 'message': escape_html(raw_msg), 'code': match.group(4)})
+                          annotate('warning', raw_file, raw_line, raw_msg)
               result['ruff_errors_count'] = len(result['ruff_errors'])
           except FileNotFoundError: pass
           with open('reports/extracted_issues.json', 'w') as f: json.dump(result, f, indent=2)
-          print(f"Extracted: {len(result['errors'])} errors, {len(result['warnings'])} warnings, {result['pylint_errors_count']} pylint, {result['ruff_errors_count']} ruff")
+          print(f"Extracted: {len(result['errors'])} errors, {len(result['warnings'])} warnings, {result['pylint_errors_count']} pylint, {result['ruff_errors_count']} ruff ({annotation_count} annotated on diff)")
           PYEOF
 
-      - name: Comment PR
-        if: github.event_name == 'pull_request' && always()
+      - name: Comment on invalid branch name
+        if: github.event_name == 'pull_request' && steps.branch-check.outputs.valid == 'false'
         uses: actions/github-script@v7
+        env:
+          BRANCH_NAME: ${{ steps.branch-check.outputs.branch_name }}
+        with:
+          script: |
+            const branchName = process.env.BRANCH_NAME || '';
+            const body = [
+              '## :x: Validation Failed',
+              '',
+              '> :no_entry: **Invalid branch name.** This PR has been **automatically closed**. Please rename your branch and open a new PR.',
+              '',
+              `**Branch:** \`${branchName}\``,
+              '',
+              '### :label: Branch Naming Convention',
+              '',
+              'Branch names must follow one of these patterns:',
+              '- `<type>/<odoo-version>-<description>` (e.g., `feature/17.0-add-invoice`)',
+              '- `<type>/<odoo-version>-<TICKET>-<number>-<description>` (e.g., `fix/17.0-SOLT-123-bug-fix`)',
+              '',
+              '**Valid types:** `feature`, `fix`, `hotfix`, `bugfix`, `release`, `refactor`, `docs`, `test`, `chore`',
+              '',
+              ':warning: **Note:** Use hyphens (`-`) as separators, not underscores (`_`).',
+              '',
+              '**Examples:**',
+              '| Branch | Status |',
+              '|--------|--------|',
+              '| `feature/17.0-add-new-feature` | :white_check_mark: Valid |',
+              '| `fix/17.0-SOLT-123-bug-fix` | :white_check_mark: Valid |',
+              '| `17.0-feature-something` | :white_check_mark: Valid |',
+              '| `feature/17.0_add_feature` | :x: Invalid (uses `_`) |',
+              `| \`${branchName}\` | :x: Invalid |`,
+            ].join('\n');
+            // Unlike the routine pass/fail report (moved to $GITHUB_STEP_SUMMARY
+            // below), this stays a PR comment on purpose: the PR gets closed
+            // right after, so this is the only place the author will see why.
+            try {
+              await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body});
+            } catch (e) {
+              core.warning(`Could not post the branch-naming comment (non-fatal): ${e.status || ''} ${e.message}`);
+            }
+
+      - name: Write job summary
+        if: always() && steps.branch-check.outputs.valid != 'false'
         env:
           MODULE_COUNT: ${{ steps.find-modules.outputs.count }}
           EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
           DURATION: ${{ steps.validate.outputs.duration }}
           SCOPE: ${{ inputs.validation-scope }}
-          ERRORS_COUNT: ${{ steps.summary.outputs.errors }}
           WARNINGS_COUNT: ${{ steps.summary.outputs.warnings }}
           MISSING_DOCSTRING: ${{ steps.summary.outputs.missing_docstring }}
           MISSING_STRING: ${{ steps.summary.outputs.missing_string }}
@@ -468,220 +547,71 @@ jobs:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
           PYTHON_VERSION: ${{ steps.detect-version.outputs.python_version }}
           IS_EMPTY_REPO: ${{ steps.summary.outputs.is_empty_repo }}
-          BRANCH_VALID: ${{ steps.branch-check.outputs.valid }}
-          BRANCH_NAME: ${{ steps.branch-check.outputs.branch_name }}
-        with:
-          script: |
-            const fs = require('fs');
-            const safeInt = (val, def = 0) => { const p = parseInt(val); return isNaN(p) ? def : p; };
-            const prNumber = context.issue.number;
-            if (!prNumber) return;
+          SOLT_PRE_COMMIT_VERSION: ${{ steps.install.outputs.version }}
+        run: |
+          # Native GitHub job summary instead of a hand-rolled PR comment: it
+          # can't drift from the run that produced it (no separately-stamped
+          # tool version to go stale), needs no PR-write permission, and shows
+          # up for push runs too, not just PRs. Per-issue detail lives as
+          # inline annotations on the diff (previous step) instead of being
+          # duplicated here as another markdown table.
+          {
+            if [ "$IS_EMPTY_REPO" = "true" ] || [ "${MODULE_COUNT:-0}" = "0" ]; then
+              echo "## :white_check_mark: Validation Report (Odoo ${ODOO_VERSION})"
+              echo ""
+              echo "> :information_source: **No Odoo modules found in this repository.**"
+              echo ""
+              echo "This PR only contains configuration files. Validation will run once you add an Odoo module with \`__manifest__.py\`."
+            else
+              EXIT_CODE="${EXIT_CODE:-0}"; case "$EXIT_CODE" in ''|*[!0-9]*) EXIT_CODE=0 ;; esac
+              WARNINGS_COUNT="${WARNINGS_COUNT:-0}"; case "$WARNINGS_COUNT" in ''|*[!0-9]*) WARNINGS_COUNT=0 ;; esac
+              RUFF_CHANGED="${RUFF_CHANGED:-0}"; case "$RUFF_CHANGED" in ''|*[!0-9]*) RUFF_CHANGED=0 ;; esac
+              PYLINT_CHANGED="${PYLINT_CHANGED:-0}"; case "$PYLINT_CHANGED" in ''|*[!0-9]*) PYLINT_CHANGED=0 ;; esac
+              MISSING_DOCSTRING="${MISSING_DOCSTRING:-0}"; case "$MISSING_DOCSTRING" in ''|*[!0-9]*) MISSING_DOCSTRING=0 ;; esac
+              MISSING_STRING="${MISSING_STRING:-0}"; case "$MISSING_STRING" in ''|*[!0-9]*) MISSING_STRING=0 ;; esac
+              MISSING_HELP="${MISSING_HELP:-0}"; case "$MISSING_HELP" in ''|*[!0-9]*) MISSING_HELP=0 ;; esac
 
-            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
-            const repository = process.env.GITHUB_REPOSITORY || '';
-            const runId = process.env.GITHUB_RUN_ID || '';
-            const workflowUrl = `${serverUrl}/${repository}/actions/runs/${runId}`;
-            const moduleCount = safeInt(process.env.MODULE_COUNT);
-            const odooVersion = process.env.ODOO_VERSION || '17.0';
-            const pythonVersion = process.env.PYTHON_VERSION || '3.11';
-            const isEmptyRepo = process.env.IS_EMPTY_REPO === 'true';
-            const branchValid = process.env.BRANCH_VALID !== 'false';
-            const branchName = process.env.BRANCH_NAME || '';
+              HAS_FAILED=false
+              if [ "$EXIT_CODE" -ne 0 ]; then
+                HAS_FAILED=true
+              elif [ "$FAIL_ON_WARNINGS" = "true" ]; then
+                if [ "$WARNINGS_COUNT" -gt 0 ]; then HAS_FAILED=true; fi
+                if [ "$PYLINT_BLOCKING" = "true" ] && [ "$PYLINT_CHANGED" -gt 0 ]; then HAS_FAILED=true; fi
+                if [ "$RUFF_BLOCKING" = "true" ] && [ "$RUFF_CHANGED" -gt 0 ]; then HAS_FAILED=true; fi
+              fi
 
-            const bodyParts = [];
-
-            // Handle invalid branch name case
-            if (!branchValid) {
-              bodyParts.push(`## :x: Validation Failed (Odoo ${odooVersion})`);
-              bodyParts.push('');
-              bodyParts.push('> :no_entry: **Invalid branch name.** This PR has been **automatically closed**. Please rename your branch and open a new PR.');
-              bodyParts.push('');
-              bodyParts.push(`**Branch:** \`${branchName}\``);
-              bodyParts.push('');
-              bodyParts.push('### :label: Branch Naming Convention');
-              bodyParts.push('');
-              bodyParts.push('Branch names must follow one of these patterns:');
-              bodyParts.push('- `<type>/<odoo-version>-<description>` (e.g., `feature/17.0-add-invoice`)');
-              bodyParts.push('- `<type>/<odoo-version>-<TICKET>-<number>-<description>` (e.g., `fix/17.0-SOLT-123-bug-fix`)');
-              bodyParts.push('');
-              bodyParts.push('**Valid types:** `feature`, `fix`, `hotfix`, `bugfix`, `release`, `refactor`, `docs`, `test`, `chore`');
-              bodyParts.push('');
-              bodyParts.push(':warning: **Note:** Use hyphens (`-`) as separators, not underscores (`_`).');
-              bodyParts.push('');
-              bodyParts.push('**Examples:**');
-              bodyParts.push('| Branch | Status |');
-              bodyParts.push('|--------|--------|');
-              bodyParts.push('| `feature/17.0-add-new-feature` | :white_check_mark: Valid |');
-              bodyParts.push('| `fix/17.0-SOLT-123-bug-fix` | :white_check_mark: Valid |');
-              bodyParts.push('| `17.0-feature-something` | :white_check_mark: Valid |');
-              bodyParts.push('| `feature/17.0_add_feature` | :x: Invalid (uses `_`) |');
-              bodyParts.push(`| \`${branchName}\` | :x: Invalid |`);
-              bodyParts.push('');
-              bodyParts.push('---');
-              bodyParts.push(`:link: **[View workflow logs](${workflowUrl})**`);
-              bodyParts.push('');
-              bodyParts.push(`:robot: *solt-pre-commit v1.0.1 (Odoo ${odooVersion})*`);
-            }
-            // Handle empty repository case
-            else if (isEmptyRepo || moduleCount === 0) {
-              bodyParts.push(`## :white_check_mark: Validation Report (Odoo ${odooVersion})`);
-              bodyParts.push('');
-              bodyParts.push('> :information_source: **No Odoo modules found in this repository.**');
-              bodyParts.push('');
-              bodyParts.push('This PR only contains configuration files. Validation will run once you add an Odoo module with `__manifest__.py`.');
-              bodyParts.push('');
-              bodyParts.push('---');
-              bodyParts.push(`:robot: *solt-pre-commit v1.0.1 (Odoo ${odooVersion})*`);
-            } else {
-              // Normal validation report
-              const exitCode = safeInt(process.env.EXIT_CODE);
-              const duration = safeInt(process.env.DURATION);
-              const scope = process.env.SCOPE || 'changed';
-              const errorsCount = safeInt(process.env.ERRORS_COUNT);
-              const warningsCount = safeInt(process.env.WARNINGS_COUNT);
-              const failOnWarnings = process.env.FAIL_ON_WARNINGS === 'true';
-              const ruffBlocking = process.env.RUFF_BLOCKING === 'true';
-              const pylintBlocking = process.env.PYLINT_BLOCKING === 'true';
-              const missingDocstring = safeInt(process.env.MISSING_DOCSTRING);
-              const missingString = safeInt(process.env.MISSING_STRING);
-              const missingHelp = safeInt(process.env.MISSING_HELP);
-              const ruffChanged = safeInt(process.env.RUFF_CHANGED);
-              const pylintChanged = safeInt(process.env.PYLINT_CHANGED);
-
-              let extractedIssues = {errors: [], warnings: [], total_errors: 0, total_warnings: 0, pylint_errors: [], pylint_errors_count: 0, ruff_errors: [], ruff_errors_count: 0};
-              try { extractedIssues = JSON.parse(fs.readFileSync('reports/extracted_issues.json', 'utf8')); } catch (e) {}
-
-              const totalErrors = extractedIssues.total_errors || errorsCount;
-              const totalWarnings = extractedIssues.total_warnings || warningsCount;
-              const icon = (val, th, rev = false) => rev ? (val <= th ? ':white_check_mark:' : ':x:') : (val >= th ? ':white_check_mark:' : ':warning:');
-              const hasBlockingErrors = exitCode !== 0;
-              const hasWarnings = warningsCount > 0 || (pylintBlocking && pylintChanged > 0) || (ruffBlocking && ruffChanged > 0);
-              const hasFailed = hasBlockingErrors || (failOnWarnings && hasWarnings);
-              const overallStatus = hasFailed ? ':x: Failed' : ':white_check_mark: Passed';
-              const MAX_DISPLAY = 10;
-
-              bodyParts.push(`## :bar_chart: Validation Report (Odoo ${odooVersion})`);
-              bodyParts.push('');
-              bodyParts.push(hasFailed ? '> :no_entry: **This PR is blocked.** Fix the errors below before merging.' : '> :white_check_mark: **All checks passed.** This PR is ready for review.');
-              bodyParts.push('');
-              bodyParts.push('### :clipboard: Summary');
-              bodyParts.push('');
-              bodyParts.push('| Metric | Value |');
-              bodyParts.push('|--------|-------|');
-              bodyParts.push(`| Status | ${overallStatus} |`);
-              bodyParts.push(`| Odoo Version | **${odooVersion}** |`);
-              bodyParts.push(`| Python Version | ${pythonVersion} |`);
-              bodyParts.push(`| Modules | ${moduleCount} |`);
-              bodyParts.push(`| Scope | \`${scope}\` |`);
-              bodyParts.push(`| Time | ${duration}s |`);
-              bodyParts.push('');
-
-              const totalDocIssues = missingDocstring + missingString + missingHelp;
-              if (totalDocIssues > 0) {
-                bodyParts.push('### :books: Documentation Issues in this PR');
-                bodyParts.push('');
-                bodyParts.push('| Type | Count |');
-                bodyParts.push('|------|-------|');
-                if (missingDocstring > 0) bodyParts.push(`| Missing docstrings | ${missingDocstring} |`);
-                if (missingString > 0) bodyParts.push(`| Fields without string | ${missingString} |`);
-                if (missingHelp > 0) bodyParts.push(`| Fields without help | ${missingHelp} |`);
-                bodyParts.push('');
-              }
-
-              const ruffMode = ruffBlocking ? 'blocking' : 'info';
-              const pylintMode = pylintBlocking ? 'blocking' : 'info';
-              bodyParts.push('### :mag: Code Quality (Changed Files)');
-              bodyParts.push('');
-              bodyParts.push('| Tool | Issues | Mode | Status |');
-              bodyParts.push('|------|--------|------|--------|');
-              bodyParts.push(`| Ruff | ${ruffChanged} | ${ruffMode} | ${icon(ruffChanged, 0, true)} |`);
-              bodyParts.push(`| Pylint-Odoo | ${pylintChanged} | ${pylintMode} | ${icon(pylintChanged, 0, true)} |`);
-              bodyParts.push('');
-
-              const soltErrors = extractedIssues.errors || [];
-              const soltWarnings = extractedIssues.warnings || [];
-              const pylintErrors = extractedIssues.pylint_errors || [];
-              const ruffErrors = extractedIssues.ruff_errors || [];
-              const showPagination = (total, type) => total > MAX_DISPLAY ? `> Showing ${MAX_DISPLAY} of ${total} ${type}. **[View all in workflow logs](${workflowUrl})**` : (total > 0 ? `> **[View details in workflow logs](${workflowUrl})**` : '');
-
-              if (totalErrors > 0 && soltErrors.length > 0) {
-                bodyParts.push(`### :no_entry: Solt Check Errors (${totalErrors})`);
-                bodyParts.push('');
-                bodyParts.push('| File | Line | Error |');
-                bodyParts.push('|------|------|-------|');
-                for (const err of soltErrors.slice(0, MAX_DISPLAY)) bodyParts.push(`| \`${err.file || '-'}\` | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                bodyParts.push('');
-                bodyParts.push(showPagination(totalErrors, 'errors'));
-                bodyParts.push('');
-              }
-
-              if (failOnWarnings && totalWarnings > 0 && soltWarnings.length > 0) {
-                bodyParts.push(`### :warning: Solt Check Warnings (${totalWarnings})`);
-                bodyParts.push('');
-                bodyParts.push('> **Note:** \`fail-on-warnings\` is enabled.');
-                bodyParts.push('');
-                bodyParts.push('| File | Line | Warning |');
-                bodyParts.push('|------|------|---------|');
-                for (const warn of soltWarnings.slice(0, MAX_DISPLAY)) bodyParts.push(`| \`${warn.file || '-'}\` | ${warn.line || '-'} | ${warn.message || 'Unknown'} |`);
-                bodyParts.push('');
-                bodyParts.push(showPagination(totalWarnings, 'warnings'));
-                bodyParts.push('');
-              }
-
-              if (pylintChanged > 0) {
-                const isBlocking = pylintBlocking && failOnWarnings;
-                bodyParts.push(`### ${isBlocking ? ':no_entry:' : ':information_source:'} Pylint-Odoo Issues (${isBlocking ? 'blocking' : 'info'})`);
-                bodyParts.push('');
-                if (pylintErrors.length > 0) {
-                  bodyParts.push('| File | Line | Issue |');
-                  bodyParts.push('|------|------|-------|');
-                  for (const err of pylintErrors.slice(0, MAX_DISPLAY)) bodyParts.push(`| \`${err.file || '-'}\` | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                  bodyParts.push('');
-                  bodyParts.push(showPagination(pylintChanged, 'issues'));
-                } else {
-                  bodyParts.push(`> ${pylintChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
-                }
-                bodyParts.push('');
-              }
-
-              if (ruffChanged > 0) {
-                const isBlocking = ruffBlocking && failOnWarnings;
-                bodyParts.push(`### ${isBlocking ? ':no_entry:' : ':information_source:'} Ruff Issues (${isBlocking ? 'blocking' : 'info'})`);
-                bodyParts.push('');
-                if (ruffErrors.length > 0) {
-                  bodyParts.push('| File | Line | Issue |');
-                  bodyParts.push('|------|------|-------|');
-                  for (const err of ruffErrors.slice(0, MAX_DISPLAY)) bodyParts.push(`| \`${err.file || '-'}\` | ${err.line || '-'} | ${err.message || 'Unknown'} |`);
-                  bodyParts.push('');
-                  bodyParts.push(showPagination(ruffChanged, 'issues'));
-                } else {
-                  bodyParts.push(`> ${ruffChanged} issues found. **[View details in workflow logs](${workflowUrl})**`);
-                }
-                bodyParts.push('');
-              }
-
-              bodyParts.push('---');
-              if (hasFailed) bodyParts.push(':bulb: **Tip:** Fix the blocking issues above and push again.\n');
-              bodyParts.push(`:link: **[View full workflow logs](${workflowUrl})**`);
-              bodyParts.push('');
-              bodyParts.push(`:robot: *solt-pre-commit v1.0.1 (Odoo ${odooVersion})*`);
-            }
-
-            const body = bodyParts.join('\n');
-            // The PR comment is a cosmetic report — a transient GitHub API error
-            // (5xx / secondary rate limit) or a read-only token on fork PRs must
-            // never fail the validation gate. Log a warning instead of throwing.
-            try {
-              const comments = await github.paginate(github.rest.issues.listComments, {owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, per_page: 100});
-              const botComment = comments.find(c => c.user.type === 'Bot' && (c.body.includes('Validation Report') || c.body.includes('Validation Failed') || c.body.includes('Validation Passed')));
-              if (botComment) {
-                await github.rest.issues.updateComment({owner: context.repo.owner, repo: context.repo.repo, comment_id: botComment.id, body: body});
-              } else {
-                await github.rest.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, body: body});
-              }
-            } catch (e) {
-              core.warning(`Could not post the validation comment (non-fatal): ${e.status || ''} ${e.message}`);
-            }
+              if [ "$HAS_FAILED" = "true" ]; then
+                echo "## :x: Validation Report (Odoo ${ODOO_VERSION})"
+                echo ""
+                echo "> :no_entry: **This PR is blocked.** See the annotations on **Files changed** and the [workflow logs](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) for details."
+              else
+                echo "## :white_check_mark: Validation Report (Odoo ${ODOO_VERSION})"
+                echo ""
+                echo "> :white_check_mark: **All configured checks passed.**"
+              fi
+              echo ""
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Odoo Version | **${ODOO_VERSION}** |"
+              echo "| Python Version | ${PYTHON_VERSION} |"
+              echo "| Modules | ${MODULE_COUNT} |"
+              echo "| Scope | \`${SCOPE}\` |"
+              echo "| Time | ${DURATION:-0}s |"
+              echo "| Ruff issues (changed files) | ${RUFF_CHANGED} ($( [ "$RUFF_BLOCKING" = "true" ] && echo blocking || echo info )) |"
+              echo "| Pylint-Odoo issues (changed files) | ${PYLINT_CHANGED} ($( [ "$PYLINT_BLOCKING" = "true" ] && echo blocking || echo info )) |"
+              TOTAL_DOC_ISSUES=$((MISSING_DOCSTRING + MISSING_STRING + MISSING_HELP))
+              if [ "$TOTAL_DOC_ISSUES" -gt 0 ]; then
+                echo "| Missing docstrings | ${MISSING_DOCSTRING} |"
+                echo "| Fields without string | ${MISSING_STRING} |"
+                echo "| Fields without help | ${MISSING_HELP} |"
+              fi
+              echo ""
+              echo "Per-issue file/line detail is annotated directly on the diff in **Files changed**."
+            fi
+            echo ""
+            echo "---"
+            echo "*solt-pre-commit ${SOLT_PRE_COMMIT_VERSION} (Odoo ${ODOO_VERSION})*"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Auto-close PR (invalid branch name)
         if: github.event_name == 'pull_request' && steps.branch-check.outputs.valid == 'false'

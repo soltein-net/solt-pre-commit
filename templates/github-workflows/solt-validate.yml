@@ -39,6 +39,8 @@ jobs:
     if: github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@{{ SOLT_VERSION }}
     with:
+      odoo-version: '{{ ODOO_VERSION }}'
+      python-version: '{{ PYTHON_VERSION }}'
       validation-scope: 'changed'
       fail-on-warnings: true
       pylint-blocking: true

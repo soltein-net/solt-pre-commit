@@ -133,7 +133,7 @@ default_install_hook_types: [ pre-commit, pre-push ]  # so `pre-commit install` 
 
 repos:
   - repo: https://github.com/soltein-net/solt-pre-commit
-    rev: v1.2.0 # check for latest release
+    rev: vX.Y.Z # replace with latest release
     hooks:
       - id: solt-check-odoo
       - id: solt-check-requirements
