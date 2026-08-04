@@ -45,6 +45,9 @@ on:
         description: 'GitHub token for updating gist badges'
         required: true
 
+env:
+  SOLT_PRE_COMMIT_VERSION: v1.3.2
+
 jobs:
   Update-Badges:
     name: Documentation Badges
@@ -112,7 +115,9 @@ jobs:
           cache: 'pip'
 
       - name: Install solt-pre-commit
-        uses: ./.github/actions/install-solt-pre-commit
+        run: |
+          pip install --upgrade pip
+          pip install "git+https://github.com/soltein-net/solt-pre-commit.git@${SOLT_PRE_COMMIT_VERSION}"
 
       - name: Collect metrics
         id: metrics
