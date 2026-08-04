@@ -10,7 +10,7 @@ inputs:
   version:
     description: 'solt-pre-commit git ref to install (tag, branch, or SHA)'
     required: false
-    default: 'v1.3.0'
+    default: 'v1.3.1'
   extra-packages:
     description: 'Additional pip packages to install in the same command (space-separated)'
     required: false
