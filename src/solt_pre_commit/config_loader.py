@@ -754,6 +754,14 @@ class SoltConfig:
         # standard Odoo CI practice (OCA's own tooling, Odoo's runbot); set False in
         # .solt-hooks.yaml for a repo whose tests genuinely exercise demo records.
         self.test_without_demo: bool = bool(self.config.get("test_without_demo", True))
+        # "changed" (default): test only the module(s) touched by this push's diff - fast,
+        # but blind to a bug that only manifests once installed alongside a SIBLING module
+        # in this same repo that the diff didn't happen to touch (module-graph conflicts,
+        # cross-module data refs, ...) - exactly what CI's Test job exercises, since it
+        # always installs every module the repo declares together. "full": install every
+        # module in this repo together, matching CI's scope, at the cost of a much slower
+        # pre-push (every module's DB setup, not just the changed one's).
+        self.test_scope: str = self.config.get("test_scope", "changed")
         # Gate the pre-push test run on an open PR existing for the current branch
         # (docs/pipeline-strategy.md: the Test tier fires on "PR opened/updated", not
         # every push - including this local instantiation of it). Default True; set

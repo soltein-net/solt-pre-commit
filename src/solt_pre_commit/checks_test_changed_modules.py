@@ -42,6 +42,18 @@ from .checks_odoo_module import _detect_modules_from_paths
 from .config_loader import SoltConfig
 
 
+def _detect_all_modules(repo_root: Path) -> list:
+    """Every Odoo module this repo itself ships, regardless of what changed -
+    the same universe CI's Test job installs together (setup-repo.py's
+    detect_modules(), which is what populates solt-validate.yml's `modules:`
+    input). Used by test_scope: full so a local pre-push run can catch a
+    conflict that only surfaces once installed alongside a sibling module the
+    current diff didn't touch (see test_scope's own docstring in
+    config_loader.py for why "changed" alone can miss that class of bug).
+    """
+    return sorted({manifest.parent for manifest in repo_root.rglob("__manifest__.py")})
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run tests for Odoo modules changed vs. the base branch.",
@@ -68,21 +80,41 @@ def main():
                 "(no authenticated `gh` session or GITHUB_TOKEN) - running tests to be safe."
             )
 
-    changed_files = config.changed_detector.get_changed_files()
+    if config.test_scope == "full":
+        # This repo's OWN top-level, not find_env_root(): that resolves to the
+        # monorepo superproject when this repo is a checked-out submodule, and
+        # scanning THAT would pull in every sibling repo's modules too, not
+        # just this repo's own - CI's Test job only ever installs the one
+        # repo's modules plus whatever `sibling-repos` supplies as already-
+        # separate clones alongside it.
+        repo_root = Path.cwd()
+        try:
+            result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True)
+            repo_root = Path(result.stdout.strip())
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+        modules = _detect_all_modules(repo_root)
+        if not modules:
+            if not args.quiet:
+                print("[solt-test-changed-modules] test_scope: full, but no Odoo modules found in this repo, skipping.")
+            sys.exit(0)
+    else:
+        changed_files = config.changed_detector.get_changed_files()
 
-    if not changed_files:
-        if not args.quiet:
-            print("[solt-test-changed-modules] No changed files detected, skipping.")
-        sys.exit(0)
+        if not changed_files:
+            if not args.quiet:
+                print("[solt-test-changed-modules] No changed files detected, skipping.")
+            sys.exit(0)
 
-    modules = _detect_modules_from_paths(sorted(changed_files))
-    if not modules:
-        if not args.quiet:
-            print("[solt-test-changed-modules] No Odoo modules among changed files, skipping.")
-        sys.exit(0)
+        modules = _detect_modules_from_paths(sorted(changed_files))
+        if not modules:
+            if not args.quiet:
+                print("[solt-test-changed-modules] No Odoo modules among changed files, skipping.")
+            sys.exit(0)
 
     module_names = [Path(m).name for m in modules]
-    print(f"[solt-test-changed-modules] Testing changed module(s): {', '.join(module_names)}")
+    scope_label = "all module(s) in this repo" if config.test_scope == "full" else "changed module(s)"
+    print(f"[solt-test-changed-modules] Testing {scope_label}: {', '.join(module_names)}")
 
     harness_rel = args.harness or config.test_harness_script
     if harness_rel:
