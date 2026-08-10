@@ -253,7 +253,9 @@ def _report_coverage(modules: list, env_root: Path) -> None:
         subprocess.run(["coverage", "xml", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True)
         subprocess.run(["coverage", "html", "-d", "htmlcov"], cwd=str(env_root), capture_output=True)
         print(f"HTML report: {env_root / 'htmlcov' / 'index.html'}")
-        print("coverage.xml written (cumulative across all modules tested so far) -- VS Code's Coverage Gutters picks this up automatically.")
+        print(
+            "coverage.xml written (cumulative across all modules tested so far) -- VS Code's Coverage Gutters picks this up automatically."
+        )
     except FileNotFoundError:
         print("[solt-test-module] `coverage` not on PATH, skipping report.", file=sys.stderr)
 

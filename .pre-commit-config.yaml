@@ -4,13 +4,24 @@
 
 repos:
   # ─────────────────────────────────────────────────────────────────────────
-  # PYTHON CODE QUALITY - Ruff
+  # PYTHON CODE QUALITY - scripts/lint.sh (ruff check + ruff format --check)
+  # Calls the script directly instead of reimplementing its ruff invocation
+  # via astral-sh/ruff-pre-commit's hooks - that split into two independent
+  # definitions of "lint" that had already drifted apart in two ways: this
+  # hook ran bare `ruff check` with no `--ignore E501`, unlike the script,
+  # and ran no format check at all, so `ruff format` violations (like the
+  # one that broke CI on hotfix/main-coverage - odoo_test_runner.py:256)
+  # were only ever caught by CI, never locally, despite the script's own
+  # header claiming otherwise. One invocation path now; can't drift again.
   # ─────────────────────────────────────────────────────────────────────────
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.10
+  - repo: local
     hooks:
-      - id: ruff
-        args: [ --no-fix, --output-format=concise ]
+      - id: solt-pre-commit-lint
+        name: Solt Pre-commit - Lint & Format (scripts/lint.sh)
+        entry: scripts/lint.sh
+        language: system
+        types: [ python ]
+        pass_filenames: false
 
   # ─────────────────────────────────────────────────────────────────────────
   # GENERAL CODE QUALITY
