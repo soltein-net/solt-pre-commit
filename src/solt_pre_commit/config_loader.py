@@ -747,6 +747,13 @@ class SoltConfig:
         self.test_modules_auto_install_disabled: list[str] = self._as_str_list(
             self.config.get("test_modules_auto_install_disabled")
         )
+        # Demo data is for onboarding/sales demos, not test fixtures - tests build their
+        # own via setUp(). Loading it anyway is slow and occasionally flaky (a demo-data
+        # collision in one module can cascade into an unrelated module's own data load
+        # failing later in the same install transaction). Default True (skip it), matching
+        # standard Odoo CI practice (OCA's own tooling, Odoo's runbot); set False in
+        # .solt-hooks.yaml for a repo whose tests genuinely exercise demo records.
+        self.test_without_demo: bool = bool(self.config.get("test_without_demo", True))
         # Gate the pre-push test run on an open PR existing for the current branch
         # (docs/pipeline-strategy.md: the Test tier fires on "PR opened/updated", not
         # every push - including this local instantiation of it). Default True; set

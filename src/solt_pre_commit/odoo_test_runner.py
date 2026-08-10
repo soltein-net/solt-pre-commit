@@ -191,6 +191,8 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
                 f"--test-tags={test_tags}",
                 "--stop-after-init",
             ]
+            if config.test_without_demo:
+                odoo_bin_args.append("--without-demo=all")
             if addons_path is not None:
                 odoo_bin_args.append(f"--addons-path={addons_path}")
             if config.test_server_wide_modules:
