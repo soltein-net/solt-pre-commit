@@ -35,7 +35,7 @@ jobs:
   # LINT - Code quality, branch naming, field attributes, docstrings
   # Runs on Pull Requests only
   # ---------------------------------------------------------------------------
-  Lint:
+  Validation:
     if: github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@{{ SOLT_VERSION }}
     with:
@@ -49,11 +49,24 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # TEST - Run Odoo module tests with coverage
-  # Runs on Pull Requests only
+  # Runs on Pull Requests only, after Validation passes
   # Note: Requires modules and sibling-repos to be auto-detected from manifests
   # If tests fail, this job fails and blocks the PR
+  #
+  # needs: Validation is deliberate: Validation is cheap (seconds) and already blocks merge
+  # on its own, so a PR that fails Validation can never merge regardless of Test's
+  # result. Running the far more expensive Test job (DB setup, sibling-repo
+  # checkouts, coverage across every module) in parallel with a doomed Validation
+  # run wastes CI minutes on every validation failure. Serializing costs green PRs
+  # Validation's runtime (seconds) in added wall-clock latency, in exchange for
+  # skipping all of Test's runtime (minutes) whenever Validation fails - a clear net
+  # win given Validation failures are common during iterative development. If Validation
+  # is skipped or fails, Test is automatically skipped too (default GitHub
+  # Actions behavior for a job whose `needs` didn't succeed) - no separate
+  # `if` needed here for that.
   # ---------------------------------------------------------------------------
   Test:
+    needs: Validation
     if: github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
@@ -66,19 +79,19 @@ jobs:
       CHECKOUT_TOKEN: ${{ secrets.SOLT_CROSS_REPO_TOKEN }}
 
   # ---------------------------------------------------------------------------
-  # BADGES - Report Lint and Test results to Gist badges
-  # Runs after Lint and Test (whether they passed or failed)
+  # BADGES - Report Validation and Test results to Gist badges
+  # Runs after Validation and Test (whether they passed or failed)
   # ---------------------------------------------------------------------------
   Badges:
     if: always() && github.event_name == 'pull_request'
-    needs: [ Lint, Test ]
+    needs: [ Validation, Test ]
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-check-badges.yml@{{ SOLT_VERSION }}
     with:
       odoo-version: '{{ ODOO_VERSION }}'
-      solt-check-errors: ${{ needs.Lint.outputs.errors-count }}
-      pylint-changed: ${{ needs.Lint.outputs.pylint-changed }}
+      solt-check-errors: ${{ needs.Validation.outputs.errors-count }}
+      pylint-changed: ${{ needs.Validation.outputs.pylint-changed }}
       pylint-blocking: true
-      ruff-changed: ${{ needs.Lint.outputs.ruff-changed }}
+      ruff-changed: ${{ needs.Validation.outputs.ruff-changed }}
       ruff-blocking: false
       test-result: ${{ needs.Test.outputs.test-result }}
       coverage-pct: ${{ needs.Test.outputs.coverage-pct }}
