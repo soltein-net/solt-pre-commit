@@ -40,9 +40,20 @@ repos:
         name: Soltein - Validate Odoo Module
         entry: python -m solt_pre_commit.checks_odoo_module
         language: system
-        files: (__manifest__|__openerp__)\.py$
-        pass_filenames: true
-        types: [ python ]
+        # Matches .pre-commit-hooks.yaml's canonical solt-check-odoo definition
+        # exactly (the one standalone repos get via `repo:
+        # https://github.com/soltein-net/solt-pre-commit`) - this local
+        # (repo: local) variant had drifted to a narrower files: pattern
+        # (__manifest__ only) that meant the hook almost never fired locally:
+        # any .py-only commit (the common case) silently skipped it, while
+        # CI's per-module, whole-file scope still caught issues in those same
+        # files - "passes locally, fails in CI" for reasons that had nothing
+        # to do with the actual check.
+        files: (__manifest__|__openerp__|\.py|\.xml|\.csv|\.po|\.pot)$
+        # Don't pass filenames - detect staged files internally (same as the
+        # canonical hook; checks_odoo_module.py's main() falls back to
+        # _detect_modules_from_staged_files() when given no positional paths).
+        pass_filenames: false
 
       - id: solt-check-requirements
         name: Soltein - Verify requirements.txt matches manifests
