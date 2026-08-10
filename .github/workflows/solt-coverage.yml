@@ -61,7 +61,7 @@ on:
         value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.3.5
+  SOLT_PRE_COMMIT_VERSION: v1.3.6
 
 jobs:
   Coverage:
@@ -219,6 +219,13 @@ jobs:
           # migration. SOLT_ODOO_VERSION makes the derived <major> match
           # inputs.odoo-version deterministically instead of relying on
           # manifest auto-detection, which could disagree with it.
+          #
+          # --config repo/.solt-hooks.yaml: without this, SoltConfig() searches
+          # for .solt-hooks.yaml starting at $GITHUB_WORKSPACE (this step's cwd)
+          # walking UP - it never looks inside repo/, so the checked-out repo's
+          # own .solt-hooks.yaml (test_server_wide_modules and friends) was
+          # silently never read here. Safe to pass even when the file doesn't
+          # exist - SoltConfig falls back to defaults.
           MAJOR="${SOLT_ODOO_VERSION%%.*}"
           mkdir -p ".devcontainer/dev_${MAJOR}"
           echo "[options]" > ".devcontainer/dev_${MAJOR}/odoo.conf"
@@ -239,7 +246,7 @@ jobs:
           # service above exactly. Scratch-DB create/drop is now handled
           # internally by solt-test-module, not this workflow.
           set +e
-          solt-test-module "$MODULES_CSV" --addons-path "$ADDONS_PATH" 2>&1 | tee test_output.txt
+          solt-test-module "$MODULES_CSV" --addons-path "$ADDONS_PATH" --config repo/.solt-hooks.yaml 2>&1 | tee test_output.txt
           RESULT=${PIPESTATUS[0]}
           set -e
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"

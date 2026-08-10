@@ -660,6 +660,19 @@ class SoltConfig:
                     pass
         return {}
 
+    @staticmethod
+    def _as_str_list(value) -> list[str]:
+        """Accept either a YAML list or a comma-separated string for a config
+        value, so `test_server_wide_modules: [a, b]` and `test_server_wide_modules: a,b`
+        both work - matches how other solt-pre-commit settings tolerate either
+        YAML shape without requiring authors to remember which one this key wants.
+        """
+        if not value:
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [str(item).strip() for item in value if str(item).strip()]
+
     def _init_settings(self):
         """Initialize all settings from config."""
         # Validation scope
@@ -722,6 +735,18 @@ class SoltConfig:
         # script instead of using the built-in runner (odoo_test_runner.py) - for repos with
         # a test setup unusual enough that the built-in runner's assumptions don't fit.
         self.test_harness_script: str | None = self.config.get("test_harness_script")
+        # Extra server-wide modules to load (via odoo-bin --load) on top of Odoo's own
+        # default (base,web) - for a module whose effect only takes hold if it's loaded
+        # at server boot, before any registry/database work happens (e.g. OCA's
+        # module_change_auto_install, which patches manifest loading itself and so must
+        # already be active by the time Odoo decides what to auto-install).
+        self.test_server_wide_modules: list[str] = self._as_str_list(self.config.get("test_server_wide_modules"))
+        # Modules to mark NOT auto-installable for this test run, via
+        # ODOO_MODULES_AUTO_INSTALL_DISABLED - only takes effect when
+        # module_change_auto_install (or equivalent) is among test_server_wide_modules.
+        self.test_modules_auto_install_disabled: list[str] = self._as_str_list(
+            self.config.get("test_modules_auto_install_disabled")
+        )
         # Gate the pre-push test run on an open PR existing for the current branch
         # (docs/pipeline-strategy.md: the Test tier fires on "PR opened/updated", not
         # every push - including this local instantiation of it). Default True; set

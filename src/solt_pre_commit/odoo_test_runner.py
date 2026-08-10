@@ -107,6 +107,12 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
 
     env = os.environ.copy()
     env["PGPASSWORD"] = config.test_db_password
+    if config.test_modules_auto_install_disabled:
+        # Read directly by module_change_auto_install's post_load patch (see its
+        # own README) - only takes effect if that module is also server-wide
+        # (test_server_wide_modules below), since it needs to run before Odoo
+        # decides what to auto-install, not after.
+        env["ODOO_MODULES_AUTO_INSTALL_DISABLED"] = ",".join(config.test_modules_auto_install_disabled)
 
     def _dropdb():
         subprocess.run(
@@ -187,6 +193,13 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
             ]
             if addons_path is not None:
                 odoo_bin_args.append(f"--addons-path={addons_path}")
+            if config.test_server_wide_modules:
+                # dict.fromkeys: dedupes while preserving order, in case a caller
+                # also lists base/web explicitly. Odoo's own --load default is
+                # base,web - overriding it entirely (rather than appending) means
+                # we must keep those two or lose functionality they provide.
+                server_wide = dict.fromkeys(["base", "web", *config.test_server_wide_modules])
+                odoo_bin_args.append(f"--load={','.join(server_wide)}")
             odoo_bin_args += ["-i", modules_arg]
 
             proc = subprocess.Popen(

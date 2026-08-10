@@ -907,9 +907,34 @@ def find_superproject_root(repo_path: Path) -> Path | None:
         return None
 
 
+def _git_remote_org_repo(repo_dir: Path) -> str | None:
+    """Resolve '<org>/<repo>' from repo_dir's own 'origin' remote.
+
+    Every solt-* addon repo happens to live under soltein-net, but a vendored
+    third-party repo (e.g. addons/server-tools, checked out from
+    https://github.com/OCA/server-tools.git) does not - assuming soltein-net
+    for it produces a sibling-repo reference to an org/repo that doesn't
+    exist. Reading the actual remote is correct for both cases and needs no
+    per-directory special-casing.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    url = result.stdout.strip()
+    # Matches "git@github.com:org/repo.git" and "https://github.com/org/repo.git" alike.
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    return match.group(1) if match else None
+
+
 def scan_monorepo_module_repos(superproject_root: Path, exclude_dir_name: str) -> dict[str, str]:
-    """Build an accurate {module_name: "soltein-net/repo-dir-name"} map by
-    reading every manifest actually on disk under <superproject_root>/addons/,
+    """Build an accurate {module_name: "org/repo-dir-name"} map by reading
+    every manifest actually on disk under <superproject_root>/addons/,
     instead of a hand-maintained guess.
 
     Exists because the old approach (a static dict of one "primary" module
@@ -928,8 +953,12 @@ def scan_monorepo_module_repos(superproject_root: Path, exclude_dir_name: str) -
     for repo_dir in addons_dir.iterdir():
         if not repo_dir.is_dir() or repo_dir.name == exclude_dir_name:
             continue
+        # Read the real remote first (correct for vendored non-soltein-net
+        # repos like server-tools); soltein-net/<dirname> is only a fallback
+        # for the rare case a directory isn't its own git checkout at all.
+        org_repo = _git_remote_org_repo(repo_dir) or f"soltein-net/{repo_dir.name}"
         for manifest in repo_dir.glob("*/__manifest__.py"):
-            mapping[manifest.parent.name] = f"soltein-net/{repo_dir.name}"
+            mapping[manifest.parent.name] = org_repo
 
     return mapping
 
