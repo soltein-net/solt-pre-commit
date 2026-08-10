@@ -492,17 +492,26 @@ class ChecksOdooModulePython:
 
         Odoo Warning: tracking value will be ignored
 
-        Only applies to classes that declare a new model (`_name` set): a
+        Only applies to classes that declare a brand-new model: a
         `_inherit`-only extension of an existing core/other-module model
         (e.g. `_inherit = "sale.order"`) commonly doesn't repeat the mixin
         because the base model already provides it elsewhere, so flagging
         those would be mostly false positives from this file's perspective.
+
+        This also covers the `_name = "x"` + `_inherit = ["x", "some.mixin"]`
+        idiom used to extend an existing model while adding a new mixin: even
+        though `_name` is set there, the class isn't defining a new model — it
+        is re-declaring the same model it inherits, so it's an extension too.
+        Only a `_name` that is NOT among the model's own `_inherit` values
+        marks an actual new model definition (`_inherit` empty or naming
+        something else entirely).
         """
         for model_key, fields in self.all_fields.items():
             model_info = self.all_models[model_key]
             filename = model_info["filename"]
 
-            if not model_info.get("_name") or model_info.get("has_mail_thread"):
+            is_new_model = model_info.get("_name") and model_info["_name"] not in model_info.get("_inherit", [])
+            if not is_new_model or model_info.get("has_mail_thread"):
                 continue
 
             for field in fields:
