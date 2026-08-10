@@ -145,9 +145,16 @@ there's nothing to hand-edit in `pyproject.toml` or `__init__.py` anymore.
 
 1. Update CHANGELOG.md
 
-2. Bump the self-install pin in `.github/workflows/solt-coverage.yml`
-   (`pip install "git+...@vX.Y.Z"`) - the one version reference that can't
-   be derived automatically, since it's a workflow referencing itself.
+2. Bump the `SOLT_PRE_COMMIT_VERSION` self-install pin
+   (`pip install "git+...@vX.Y.Z"`) in **all three** reusable workflows -
+   `.github/workflows/solt-validate.yml`, `solt-coverage.yml`, and
+   `solt-update-badges.yml` - each carries its own identical env block, and
+   it's the one version reference that can't be derived automatically since
+   these are workflows referencing themselves. Missing any one of the three
+   leaves that workflow silently running an older release even for
+   consumers pinned to the new tag (`uses: ...@vX.Y.Z` only selects which
+   *workflow file* runs - `SOLT_PRE_COMMIT_VERSION` inside it separately
+   controls which *package release* gets installed).
 
 3. Create and push a git tag:
 ```bash
