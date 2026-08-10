@@ -90,6 +90,26 @@ class SaleOrder(models.Model):
         )
         assert checks.checks_errors["python_tracking_without_mail_thread"] == []
 
+    def test_name_and_inherit_self_extension_not_flagged(self, tmp_path):
+        # `_name = "x"` + `_inherit = ["x", "some.mixin"]` is the idiom used
+        # to extend an existing model while adding a new mixin (e.g. crm.lead
+        # + a tracking mixin). It re-declares the same model it inherits, so
+        # it's an extension, not a new model - same as `_inherit`-only above.
+        checks = _run_checks(
+            tmp_path,
+            """
+from odoo import fields, models
+
+
+class CrmLead(models.Model):
+    _name = "crm.lead"
+    _inherit = ["crm.lead", "some.mixin"]
+
+    my_field = fields.Char(tracking=True)
+""",
+        )
+        assert checks.checks_errors["python_tracking_without_mail_thread"] == []
+
     def test_no_tracking_not_flagged(self, tmp_path):
         checks = _run_checks(
             tmp_path,
