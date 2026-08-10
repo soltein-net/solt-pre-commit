@@ -163,6 +163,13 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
             odoo_bin_args = [
                 "coverage",
                 "run",
+                # --append: without it, `coverage run` truncates the data file
+                # at the start of every run, so pushing module B would erase
+                # module A's data from a push five minutes earlier. Appending
+                # lets the data file accumulate across pushes/modules so
+                # coverage.xml (see _report_coverage) keeps reflecting every
+                # module tested so far, not just the most recent one.
+                "--append",
                 str(odoo_bin),
                 "-c",
                 str(odoo_conf),
@@ -229,20 +236,24 @@ def _report_coverage(modules: list, env_root: Path) -> None:
     match nothing. The leading `*/` also covers both the super-repo's nested
     addons/<repo>/<module> paths and a standalone addon repo checkout (module
     at the repo root), since this same runner executes in both contexts.
+
+    The terminal report stays scoped to `modules` (--include) - that's what
+    you just pushed, so that's what belongs in your terminal. coverage.xml/
+    htmlcov are written WITHOUT that filter: `coverage run --append` (see
+    call site) keeps every module's data in the same .coverage file across
+    pushes, so an unfiltered xml/html export reflects everything tested so
+    far, not just this push's modules - otherwise Coverage Gutters would show
+    a blank gutter for any file outside whatever you pushed last.
     Best-effort: a reporting hiccup here must never turn a passing test run red.
     """
     include = ",".join(f"*/{m}/*" for m in modules)
     print("\nCoverage:")
     try:
         subprocess.run(["coverage", "report", "-m", f"--include={include}"], cwd=str(env_root))
-        subprocess.run(
-            ["coverage", "xml", f"--include={include}", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True
-        )
-        subprocess.run(
-            ["coverage", "html", f"--include={include}", "-d", "htmlcov"], cwd=str(env_root), capture_output=True
-        )
+        subprocess.run(["coverage", "xml", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True)
+        subprocess.run(["coverage", "html", "-d", "htmlcov"], cwd=str(env_root), capture_output=True)
         print(f"HTML report: {env_root / 'htmlcov' / 'index.html'}")
-        print("coverage.xml written -- VS Code's Coverage Gutters picks this up automatically.")
+        print("coverage.xml written (cumulative across all modules tested so far) -- VS Code's Coverage Gutters picks this up automatically.")
     except FileNotFoundError:
         print("[solt-test-module] `coverage` not on PATH, skipping report.", file=sys.stderr)
 
