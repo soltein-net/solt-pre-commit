@@ -6,6 +6,7 @@
 (including the version-branch convention this suite actually uses), and
 SoltConfig defaults."""
 
+import pathlib
 import subprocess
 from unittest import mock
 
@@ -75,6 +76,31 @@ class TestDetectVersionFromManifest:
     def test_falls_back_to_default_when_no_manifest(self, tmp_path):
         detector = OdooVersionDetector(tmp_path)
         assert detector.detect_version() == "17.0"
+
+    def test_an_unreadable_directory_does_not_abort_the_walk(self, tmp_path, monkeypatch):
+        """The walk up the tree reaches the filesystem root, and globbing it on
+        macOS stats APFS firmlinks such as /.resolve, which fail with EINVAL. That
+        used to escape as OSError and abort the hook instead of falling back."""
+        module_dir = tmp_path / "my_module"
+        module_dir.mkdir()
+        (module_dir / "__manifest__.py").write_text("{'name': 'x', 'version': '18.0.1.0.0'}")
+
+        real_glob = pathlib.Path.glob
+
+        def refusing_glob(self, pattern):
+            if self == tmp_path:
+                raise OSError(22, "Invalid argument")
+            return real_glob(self, pattern)
+
+        monkeypatch.setattr(pathlib.Path, "glob", refusing_glob)
+        assert OdooVersionDetector(tmp_path).detect_version() == "17.0"
+
+    def test_the_glob_helper_swallows_only_os_errors(self, tmp_path):
+        (tmp_path / "mod").mkdir()
+        (tmp_path / "mod" / "__manifest__.py").write_text("{}")
+        found = OdooVersionDetector._glob_manifests(tmp_path, "__manifest__.py")
+        assert [p.name for p in found] == ["__manifest__.py"]
+        assert OdooVersionDetector._glob_manifests(pathlib.Path("/"), "__manifest__.py") == []
 
     def test_caches_detected_version(self, tmp_path):
         manifest = tmp_path / "__manifest__.py"

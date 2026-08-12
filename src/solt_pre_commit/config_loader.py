@@ -112,7 +112,7 @@ class OdooVersionDetector:
 
             # Also search for any manifest in subdirectories (module detection)
             for manifest_name in self.MANIFEST_NAMES:
-                manifests = list(search_path.glob(f"*/{manifest_name}"))
+                manifests = self._glob_manifests(search_path, manifest_name)
                 if manifests:
                     version = self._extract_version_from_manifest(manifests[0])
                     if version:
@@ -126,6 +126,21 @@ class OdooVersionDetector:
 
         self._detected_version = DEFAULT_ODOO_VERSION
         return self._detected_version
+
+    @staticmethod
+    def _glob_manifests(search_path: Path, manifest_name: str) -> list[Path]:
+        """Return the manifests one level under ``search_path``, or none.
+
+        The walk up the tree reaches the filesystem root, where globbing stats
+        every top-level entry. On macOS that includes the APFS synthetic
+        firmlinks — ``/.resolve`` above all — and ``os.stat`` refuses them with
+        EINVAL, which aborted the whole hook with ``OSError: [Errno 22]`` instead
+        of falling back to the default version.
+        """
+        try:
+            return list(search_path.glob(f"*/{manifest_name}"))
+        except OSError:
+            return []
 
     def _extract_version_from_manifest(self, manifest_path: Path) -> str | None:
         """Extract Odoo version from manifest file.
