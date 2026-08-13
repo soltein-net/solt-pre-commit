@@ -192,7 +192,13 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
                 "--stop-after-init",
             ]
             if config.test_without_demo:
-                odoo_bin_args.append("--without-demo=all")
+                # `all` was the pre-19.0 spelling; 19.0 types this as a
+                # boolean and warns on it. `True` works below 19.0 too, but by
+                # accident: there the option is untyped and only tested for
+                # truthiness, so any non-empty string disables demo data. Branch
+                # on the version if one ever honours its "comma-separated module
+                # list" help text.
+                odoo_bin_args.append("--without-demo=True")
             if addons_path is not None:
                 odoo_bin_args.append(f"--addons-path={addons_path}")
             if config.test_server_wide_modules:
