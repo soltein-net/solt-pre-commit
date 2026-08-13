@@ -1081,6 +1081,16 @@ def refresh_solt_hooks(config_file: Path, template_text: str, dry_run: bool = Fa
         print_step("⚠️ ", f"Could not carry over '{key}' - check it by hand")
 
 
+# The reusable coverage workflow (solt-coverage.yml) always checks Odoo core
+# out itself, via its own dedicated "Checkout Odoo core (public)" step - that
+# is not what sibling-repos is for. If a local workspace happens to have the
+# odoo/odoo submodule checked out beside this repo, discover_workspace_repos
+# finds it like any other sibling and, since virtually every module depends on
+# some core Odoo module, it would otherwise always end up in `needed` here -
+# duplicating that step's own checkout and failing CI with "destination path
+# 'odoo' already exists" on every repo this regenerates for.
+ODOO_CORE_REPO = "odoo/odoo"
+
 
 def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]:
     """The external repos CI must clone, deduced from what this repo depends on.
@@ -1096,6 +1106,9 @@ def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]
     17.0 topology, where the addons live in separate repos, and was applied
     unchanged to 19.0, where they were consolidated into one. It also kept a
     list of client repo names inside a public repository.
+
+    Nor is Odoo core (odoo/odoo) ever a sibling, no matter how many modules
+    depend on it - see ODOO_CORE_REPO.
 
     What is found depends on what is cloned beside this repo, so a workspace
     missing a checkout yields a workflow missing that repo. That is visible in
@@ -1119,7 +1132,7 @@ def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]
         worklist.extend(depends_of.get(dep, []))
 
     target_ref = get_git_branch(repo_path)
-    needed = sorted({provider[dep] for dep in seen if dep in provider})
+    needed = sorted({provider[dep] for dep in seen if dep in provider} - {ODOO_CORE_REPO})
     return [f"{repo}@{target_ref}:{repo.split('/')[-1]}" for repo in needed]
 
 
