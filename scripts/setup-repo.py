@@ -93,8 +93,17 @@ FILES_TO_COPY = [
     # (source_path, destination_relative_path, description)
     (TEMPLATES_DIR / ".pylintrc", ".pylintrc", "Pylint configuration"),
     (TEMPLATES_DIR / "pyproject.toml", "pyproject.toml", "Python project configuration"),
-    (TEMPLATES_DIR / ".solt-hooks.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
     (TEMPLATES_DIR / "CONTRIBUTING-template.md", "CONTRIBUTING.md", "Contributor guide (dev setup, branch naming, optional AI tooling)"),
+]
+
+# Files the repo owns once they exist: seeded from the template on first setup,
+# never overwritten afterwards. .solt-hooks.yaml announces itself as the place
+# "users can override" the defaults, and copying it with force would silently
+# discard exactly the overrides it invites - disabled_checks, protected
+# branches, and the sibling_repos declaration CI depends on. Regeneration must
+# be able to run on a configured repo without destroying its configuration.
+FILES_TO_CREATE_IF_MISSING = [
+    (TEMPLATES_DIR / ".solt-hooks.yaml", ".solt-hooks.yaml", "Solt hooks configuration"),
 ]
 
 # Directories copied wholesale (source_path, destination_relative_path, description).
@@ -551,6 +560,16 @@ def setup_single_repo(
             print_step("❌", f"Source not found: {src}")
             failed += 1
 
+    # Never with `force`, and refreshed rather than replaced when it already
+    # exists: see FILES_TO_CREATE_IF_MISSING.
+    for src, dest_rel, _description in FILES_TO_CREATE_IF_MISSING:
+        dest = target / dest_rel
+        existed = dest.exists()
+        if src.exists() and copy_file(src, dest, dry_run, force=False):
+            copied += 1
+        elif existed and src.exists():
+            refresh_solt_hooks(dest, src.read_text(), dry_run)
+
     # Copy directory trees (agent skills)
     for src, dest_rel, _description in DIRECTORIES_TO_COPY:
         dest = target / dest_rel
@@ -769,16 +788,26 @@ def get_python_version(odoo_version: str) -> str:
     minimum maps to gevent's "Jammy" pin in Odoo's own requirements.txt,
     which no longer builds on current GitHub-hosted runners (ubuntu-latest
     moved to Noble/24.04). 3.10 also isn't what any real environment here
-    runs: devcontainers and production images are already on 3.11. Testing
-    at the documented minimum instead of the version we deploy buys no real
-    coverage and reliably breaks CI on an unrelated toolchain mismatch, so
-    this maps to what's actually deployed.
+    runs. Testing at the documented minimum instead of the version we deploy
+    buys no real coverage and reliably breaks CI on an unrelated toolchain
+    mismatch, so this maps to what's actually deployed.
+
+    19.0 is on 3.13. Two reasons it is not lower: below Python 3.12 Odoo's own
+    requirements.txt holds cryptography at 3.4.8 and pyOpenSSL at 21.0.0, both
+    from 2021, so generating CI under that boundary validates every build
+    against a cryptography nothing deploys - silently, until the day an addon
+    needs a modern one. And 3.13 costs nothing over 3.12 in coverage: checked
+    by evaluating every marker in Odoo 19's requirements.txt, both resolve 44
+    of 47 packages, the difference being Odoo's own PyPDF2 -> pypdf swap at the
+    3.13 boundary plus a Windows-only entry. Nothing is left without a version.
     """
     mapping = {
         "17.0": "3.11",
         "18.0": "3.11",
-        "19.0": "3.11",
-        "20.0": "3.12",  # Odoo 20.0 minimum Python 3.12 - nothing deployed yet to override with
+        "19.0": "3.13",
+        "20.0": "3.13",  # Above its 3.12 minimum: nothing is deployed yet to override with, so
+                         # it follows 19.0 rather than sitting a Python version behind the release
+                         # before it - which is the shape that reads as a mistake and eventually is one.
     }
     if odoo_version not in mapping:
         raise ValueError(
@@ -885,185 +914,213 @@ def generate_dependencies_string(modules: dict[str, dict]) -> str:
     return ", ".join(external) if external else "base"
 
 
-def find_superproject_root(repo_path: Path) -> Path | None:
-    """The monorepo this repo is checked out under as a submodule, if any.
-
-    Mirrors odoo_test_runner.find_env_root()'s own superproject detection -
-    same underlying git call, same reasoning: a repo checked out standalone
-    (not under the soltein monorepo) has no superproject, and that's a normal,
-    expected case (e.g. someone cloning just solt-llm on its own), not an error.
-    """
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-superproject-working-tree"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        superproject = result.stdout.strip()
-        return Path(superproject) if superproject else None
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
 
 
-def _git_remote_org_repo(repo_dir: Path) -> str | None:
-    """Resolve '<org>/<repo>' from repo_dir's own 'origin' remote.
 
-    Every solt-* addon repo happens to live under soltein-net, but a vendored
-    third-party repo (e.g. addons/server-tools, checked out from
-    https://github.com/OCA/server-tools.git) does not - assuming soltein-net
-    for it produces a sibling-repo reference to an org/repo that doesn't
-    exist. Reading the actual remote is correct for both cases and needs no
-    per-directory special-casing.
-    """
+def _remote_org_repo(repo_dir: Path) -> str | None:
+    """Resolve "<org>/<repo>" from a checkout's own origin remote."""
     try:
         result = subprocess.run(
             ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            check=True,
+            capture_output=True, text=True, check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
-    url = result.stdout.strip()
-    # Matches "git@github.com:org/repo.git" and "https://github.com/org/repo.git" alike.
-    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", result.stdout.strip())
     return match.group(1) if match else None
 
 
-def scan_monorepo_module_repos(superproject_root: Path, exclude_dir_name: str) -> dict[str, str]:
-    """Build an accurate {module_name: "org/repo-dir-name"} map by reading
-    every manifest actually on disk under <superproject_root>/addons/,
-    instead of a hand-maintained guess.
+def discover_workspace_repos(repo_path: Path) -> dict[str, Path]:
+    """Find the checkouts sitting alongside this one, as {org/repo: path}.
 
-    Exists because the old approach (a static dict of one "primary" module
-    name per repo) silently missed any OTHER module in a multi-module repo -
-    e.g. solt-crm ships solt_crm, solt_crm_landing_quoter, and
-    solt_crm_commercial_profile, but the static map only ever knew "solt_crm".
-    A dependency on any of the other two resolved to no sibling-repo at all,
-    which only surfaces once CI actually tries to install that specific
-    module and finds it missing - exactly the failure this replaces.
+    Two layouts exist and they cannot be probed the same way.
+
+    A repo checked out as a **git submodule** has a superproject, and that
+    superproject's .gitmodules holds each sibling's real remote URL and the
+    path it belongs at - authoritative, and it also states which checkouts are
+    part of the set rather than merely nearby.
+
+    A **flat workspace** - sibling directories under a plain folder, no git
+    relationship between them - has no such record. `--show-superproject-working-tree`
+    answers nothing there, which is why the detection this replaced silently
+    found no siblings at all in exactly the layout it was being run in. The
+    only source left is each directory's own origin remote.
+
+    Used to *seed* a declaration a human then reviews, never to generate the
+    workflow directly: whatever is found depends on what happens to be cloned,
+    and that is acceptable in a file under review and not in one that is
+    committed and shared.
     """
-    addons_dir = superproject_root / "addons"
-    mapping: dict[str, str] = {}
-    if not addons_dir.is_dir():
-        return mapping
+    found: dict[str, Path] = {}
 
-    for repo_dir in addons_dir.iterdir():
-        if not repo_dir.is_dir() or repo_dir.name == exclude_dir_name:
+    superproject = None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-superproject-working-tree"],
+            cwd=repo_path, capture_output=True, text=True, check=True,
+        )
+        superproject = Path(result.stdout.strip()) if result.stdout.strip() else None
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        superproject = None
+
+    if superproject and (superproject / ".gitmodules").is_file():
+        try:
+            result = subprocess.run(
+                ["git", "config", "--file", str(superproject / ".gitmodules"), "--get-regexp", r"^submodule\..*\.(path|url)$"],
+                capture_output=True, text=True, check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            result = None
+        if result:
+            paths, urls = {}, {}
+            for line in result.stdout.splitlines():
+                key, _, value = line.partition(" ")
+                name = key[len("submodule."):].rsplit(".", 1)[0]
+                (paths if key.endswith(".path") else urls)[name] = value
+            for name, rel in paths.items():
+                match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", urls.get(name, ""))
+                candidate = superproject / rel
+                if match and candidate.is_dir() and candidate.resolve() != repo_path.resolve():
+                    found[match.group(1)] = candidate
+        return found
+
+    for candidate in sorted(repo_path.parent.iterdir()):
+        if not candidate.is_dir() or candidate.resolve() == repo_path.resolve():
             continue
-        # Read the real remote first (correct for vendored non-soltein-net
-        # repos like server-tools); soltein-net/<dirname> is only a fallback
-        # for the rare case a directory isn't its own git checkout at all.
-        org_repo = _git_remote_org_repo(repo_dir) or f"soltein-net/{repo_dir.name}"
-        for manifest in repo_dir.glob("*/__manifest__.py"):
-            mapping[manifest.parent.name] = org_repo
-
-    return mapping
+        if not (candidate / ".git").exists():
+            continue
+        org_repo = _remote_org_repo(candidate)
+        if org_repo:
+            found[org_repo] = candidate
+    return found
 
 
-def scan_monorepo_module_depends(superproject_root: Path, exclude_dir_name: str) -> dict[str, list[str]]:
-    """Build {module_name: depends} for every module on disk under
-    <superproject_root>/addons/, excluding the target repo itself.
 
-    Needed to resolve TRANSITIVE sibling-repo dependencies: a module this
-    repo depends on directly may itself depend on a module that lives in a
-    THIRD repo - e.g. llm_crm depends on solt_crm_landing_quoter (repo
-    solt-crm), which itself depends on solt_crm (same repo) and solt_base
-    (repo solt-base). Only the on-disk manifests hold that second hop; a
-    dependency's own `depends` never appears in the target repo's manifests.
+def _yaml_block(text: str, key: str) -> tuple[int, int] | None:
+    """Locate a top-level key's lines, comments immediately above included.
+
+    The comments come along because they are the reason the value is what it
+    is - a repo that annotates why it declares a sibling loses the annotation
+    if only the value travels, and the next person to read the refreshed file
+    sees a bare entry with no explanation.
     """
-    addons_dir = superproject_root / "addons"
-    depends_map: dict[str, list[str]] = {}
-    if not addons_dir.is_dir():
-        return depends_map
-
-    import ast
-
-    for repo_dir in addons_dir.iterdir():
-        if not repo_dir.is_dir() or repo_dir.name == exclude_dir_name:
+    lines = text.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if not line.startswith(f"{key}:"):
             continue
-        for manifest in repo_dir.glob("*/__manifest__.py"):
-            try:
-                manifest_data = ast.literal_eval(manifest.read_text())
-            except (SyntaxError, ValueError):
-                continue
-            if isinstance(manifest_data, dict):
-                depends_map[manifest.parent.name] = manifest_data.get("depends", [])
+        start = index
+        while start and (lines[start - 1].lstrip().startswith("#") or not lines[start - 1].strip()):
+            if not lines[start - 1].strip():
+                break
+            start -= 1
+        end = index + 1
+        while end < len(lines) and (lines[end].startswith((" ", "\t", "-")) or not lines[end].strip()):
+            if not lines[end].strip():
+                break
+            end += 1
+        return start, end
+    return None
 
-    return depends_map
+
+
+def refresh_solt_hooks(config_file: Path, template_text: str, dry_run: bool = False) -> None:
+    """Bring an existing config up to the current template, keeping its answers.
+
+    Neither of the two obvious behaviours is right. Overwriting discards
+    exactly the overrides the file invites - it announces itself as the place
+    "users can override", and a full setup used to silently reset every one of
+    them. Never touching it freezes the file at whatever template version
+    created it, so new settings and the documentation explaining them never
+    reach a repo that is already configured, and the only way to see them is to
+    delete the file and diff.
+
+    So: the template supplies the structure and the prose, the repo supplies
+    the answers. Every key whose value differs from the template default is
+    carried across verbatim, with its comments.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return
+
+    current_text = config_file.read_text()
+    try:
+        current = yaml.safe_load(current_text) or {}
+        defaults = yaml.safe_load(template_text) or {}
+    except yaml.YAMLError as exc:
+        print_step("⚠️ ", f"Leaving {config_file.name} alone, it does not parse: {exc}")
+        return
+
+    overrides = [key for key in current if current.get(key) != defaults.get(key)]
+    if template_text == current_text:
+        return
+
+    merged = template_text
+    carried, lost = [], []
+    for key in overrides:
+        source = _yaml_block(current_text, key)
+        target = _yaml_block(merged, key)
+        if not source:
+            continue
+        block = "".join(current_text.splitlines(keepends=True)[source[0]:source[1]])
+        if target:
+            lines = merged.splitlines(keepends=True)
+            merged = "".join(lines[:target[0]]) + block + "".join(lines[target[1]:])
+        else:
+            merged = merged.rstrip() + "\n\n" + block
+        carried.append(key)
+
+    lost = [key for key in overrides if key not in carried]
+    if dry_run:
+        print_step("📄", f"Would refresh {config_file.name}, keeping: {', '.join(carried) or 'nothing'}")
+        return
+
+    config_file.write_text(merged)
+    print_step("🔄", f"Refreshed {config_file.name}" + (f", kept: {', '.join(carried)}" if carried else ""))
+    for key in lost:
+        print_step("⚠️ ", f"Could not carry over '{key}' - check it by hand")
+
 
 
 def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]:
-    """Detect external repos needed from module dependencies.
+    """The external repos CI must clone, deduced from what this repo depends on.
 
-    Args:
-        modules: detected module dict
-        repo_path: path to the repo being set up (to extract git branch/tag)
+    Transitively, because of an incident that must not repeat: a repo depended
+    on a module in a second repo whose own manifest depended on a module in a
+    third. Cloning only the first hop gets that repo checked out and then fails
+    installing it, in a real CI run rather than here.
 
-    Returns list of sibling-repo strings for workflow input, e.g.:
-        ['soltein-net/solt-base@17.0:solt-base', 'soltein-net/solt-base@17.0-2026.07.17-00:solt-base']
+    A dependency satisfied by a module of this repo is never a sibling. The
+    hand-written table this replaced got that wrong most visibly, listing the
+    same modules as local and external in one generated file - it described the
+    17.0 topology, where the addons live in separate repos, and was applied
+    unchanged to 19.0, where they were consolidated into one. It also kept a
+    list of client repo names inside a public repository.
 
-    CRITICAL: Uses the SAME branch/tag as the target repo, not a hardcoded version.
-    Example: if repo is on tag '17.0-2026.07.17-00', sibling repos will use that tag too.
+    What is found depends on what is cloned beside this repo, so a workspace
+    missing a checkout yields a workflow missing that repo. That is visible in
+    the diff of the regenerated file, which is the review this relies on.
     """
-    all_deps = set()
-    for module_info in modules.values():
-        all_deps.update(module_info.get("depends", []))
+    workspace = discover_workspace_repos(repo_path)
+    provider: dict[str, str] = {}
+    depends_of: dict[str, list[str]] = {}
+    for org_repo, path in workspace.items():
+        for name, info in detect_modules(path).items():
+            provider.setdefault(name, org_repo)
+            depends_of.setdefault(name, info.get("depends", []))
 
-    # Static fallback for repos checked out standalone, with no monorepo
-    # superproject to scan (find_superproject_root returns None there).
-    known_mappings = {
-        "solt_base": "soltein-net/solt-base",
-        "solt_base_product": "soltein-net/solt-base-product",
-        "solt_account": "soltein-net/solt-account",
-        "solt_crm": "soltein-net/solt-crm",
-        "solt_stock": "soltein-net/solt-stock",
-        "solt_sale": "soltein-net/solt-sale",
-        "solt_purchase": "soltein-net/solt-purchase",
-        "solt_web": "soltein-net/solt-web",
-        "solt_project": "soltein-net/solt-project",
-        "solt_hr": "soltein-net/solt-hr",
-    }
+    seen: set[str] = set()
+    worklist = [dep for info in modules.values() for dep in info.get("depends", [])]
+    while worklist:
+        dep = worklist.pop()
+        if dep in seen or dep in modules:
+            continue
+        seen.add(dep)
+        worklist.extend(depends_of.get(dep, []))
 
-    superproject_root = find_superproject_root(repo_path)
-    if superproject_root:
-        # Dynamic, on-disk mapping wins when available - it's accurate for
-        # every module in every repo, not just each repo's "primary" one.
-        known_mappings = {**known_mappings, **scan_monorepo_module_repos(superproject_root, repo_path.name)}
-
-        # Walk dependencies-of-dependencies to a fixpoint: a directly-depended
-        # module can itself depend on a module in a THIRD repo (see
-        # scan_monorepo_module_depends' docstring). Without this, CI clones
-        # only the first hop and fails once Odoo tries to install a module
-        # two or more hops away. Standalone checkouts (no superproject) can't
-        # do this - there's no on-disk manifest to read a sibling's depends
-        # from - so they keep the single-hop behavior via known_mappings.
-        depends_map = scan_monorepo_module_depends(superproject_root, repo_path.name)
-        worklist = list(all_deps)
-        while worklist:
-            dep = worklist.pop()
-            for transitive_dep in depends_map.get(dep, []):
-                if transitive_dep not in all_deps:
-                    all_deps.add(transitive_dep)
-                    worklist.append(transitive_dep)
-
-    # Extract the git branch/tag from the target repo (CRITICAL: not hardcoded)
-    target_branch = get_git_branch(repo_path)
-
-    # dict, not a list-with-duplicates: multiple dependencies (e.g.
-    # solt_crm_landing_quoter and solt_crm_commercial_profile) commonly map to
-    # the SAME repo, and each would otherwise add its own identical entry.
-    seen_repos: dict[str, str] = {}
-    for dep in sorted(all_deps):
-        if dep in known_mappings:
-            repo = known_mappings[dep]
-            repo_name = repo.split("/")[1]
-            # Use the SAME branch/tag as target repo, not a fixed version
-            seen_repos[repo] = f"{repo}@{target_branch}:{repo_name}"
-
-    return sorted(seen_repos.values())
+    target_ref = get_git_branch(repo_path)
+    needed = sorted({provider[dep] for dep in seen if dep in provider})
+    return [f"{repo}@{target_ref}:{repo.split('/')[-1]}" for repo in needed]
 
 
 # Postgres extension -> service image that provides it. vchord's image is

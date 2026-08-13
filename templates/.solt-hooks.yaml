@@ -18,8 +18,8 @@ odoo_version: auto
 validation_scope: changed
 
 # Base branch for detecting changed files (auto-detected if not set: tries the
-# Odoo version embedded in the current branch name first, e.g. feature/17.0-x
-# -> origin/17.0, then main/master/develop, then HEAD~1)
+# Odoo version embedded in the current branch name first, e.g. feature/<odoo-version>-x
+# -> origin/<odoo-version>, then main/master/develop, then HEAD~1)
 # base_branch: main
 
 # Odoo test-run settings (solt-test-changed-modules / solt-test-module), used
@@ -27,7 +27,7 @@ validation_scope: changed
 # tree when this repo is a submodule (e.g. a solt-* addon repo checked out
 # under a soltein-suite super-repo), otherwise this repo's own root.
 # test_odoo_bin: odoo/odoo-bin
-# test_odoo_conf: .devcontainer/dev_17/odoo.conf   # default: derived from odoo_version
+# test_odoo_conf: .devcontainer/dev_<major>/odoo.conf   # default: derived from odoo_version
 # test_db_host: localhost      # default: $DB_HOST or localhost
 # test_db_port: 5432           # default: $DB_PORT or 5432
 # test_db_user: odoo           # default: $DB_USER or odoo

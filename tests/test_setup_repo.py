@@ -252,67 +252,109 @@ class TestPreCommitTemplateConsistency:
         assert wrong_language == {}, f"repo:local hooks must use language: system, found: {wrong_language}"
 
 
-class TestDetectSiblingRepos:
-    """Regression test: detect_sibling_repos() must resolve TRANSITIVE
-    dependencies, not just the target repo's own direct ones.
+class TestSiblingRepos:
+    """Deduced from the workspace, transitively, and never from a table.
 
-    Real incident: solt-llm's llm_crm manifest only lists
-    solt_crm_landing_quoter (repo solt-crm) as a direct dependency - it
-    never mentions solt_base. But solt_crm_landing_quoter's OWN manifest
-    depends on solt_base (repo solt-base) too. The old single-hop detection
-    only read llm_crm's manifest, so it added solt-crm to sibling-repos but
-    never solt-base. CI cloned solt-crm, then failed installing it because
-    solt_base was missing - a failure that only ever surfaced once a real
-    CI run tried the install.
+    The mapping this replaced was a hand-written module -> repo dict applied to
+    every Odoo version. It described the 17.0 topology, where the addons live in
+    separate repos; on 19.0, where they were consolidated into one, it named
+    repos that do not exist for that version - and listed the same modules as
+    local and external in the same generated file. It also kept client repo
+    names in a public repository.
     """
 
-    def _build_monorepo(self, tmp_path, repo_layout):
-        addons = tmp_path / "addons"
-        for repo_dir, modules in repo_layout.items():
-            for module_name, depends in modules.items():
-                module_dir = addons / repo_dir / module_name
-                module_dir.mkdir(parents=True)
-                (module_dir / "__manifest__.py").write_text(repr({"name": module_name, "depends": depends}))
-        return tmp_path
+    def _repo(self, path, modules):
+        path.mkdir(parents=True, exist_ok=True)
+        for name, depends in modules.items():
+            module = path / name
+            module.mkdir(parents=True, exist_ok=True)
+            (module / "__manifest__.py").write_text(repr({"name": name, "depends": depends}))
+        return path
 
-    def test_resolves_a_sibling_repo_two_hops_away(self, tmp_path, monkeypatch):
-        superproject_root = self._build_monorepo(
+    def test_reaches_a_repo_two_hops_away(self, tmp_path, monkeypatch):
+        """The incident: hop 1 gets cloned, hop 2 is missing, install fails."""
+        self._repo(tmp_path / "solt-crm", {"solt_crm_landing_quoter": ["sale", "solt_base"]})
+        self._repo(tmp_path / "solt-base", {"solt_base": ["base"]})
+        repo_path = self._repo(tmp_path / "solt-llm", {"llm_crm": ["solt_crm_landing_quoter"]})
+        monkeypatch.setattr(setup_repo, "discover_workspace_repos",
+                            lambda p: {"org/solt-crm": tmp_path / "solt-crm", "org/solt-base": tmp_path / "solt-base"})
+        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "19.0")
+
+        result = setup_repo.detect_sibling_repos(setup_repo.detect_modules(repo_path), repo_path)
+
+        assert result == ["org/solt-base@19.0:solt-base", "org/solt-crm@19.0:solt-crm"]
+
+    def test_a_module_of_this_repo_is_never_a_sibling(self, tmp_path, monkeypatch):
+        """It cannot be both, and cloning it again duplicates it."""
+        self._repo(tmp_path / "solt-suite", {"solt_base": ["base"]})
+        repo_path = self._repo(tmp_path / "the-repo", {"solt_base": ["base"], "solt_thing": ["solt_base"]})
+        monkeypatch.setattr(setup_repo, "discover_workspace_repos", lambda p: {"org/solt-suite": tmp_path / "solt-suite"})
+        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "19.0")
+
+        assert setup_repo.detect_sibling_repos(setup_repo.detect_modules(repo_path), repo_path) == []
+
+    def test_a_self_contained_repo_declares_none(self, tmp_path, monkeypatch):
+        """Odoo core is not a sibling, and neither is anything else unfound."""
+        repo_path = self._repo(tmp_path / "the-repo", {"solt_thing": ["base", "mail", "stock"]})
+        monkeypatch.setattr(setup_repo, "discover_workspace_repos", lambda p: {})
+        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "19.0")
+
+        assert setup_repo.detect_sibling_repos(setup_repo.detect_modules(repo_path), repo_path) == []
+
+
+class TestRefreshSoltHooks:
+    """An existing config is neither overwritten nor frozen.
+
+    Overwriting discards the overrides the file exists to hold - it announces
+    itself as the place users configure, and a full setup used to reset every
+    answer in it. Never touching it freezes the file at the template version
+    that created it, so new settings and the prose explaining them never reach
+    a repo that is already set up.
+
+    Template supplies the structure, repo supplies the answers.
+    """
+
+    def _write(self, tmp_path, template_text, current_text):
+        """The template arrives as text, already rendered for the repo's Odoo
+        version - its worked examples name the version reading them."""
+        config = tmp_path / ".solt-hooks.yaml"
+        config.write_text(current_text)
+        return config, template_text
+
+    def test_new_template_content_reaches_a_configured_repo(self, tmp_path):
+        config, template = self._write(
             tmp_path,
-            {
-                "solt-crm": {
-                    # Mirrors the real solt_crm_landing_quoter manifest:
-                    # llm_crm depends on it directly (hop 1), and it in turn
-                    # depends on solt_base, a module in a THIRD repo (hop 2).
-                    "solt_crm_landing_quoter": ["sale", "solt_base"],
-                },
-                "solt-base": {
-                    "solt_base": ["base"],
-                },
-            },
+            "odoo_version: auto\n\n# A setting added after this repo was set up.\nnew_setting: false\n",
+            "odoo_version: auto\n",
         )
-        repo_path = superproject_root / "addons" / "solt-llm"
-        repo_path.mkdir(parents=True)
 
-        monkeypatch.setattr(setup_repo, "find_superproject_root", lambda p: superproject_root)
-        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "17.0")
+        setup_repo.refresh_solt_hooks(config, template)
 
-        modules = {"llm_crm": {"depends": ["solt_crm_landing_quoter"]}}
-        result = setup_repo.detect_sibling_repos(modules, repo_path)
+        assert "new_setting: false" in config.read_text()
 
-        assert "soltein-net/solt-base@17.0:solt-base" in result
-        assert "soltein-net/solt-crm@17.0:solt-crm" in result
+    def test_an_answer_survives_with_the_comment_explaining_it(self, tmp_path):
+        """The comment travels because it is the reason the value is what it is."""
+        config, template = self._write(
+            tmp_path,
+            "# Repos CI must clone.\nsibling_repos: [ ]\n",
+            "# Not detectable: a theme is installed, never declared in depends.\nsibling_repos:\n  - org/themes\n",
+        )
 
-    def test_standalone_checkout_without_superproject_keeps_single_hop_behavior(self, tmp_path, monkeypatch):
-        """No monorepo to scan -> falls back to the static known_mappings,
-        which can only ever resolve one hop. Documents the existing limit
-        rather than silently trying (and failing) to do more."""
-        monkeypatch.setattr(setup_repo, "find_superproject_root", lambda p: None)
-        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "17.0")
+        setup_repo.refresh_solt_hooks(config, template)
 
-        modules = {"solt_crm": {"depends": ["solt_base"]}}
-        result = setup_repo.detect_sibling_repos(modules, tmp_path)
+        result = config.read_text()
+        assert "  - org/themes" in result
+        assert "Not detectable: a theme is installed" in result
 
-        assert result == ["soltein-net/solt-base@17.0:solt-base"]
+    def test_a_file_that_does_not_parse_is_left_alone(self, tmp_path):
+        """Rewriting from a half-read config would lose answers it could not see."""
+        config, template = self._write(tmp_path, "odoo_version: auto\n", "odoo_version: [unclosed\n")
+
+        setup_repo.refresh_solt_hooks(config, template)
+
+        assert config.read_text() == "odoo_version: [unclosed\n"
+
+
 
 
 class TestDetectPostgresImage:

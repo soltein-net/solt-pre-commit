@@ -25,7 +25,7 @@ on:
       sibling-repos:
         description: |
           Newline-separated additional module repos this depends on, each
-          "owner/repo@ref:path" (e.g. "soltein-net/solt-base@17.0:solt-base").
+          "owner/repo@ref:path" (e.g. "org/some-repo@17.0:some-repo").
           Leave empty if this repo's modules only depend on Odoo core.
         required: false
         type: string
@@ -145,23 +145,27 @@ jobs:
           SIBLING_REPOS: ${{ inputs.sibling-repos }}
         run: |
           pip install --upgrade pip
-          pip install -r odoo/requirements.txt
-          # -c (not -r): odoo/requirements.txt is a hard ceiling/floor here,
-          # not something to install fresh. Without it, an unpinned addon
-          # dependency (e.g. a Google API client needing a newer `cryptography`
-          # than Odoo's pinned `pyOpenSSL` tolerates) can silently upgrade a
-          # package Odoo already pinned, breaking it at Odoo startup instead
-          # of failing here with a clear resolver conflict.
+          # A lockfile is a starting point, not a ceiling.
           #
-          # psutil excluded from the constraint: every crawlee release back to
-          # its second-ever version (0.0.2) requires psutil>=6.0.0, which
-          # conflicts with Odoo's exact psutil==5.9.4 pin - checked, there is
-          # no compatible crawlee release. Unlike cryptography/pyOpenSSL, this
-          # mismatch is empirically harmless (Odoo doesn't hard-crash on a
-          # newer psutil), so it's excluded rather than left to block every
-          # install that happens to need crawlee.
-          grep -v '^psutil' odoo/requirements.txt > /tmp/odoo-constraints.txt
-          pip install -c /tmp/odoo-constraints.txt -r repo/requirements.txt
+          # odoo/requirements.txt is a reproducibility lockfile: it pins to what
+          # Ubuntu Noble ships, as its own "(Noble)" comments say. Odoo's actual
+          # dependency contract is setup.py, and there it declares cryptography,
+          # pyOpenSSL and psutil with no bound at all. Passing the lockfile as
+          # `-c` therefore asserted a compatibility requirement Odoo never made,
+          # and any addon needing a newer floor of an exactly-pinned package
+          # could not resolve at all - at any Python version, since the pin only
+          # moves from 3.4.8 to 42.0.8 across the 3.12 boundary. That is what a
+          # hand-maintained exclusion list was patching, one package at a time,
+          # each entry costing a release of this repo.
+          #
+          # So: seed from the lockfile, which is worth keeping - those versions
+          # are known good and their C extensions are known to build on the
+          # runner. Then let the repo upgrade what it explicitly pins. An
+          # explicit pin is a decision; the drift worth guarding against is the
+          # unpinned dependency that creeps upward, and that one still lands on
+          # Odoo's tested version because nothing asks it to move.
+          pip install -r odoo/requirements.txt
+          pip install -r repo/requirements.txt
           if [ -n "$SIBLING_REPOS" ]; then
             # See the "Checkout sibling repos" step - same space-vs-newline
             # normalization, needed here too since this is a separate step
@@ -172,7 +176,7 @@ jobs:
               path="${line##*:}"
               if [ -f "$path/requirements.txt" ]; then
                 echo "Installing sibling dependencies: $path/requirements.txt"
-                pip install -c /tmp/odoo-constraints.txt -r "$path/requirements.txt"
+                pip install -r "$path/requirements.txt"
               fi
             done <<< "$SIBLING_REPOS"
           fi
@@ -186,6 +190,23 @@ jobs:
           # (env.SOLT_PRE_COMMIT_VERSION below) - bump it here, and in the
           # identical block in the other two files, on every release.
           pip install "git+https://github.com/soltein-net/solt-pre-commit.git@${SOLT_PRE_COMMIT_VERSION}"
+
+          # The guard, and it replaces the constraint rather than joining it.
+          # Not "did any version change against a list somebody maintains", but
+          # "is the installed set coherent" - which is what actually breaks, and
+          # is the one question the packages themselves can answer. pyOpenSSL
+          # declaring `cryptography<47,>=46.0.0` is how the pair that motivated
+          # all of this gets caught, with nobody writing it down anywhere.
+          #
+          # Last, so it sees everything: the repo, every sibling, and coverage.
+          #
+          # It only sees *declared* incompatibilities, and Odoo is checked out
+          # rather than installed as a distribution, so its own needs are not in
+          # metadata for pip to read. That half is covered by the step that runs
+          # the tests, which starts Odoo with the modules loaded - the same
+          # backstop the constraint relied on, since it could not police a
+          # package Odoo does not pin either.
+          pip check
 
       - name: Build addons-path
         id: addons_path
