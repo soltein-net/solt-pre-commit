@@ -193,6 +193,18 @@ class TestAddonsPathOverride:
 
         return captured["cmd"]
 
+    def test_without_demo_is_spelled_as_a_boolean(self, fake_env):
+        """`all` was the pre-19.0 spelling. Odoo 19 warns "invalid boolean
+        value: 'all', assume True" on every run - it still does the right
+        thing, so the only symptom is a warning nobody reads until the
+        spelling stops being accepted."""
+        tmp_path, config = fake_env
+        cmd = self._run_capturing_popen(tmp_path, config)
+
+        assert "--without-demo=True" in cmd
+        assert "--without-demo=all" not in cmd
+
+
     def test_appends_the_flag_when_provided(self, fake_env):
         tmp_path, config = fake_env
         cmd = self._run_capturing_popen(tmp_path, config, addons_path="/custom/addons")
