@@ -301,6 +301,22 @@ class TestSiblingRepos:
 
         assert setup_repo.detect_sibling_repos(setup_repo.detect_modules(repo_path), repo_path) == []
 
+    def test_odoo_core_is_never_a_sibling_even_when_checked_out_beside_this_repo(self, tmp_path, monkeypatch):
+        """The coverage workflow's own dedicated step already checks out
+        odoo/odoo - listing it as a sibling too makes that step's `git clone`
+        collide with the directory actions/checkout just created, failing CI
+        with "destination path 'odoo' already exists". This is what actually
+        happened: the local workspace had odoo/odoo checked out beside the
+        repo, same as any other sibling, and virtually every module depends on
+        some core Odoo module."""
+        self._repo(tmp_path / "odoo", {"base": [], "mail": ["base"]})
+        repo_path = self._repo(tmp_path / "the-repo", {"solt_thing": ["base", "mail"]})
+        monkeypatch.setattr(setup_repo, "discover_workspace_repos",
+                            lambda p: {setup_repo.ODOO_CORE_REPO: tmp_path / "odoo"})
+        monkeypatch.setattr(setup_repo, "get_git_branch", lambda p: "17.0")
+
+        assert setup_repo.detect_sibling_repos(setup_repo.detect_modules(repo_path), repo_path) == []
+
 
 class TestRefreshSoltHooks:
     """An existing config is neither overwritten nor frozen.
