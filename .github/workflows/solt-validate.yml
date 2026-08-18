@@ -81,7 +81,7 @@ on:
         value: ${{ jobs.Validate.outputs.ruff_changed }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.4.1
+  SOLT_PRE_COMMIT_VERSION: v1.4.2
 
 jobs:
   Validate:
