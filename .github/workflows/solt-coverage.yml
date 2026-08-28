@@ -79,7 +79,7 @@ on:
         value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.5.1
+  SOLT_PRE_COMMIT_VERSION: v1.5.2
 
 jobs:
   Coverage:
@@ -322,6 +322,14 @@ jobs:
           # finds nothing, so this can never silently skip real testing - it only ever
           # narrows, never expands or disables the run.
           if [ "$SCOPE" = "changed" ]; then
+            # | tail -n 1: ChangedFilesDetector._log() prints "[ChangedFilesDetector] ..."
+            # debug lines to stdout unconditionally whenever it detects a CI context (not
+            # gated behind SOLT_DEBUG there) - without this, $(...) below captures that
+            # noise ahead of the actual CSV line, CHANGED_MODULES ends up holding debug
+            # text instead of module names, and every scope=changed run on a real PR
+            # silently falls through to "no declared module matched" regardless of what
+            # actually changed. The real result print(...) is always the last line
+            # printed, so tail -n 1 reliably isolates it from the debug noise above it.
             CHANGED_MODULES=$(cd repo && python3 -c "
           from pathlib import Path
           from solt_pre_commit.checks_odoo_module import _detect_modules_from_paths
@@ -331,7 +339,7 @@ jobs:
           changed = config.changed_detector.get_changed_files()
           modules = _detect_modules_from_paths(sorted(changed))
           print(','.join(sorted({Path(m).name for m in modules})))
-          ")
+          " | tail -n 1)
             echo "Changed-module detection found: ${CHANGED_MODULES:-<none>}"
             if [ -n "$CHANGED_MODULES" ]; then
               DECLARED=",$MODULES_CSV,"
