@@ -48,6 +48,24 @@ on:
         required: false
         type: string
         default: 'postgres:15'
+      scope:
+        description: |
+          'full' (default): test every module in `modules`, unconditionally - today's
+          behavior, unchanged for any caller that doesn't set this.
+          'changed': test only the modules in `modules` that actually have a changed file
+          in this PR's diff (reuses the same changed-file detection the local pre-push
+          hook already uses for `test_scope: changed` in .solt-hooks.yaml - see
+          checks_test_changed_modules.py). Falls back to the full `modules` list if
+          detection finds no changed modules among them (e.g. the diff only touched
+          non-module files), so this never silently skips real testing.
+          A repo with many modules in one addon repo (e.g. solt-llm's 24) should set this
+          to 'changed' - most PRs there only ever touch 1-3 of them, and this job's own
+          checkout/install overhead is fixed regardless of how many modules get tested, so
+          the only thing 'changed' saves is the wasted minutes actually running every
+          *other* module's full test suite for a change that never touched them.
+        required: false
+        type: string
+        default: 'full'
     secrets:
       CHECKOUT_TOKEN:
         description: 'Token with read access to sibling-repos. Only needed when sibling-repos is set.'
@@ -61,7 +79,7 @@ on:
         value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.4.3
+  SOLT_PRE_COMMIT_VERSION: v1.5.0
 
 jobs:
   Coverage:
@@ -262,6 +280,7 @@ jobs:
           ADDONS_PATH: ${{ steps.addons_path.outputs.value }}
           MODULES: ${{ inputs.modules }}
           SOLT_ODOO_VERSION: ${{ inputs.odoo-version }}
+          SCOPE: ${{ inputs.scope }}
         run: |
           # solt-test-module (odoo_test_runner.py) requires a conf file to
           # exist at .devcontainer/dev_<major>/odoo.conf before it will run
@@ -292,6 +311,48 @@ jobs:
           MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
           MODULES_CSV="${MODULES_CSV#,}"
           MODULES_CSV="${MODULES_CSV%,}"
+
+          # scope: 'changed' - narrow MODULES_CSV to only the declared modules that
+          # actually have a changed file in this PR's diff. Reuses the exact same
+          # changed-file detection the local pre-push hook already uses for
+          # test_scope: changed (SoltConfig.changed_detector - self-heals a shallow
+          # clone by fetching the base ref if it's not already available locally, and
+          # reads GITHUB_BASE_REF automatically in this context - no extra checkout
+          # config needed here). Falls back to the full MODULES_CSV whenever detection
+          # finds nothing, so this can never silently skip real testing - it only ever
+          # narrows, never expands or disables the run.
+          if [ "$SCOPE" = "changed" ]; then
+            CHANGED_MODULES=$(cd repo && python3 -c "
+          from pathlib import Path
+          from solt_pre_commit.checks_odoo_module import _detect_modules_from_paths
+          from solt_pre_commit.config_loader import SoltConfig
+
+          config = SoltConfig('.solt-hooks.yaml')
+          changed = config.changed_detector.get_changed_files()
+          modules = _detect_modules_from_paths(sorted(changed))
+          print(','.join(sorted({Path(m).name for m in modules})))
+          ")
+            echo "Changed-module detection found: ${CHANGED_MODULES:-<none>}"
+            if [ -n "$CHANGED_MODULES" ]; then
+              DECLARED=",$MODULES_CSV,"
+              INTERSECT=""
+              IFS=',' read -ra CHANGED_ARR <<< "$CHANGED_MODULES"
+              for m in "${CHANGED_ARR[@]}"; do
+                case "$DECLARED" in
+                  *",$m,"*) INTERSECT="${INTERSECT}${m}," ;;
+                esac
+              done
+              INTERSECT="${INTERSECT%,}"
+              if [ -n "$INTERSECT" ]; then
+                echo "scope=changed: testing $INTERSECT (declared: $MODULES_CSV)"
+                MODULES_CSV="$INTERSECT"
+              else
+                echo "scope=changed: no declared module matched - falling back to the full list"
+              fi
+            else
+              echo "scope=changed: no changed modules detected - falling back to the full list"
+            fi
+          fi
 
           # DB_HOST/DB_PORT/DB_USER/DB_PASSWORD are not set here - SoltConfig's
           # own defaults (localhost/5432/odoo/odoo) already match the postgres
