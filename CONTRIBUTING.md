@@ -143,32 +143,35 @@ Tags: `[IMP]` improvement, `[FIX]` bugfix, `[ADD]` new feature, `[REM]` removal,
 Version is derived automatically from the git tag (via `setuptools_scm`) -
 there's nothing to hand-edit in `pyproject.toml` or `__init__.py` anymore.
 
-1. Update CHANGELOG.md
+1. Bump the `SOLT_PRE_COMMIT_VERSION` self-install pin
+   (`pip install "git+...@vX.Y.Z"`) in **all three** reusable workflows
+   - `.github/workflows/solt-validate.yml`,
+   - `solt-coverage.yml`,
+   - and `solt-update-badges.yml`
 
-2. Bump the `SOLT_PRE_COMMIT_VERSION` self-install pin
-   (`pip install "git+...@vX.Y.Z"`) in **all three** reusable workflows -
-   `.github/workflows/solt-validate.yml`, `solt-coverage.yml`, and
-   `solt-update-badges.yml` - each carries its own identical env block, and
+   Each carries its own identical env block, and
    it's the one version reference that can't be derived automatically since
-   these are workflows referencing themselves. Missing any one of the three
+   these are workflows referencing themselves.
+
+   Missing any one of the three
    leaves that workflow silently running an older release even for
    consumers pinned to the new tag (`uses: ...@vX.Y.Z` only selects which
    *workflow file* runs - `SOLT_PRE_COMMIT_VERSION` inside it separately
    controls which *package release* gets installed).
 
-3. Create and push a git tag:
+2. Create and push a git tag:
 ```bash
 git tag v1.x.0
 git push origin v1.x.0
 ```
 
-4. Everyone consuming this repo picks up the new version by running
+1. Everyone consuming this repo picks up the new version by running
    `setup-repo.py --update-only --batch repos.txt` against their own repos
    (or `--update-only` for a single repo) - it re-derives the current
    version from this repo's latest tag and stamps it into each consumer's
    `.pre-commit-config.yaml` / `solt-validate.yml`.
 
-4. The CI will automatically create a GitHub release
+2. The CI will automatically create a GitHub release
 
 ## Configuration Priority
 
