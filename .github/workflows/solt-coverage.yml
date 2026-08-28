@@ -79,7 +79,7 @@ on:
         value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.5.0
+  SOLT_PRE_COMMIT_VERSION: v1.5.1
 
 jobs:
   Coverage:
@@ -358,6 +358,18 @@ jobs:
           # own defaults (localhost/5432/odoo/odoo) already match the postgres
           # service above exactly. Scratch-DB create/drop is now handled
           # internally by solt-test-module, not this workflow.
+          #
+          # modules-tested carries this step's *final* MODULES_CSV (narrowed by
+          # scope=changed, or the untouched full list otherwise) to the Coverage
+          # report step below via GITHUB_OUTPUT - shell variables don't survive
+          # between steps. Without this, that step falls back to re-deriving the
+          # module list from inputs.modules (the full declared list) and its
+          # --include pattern would span every declared module regardless of
+          # scope, so a scope=changed run's coverage% would count the untested
+          # modules' entirely-untraced source as 0% covered and tank the number
+          # for modules that were actually well covered. Written before
+          # solt-test-module runs, so it's captured even if the step then fails.
+          echo "modules-tested=$MODULES_CSV" >> "$GITHUB_OUTPUT"
           set +e
           solt-test-module "$MODULES_CSV" --addons-path "$ADDONS_PATH" --config repo/.solt-hooks.yaml 2>&1 | tee test_output.txt
           RESULT=${PIPESTATUS[0]}
@@ -370,19 +382,34 @@ jobs:
         if: always()
         env:
           MODULES: ${{ inputs.modules }}
+          MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
         run: |
-          # Same space-vs-comma normalization as the test step above - see
-          # that step's comment for why this matters.
-          MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
-          MODULES_CSV="${MODULES_CSV#,}"
-          MODULES_CSV="${MODULES_CSV%,}"
+          # Report coverage over exactly the modules the previous step actually
+          # tested (steps.test's modules-tested output - already normalized,
+          # already narrowed if scope=changed applied), not the full declared
+          # list - otherwise --include below would span every declared module,
+          # and modules that were never even loaded this run (0 trace data, all
+          # statements "missing") would drag percent_covered down for modules
+          # that were genuinely well covered. Falls back to re-deriving from the
+          # full inputs.modules only if modules-tested is unset - e.g. the Run
+          # tests step failed before reaching that computation - matching this
+          # step's own if: always() intent of still reporting something useful.
+          if [ -n "$MODULES_TESTED" ]; then
+            MODULES_CSV="$MODULES_TESTED"
+          else
+            # Same space-vs-comma normalization as the test step above - see
+            # that step's comment for why this matters.
+            MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
+            MODULES_CSV="${MODULES_CSV#,}"
+            MODULES_CSV="${MODULES_CSV%,}"
+          fi
           IFS=',' read -ra MODULE_ARR <<< "$MODULES_CSV"
           INCLUDE=""
           for m in "${MODULE_ARR[@]}"; do INCLUDE="${INCLUDE}*/${m}/*,"; done
           INCLUDE="${INCLUDE%,}"
           coverage report --include="$INCLUDE" | tee coverage_report.txt
           {
-            echo "## Coverage Report ($MODULES)"
+            echo "## Coverage Report ($MODULES_CSV)"
             echo ""
             echo '```'
             cat coverage_report.txt
