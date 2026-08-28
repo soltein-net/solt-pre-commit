@@ -81,7 +81,7 @@ on:
         value: ${{ jobs.Validate.outputs.ruff_changed }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.5.2
+  SOLT_PRE_COMMIT_VERSION: v1.5.3
 
 jobs:
   Validate:
@@ -539,6 +539,7 @@ jobs:
         env:
           MODULE_COUNT: ${{ steps.find-modules.outputs.count }}
           EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
+          ERRORS_COUNT: ${{ steps.summary.outputs.errors }}
           DURATION: ${{ steps.validate.outputs.duration }}
           SCOPE: ${{ inputs.validation-scope }}
           WARNINGS_COUNT: ${{ steps.summary.outputs.warnings }}
@@ -569,6 +570,7 @@ jobs:
               echo "This PR only contains configuration files. Validation will run once you add an Odoo module with \`__manifest__.py\`."
             else
               EXIT_CODE="${EXIT_CODE:-0}"; case "$EXIT_CODE" in ''|*[!0-9]*) EXIT_CODE=0 ;; esac
+              ERRORS_COUNT="${ERRORS_COUNT:-0}"; case "$ERRORS_COUNT" in ''|*[!0-9]*) ERRORS_COUNT=0 ;; esac
               WARNINGS_COUNT="${WARNINGS_COUNT:-0}"; case "$WARNINGS_COUNT" in ''|*[!0-9]*) WARNINGS_COUNT=0 ;; esac
               RUFF_CHANGED="${RUFF_CHANGED:-0}"; case "$RUFF_CHANGED" in ''|*[!0-9]*) RUFF_CHANGED=0 ;; esac
               PYLINT_CHANGED="${PYLINT_CHANGED:-0}"; case "$PYLINT_CHANGED" in ''|*[!0-9]*) PYLINT_CHANGED=0 ;; esac
@@ -576,8 +578,14 @@ jobs:
               MISSING_STRING="${MISSING_STRING:-0}"; case "$MISSING_STRING" in ''|*[!0-9]*) MISSING_STRING=0 ;; esac
               MISSING_HELP="${MISSING_HELP:-0}"; case "$MISSING_HELP" in ''|*[!0-9]*) MISSING_HELP=0 ;; esac
 
+              # Same distinction as the Final validation check step: a genuine error
+              # (ERRORS_COUNT > 0) always fails; EXIT_CODE alone conflates errors with
+              # warnings (solt-check-odoo exits non-zero on either, with no way to tell them
+              # apart from its exit code) and would show "blocked" here even on a
+              # warnings-only run with fail-on-warnings: false, disagreeing with the job's
+              # actual (passing) result.
               HAS_FAILED=false
-              if [ "$EXIT_CODE" -ne 0 ]; then
+              if [ "$ERRORS_COUNT" -gt 0 ]; then
                 HAS_FAILED=true
               elif [ "$FAIL_ON_WARNINGS" = "true" ]; then
                 if [ "$WARNINGS_COUNT" -gt 0 ]; then HAS_FAILED=true; fi
@@ -657,6 +665,16 @@ jobs:
 
           EXIT_CODE="${{ steps.validate.outputs.exit_code }}"
           case "$EXIT_CODE" in ''|*[!0-9]*) EXIT_CODE=0 ;; esac
+          # ERRORS (steps.summary's own parse of "Errors: N" from solt-check-odoo's report) is
+          # the real signal for a genuine blocking problem - EXIT_CODE conflates it with
+          # warnings, since solt-check-odoo itself exits non-zero whenever warnings > 0 too,
+          # with no CLI flag to separate the two. Gating on EXIT_CODE directly meant
+          # fail-on-warnings: false never actually suppressed anything: a warnings-only run
+          # (0 real errors) still hit this branch unconditionally and failed anyway - the
+          # elif below (which IS correctly gated on fail-on-warnings) was unreachable in
+          # practice, since EXIT_CODE was already nonzero by the time execution got there.
+          ERRORS="${{ steps.summary.outputs.errors }}"
+          case "$ERRORS" in ''|*[!0-9]*) ERRORS=0 ;; esac
           FAIL_ON_WARNINGS="${{ inputs.fail-on-warnings }}"
           RUFF_BLOCKING="${{ inputs.ruff-blocking }}"
           PYLINT_BLOCKING="${{ inputs.pylint-blocking }}"
@@ -666,10 +684,10 @@ jobs:
           case "$RUFF_CHANGED" in ''|*[!0-9]*) RUFF_CHANGED=0 ;; esac
           PYLINT_CHANGED="${{ steps.summary.outputs.pylint_changed }}"
           case "$PYLINT_CHANGED" in ''|*[!0-9]*) PYLINT_CHANGED=0 ;; esac
-          echo "::notice::Final check (Odoo $ODOO_VERSION) - Exit=$EXIT_CODE, Warnings=$WARNINGS, Pylint=$PYLINT_CHANGED (blocking=$PYLINT_BLOCKING), Ruff=$RUFF_CHANGED (blocking=$RUFF_BLOCKING)"
-          if [ "$EXIT_CODE" -ne 0 ]; then
+          echo "::notice::Final check (Odoo $ODOO_VERSION) - Exit=$EXIT_CODE, Errors=$ERRORS, Warnings=$WARNINGS, Pylint=$PYLINT_CHANGED (blocking=$PYLINT_BLOCKING), Ruff=$RUFF_CHANGED (blocking=$RUFF_BLOCKING)"
+          if [ "$ERRORS" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
-            echo "::error::Validation FAILED - solt-check-odoo blocking errors"
+            echo "::error::Validation FAILED - $ERRORS solt-check-odoo blocking error(s)"
             exit 1
           elif [ "$FAIL_ON_WARNINGS" = "true" ] && [ "$WARNINGS" -gt 0 ]; then
             echo "result=failure" >> $GITHUB_OUTPUT
