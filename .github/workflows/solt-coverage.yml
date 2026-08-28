@@ -61,7 +61,7 @@ on:
         value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.4.2
+  SOLT_PRE_COMMIT_VERSION: v1.4.3
 
 jobs:
   Coverage:
@@ -86,6 +86,37 @@ jobs:
           --health-retries 10
 
     steps:
+      - name: Free disk space
+        run: |
+          # This job's own footprint is already large before it does anything of
+          # its own: Odoo core, up to 11 sibling-repo clones, and a heavy
+          # requirements.txt (e.g. solt-llm's pulls in sentence-transformers,
+          # crawlee's browser deps, llama_index) plus a Postgres+vector-extension
+          # service image. GitHub-hosted ubuntu-24.04 runners ship with only
+          # ~14GB free after their own preinstalled toolchains - most of which
+          # (a full .NET SDK, Android SDK, GHC, a CodeQL bundle) no Odoo/Python
+          # job here ever touches. A GitHub-side runner-image update can shrink
+          # that baseline further with zero warning and no code change on our
+          # side (see actions/runner-images#9329, #9344, #13189 for prior,
+          # repeated instances of exactly this regression) - this job was
+          # already close enough to the ceiling that one of those was enough to
+          # tip a real PR into "No space left on device" mid-`pip install`,
+          # with every actual test passing right up to that point.
+          #
+          # Removing this preinstalled bloat up front is the standard mitigation
+          # for this failure class. It can't reclaim space the `postgres:`
+          # service container's image already used - GitHub Actions provisions
+          # service containers before any job step runs - but it frees real
+          # room for everything this job's own steps do next: sibling-repo
+          # checkouts and the heavy pip installs, which is where a repo like
+          # solt-llm's actual pressure comes from.
+          echo "Disk usage before cleanup:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af || true
+          echo "Disk usage after cleanup:"
+          df -h /
+
       - name: Checkout this repo
         uses: actions/checkout@v4
         with:
