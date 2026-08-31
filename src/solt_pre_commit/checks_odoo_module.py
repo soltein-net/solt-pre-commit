@@ -700,7 +700,9 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
                 if model_info.get("is_odoo_model"):
                     total_models += 1
 
-            for _class_name, field_list in fields.items():
+            for class_name, field_list in fields.items():
+                if not models.get(class_name, {}).get("is_odoo_model"):
+                    continue
                 for fld in field_list:
                     field_name = fld.get("name", "")
                     if field_name.startswith("_"):
@@ -720,7 +722,9 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
                         if fld.get("help"):
                             fields_with_help += 1
 
-            for _class_name, method_list in methods.items():
+            for class_name, method_list in methods.items():
+                if not models.get(class_name, {}).get("is_odoo_model"):
+                    continue
                 for meth in method_list:
                     name = meth.get("name", "")
                     if name.startswith("_") and not name.startswith("__"):

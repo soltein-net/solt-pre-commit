@@ -975,12 +975,13 @@ class TestPrintGlobalCoverageMetrics:
     def test_skip_listed_field_names_are_excluded_from_the_denominator(self, tmp_path, capsys):
         config = _make_config(tmp_path)  # "name" is in DEFAULT_SKIP_STRING_FIELDS/HELP_FIELDS
         obj = self._checks_obj_with(
+            models={"M": {"is_odoo_model": True}},
             fields={
                 "M": [
                     {"name": "name", "string": None, "help": None},
                     {"name": "custom_field", "string": None, "help": None},
                 ]
-            }
+            },
         )
         mod._print_global_coverage_metrics([("m", obj)], config)
         out = capsys.readouterr().out
@@ -1003,14 +1004,54 @@ class TestPrintGlobalCoverageMetrics:
 
     def test_field_with_help_counts_toward_the_help_percentage(self, tmp_path, capsys):
         config = _make_config(tmp_path)
-        obj = self._checks_obj_with(fields={"M": [{"name": "custom_field", "string": "Label", "help": "Explains it"}]})
+        obj = self._checks_obj_with(
+            models={"M": {"is_odoo_model": True}},
+            fields={"M": [{"name": "custom_field", "string": "Label", "help": "Explains it"}]},
+        )
         mod._print_global_coverage_metrics([("m", obj)], config)
         out = capsys.readouterr().out
         assert "Fields with help:    100.0%  (1/1)" in out
 
+    def test_fields_and_methods_of_a_non_odoo_model_class_are_excluded(self, tmp_path, capsys):
+        # total_models is already filtered by is_odoo_model (see the test below) -
+        # the fields/methods loops must apply the same filter, otherwise a plain
+        # Python class (e.g. a TransactionCase subclass in tests/) counts its
+        # undocumented test methods as if they belonged to an Odoo model.
+        config = _make_config(tmp_path)
+        obj = self._checks_obj_with(
+            models={
+                "M": {"is_odoo_model": True},
+                "TestM": {"is_odoo_model": False},
+            },
+            fields={
+                "M": [{"name": "custom_field", "string": "Label", "help": "Explains it"}],
+                "TestM": [{"name": "not_a_field", "string": None, "help": None}],
+            },
+            methods={
+                "M": [{"name": "do_x", "has_docstring": True}],
+                "TestM": [{"name": "test_something", "has_docstring": False}],
+            },
+        )
+        mod._print_global_coverage_metrics([("m", obj)], config)
+        out = capsys.readouterr().out
+        # Only M's field and method count - TestM isn't an Odoo model.
+        assert "Total Fields: 1 | Public Methods: 1" in out
+        assert "Docstrings:          100.0%  (1/1)" in out
+
+    def test_total_models_only_counts_classes_flagged_as_odoo_models(self, tmp_path, capsys):
+        config = _make_config(tmp_path)
+        obj = self._checks_obj_with(
+            models={"M": {"is_odoo_model": True}, "Mixin": {"is_odoo_model": False}},
+            fields={"M": [{"name": "custom_field", "string": "x", "help": "x"}]},
+        )
+        mod._print_global_coverage_metrics([("m", obj)], config)
+        out = capsys.readouterr().out
+        assert "Models: 1" in out
+
     def test_private_and_skip_listed_methods_are_excluded_from_the_docstring_count(self, tmp_path, capsys):
         config = _make_config(tmp_path)
         obj = self._checks_obj_with(
+            models={"M": {"is_odoo_model": True}},
             fields={"M": [{"name": "custom_field", "string": "x", "help": "x"}]},
             methods={
                 "M": [

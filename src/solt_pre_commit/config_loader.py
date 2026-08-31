@@ -811,8 +811,16 @@ class SoltConfig:
 
     def is_path_excluded(self, filepath: str) -> bool:
         """Check if a file path should be excluded."""
+        # fnmatch has no globstar semantics - "**" behaves like a single "*",
+        # so a pattern like "**/tests/**" still requires a literal "/" before
+        # "tests" in the string. A path relative to a module root (e.g.
+        # "tests/test_foo.py", with no leading segment) would never match, even
+        # though the module's own tests/ dir is exactly what the pattern means
+        # to exclude. Normalize with a leading "./" so a root-level dir matches
+        # the same as one nested deeper.
+        normalized = filepath if os.path.isabs(filepath) else f"./{filepath}"
         for pattern in self.exclude_paths:
-            if fnmatch.fnmatch(filepath, pattern):
+            if fnmatch.fnmatch(normalized, pattern):
                 return True
         return False
 
