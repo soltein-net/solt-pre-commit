@@ -191,6 +191,33 @@ class TestDetectBaseBranch:
                 assert detector._detect_base_branch() == "HEAD~1"
 
 
+class TestIsPathExcluded:
+    # fnmatch has no globstar semantics: "**" behaves like a single "*", which
+    # still requires the pattern's literal "/" before "tests" to be present in
+    # the string. Every module's own tests/ dir sits at the module root, so the
+    # path handed to is_path_excluded (relative to the addon path) is exactly
+    # "tests/test_foo.py" - no leading segment for "**/tests/**" to match against.
+    def test_excludes_tests_dir_at_the_module_root(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        config = SoltConfig()
+        assert config.is_path_excluded("tests/test_foo.py") is True
+
+    def test_excludes_tests_dir_nested_under_a_package(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        config = SoltConfig()
+        assert config.is_path_excluded("llm_assistant/tests/test_foo.py") is True
+
+    def test_excludes_migrations_dir_at_the_module_root(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        config = SoltConfig()
+        assert config.is_path_excluded("migrations/1.0/pre-migration.py") is True
+
+    def test_does_not_exclude_an_unrelated_root_level_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        config = SoltConfig()
+        assert config.is_path_excluded("models/res_partner.py") is False
+
+
 class TestSoltConfigDefaults:
     def test_defaults_with_no_config_file(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
