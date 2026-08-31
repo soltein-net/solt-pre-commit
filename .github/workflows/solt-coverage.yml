@@ -79,7 +79,7 @@ on:
         value: ${{ jobs.Coverage.outputs.coverage_pct }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.5.3
+  SOLT_PRE_COMMIT_VERSION: v1.5.4
 
 jobs:
   Coverage:
