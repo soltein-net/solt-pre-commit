@@ -730,10 +730,21 @@ jobs:
           merge-multiple: false
 
       - name: Setup Python
+        # No `cache: 'pip'` here (unlike other jobs in this workflow) - pip's
+        # cache key is hashed from a requirements.txt/pyproject.toml in the
+        # checked-out repo, and this job deliberately never checks out the
+        # repo (it only downloads artifacts and runs an inline script) - there
+        # is nothing to hash. With cache enabled, setup-python hard-errors:
+        # "No file in .../solt-suite matched to [**/requirements.txt or
+        # **/pyproject.toml], make sure you have checked out the target
+        # repository" - failing this job on every run regardless of shard
+        # data (confirmed live on soltein-net/solt-suite#669, the first
+        # real-infra exercise of this job since it was added). A single `pip
+        # install coverage` per run is cheap enough that caching buys nothing
+        # worth reintroducing a checkout step for.
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install coverage
         run: pip install coverage
