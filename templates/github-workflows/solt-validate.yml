@@ -74,25 +74,35 @@ jobs:
   # ---------------------------------------------------------------------------
   # TEST - Run Odoo module tests with coverage
   # Runs on Pull Requests (scope=changed) and on push to '{{ ODOO_VERSION }}'
-  # post-merge (scope=full), after Validation passes
+  # post-merge (scope=full)
   # Note: Requires modules and sibling-repos to be auto-detected from manifests
   # If tests fail, this job fails and blocks the PR
   #
-  # needs: Validation is deliberate: Validation is cheap (seconds) and already blocks merge
-  # on its own, so a PR that fails Validation can never merge regardless of Test's
-  # result. Running the far more expensive Test job (DB setup, sibling-repo
-  # checkouts, coverage across every module) in parallel with a doomed Validation
-  # run wastes CI minutes on every validation failure. Serializing costs green PRs
-  # Validation's runtime (seconds) in added wall-clock latency, in exchange for
-  # skipping all of Test's runtime (minutes) whenever Validation fails - a clear net
-  # win given Validation failures are common during iterative development. If Validation
-  # is skipped or fails, Test is automatically skipped too (default GitHub
-  # Actions behavior for a job whose `needs` didn't succeed) - no separate
-  # `if` needed here for that.
+  # needs: Validation, gated differently per event - deliberate, not the same rule
+  # both times:
+  # - pull_request: Test only runs once Validation succeeds. Validation is cheap
+  #   (seconds) and already blocks merge on its own, so a PR that fails Validation
+  #   can never merge regardless of Test's result - running the far more expensive
+  #   Test job (DB setup, sibling-repo checkouts, coverage across every module) in
+  #   parallel with a doomed Validation run wastes CI minutes on every validation
+  #   failure, which is common during iterative development.
+  # - push: Test always runs regardless of Validation's outcome. Validation's own
+  #   `fail-on-warnings`/`pylint-blocking` are already non-blocking here (see
+  #   Validation's own comment) specifically so pre-existing debt a full-scope scan
+  #   surfaces doesn't redden this branch - but `severity: error` checks (unlike
+  #   warnings) are *always* blocking regardless of that setting, and a repo can
+  #   easily carry pre-existing *errors* across modules no recent PR touched too
+  #   (e.g. python_tracking_without_mail_thread on old code). Left as a plain
+  #   `needs: Validation` dependency, GitHub Actions skips Test outright whenever
+  #   Validation fails for any reason - silently discarding the one signal this
+  #   job exists to produce post-merge (real, full-scope coverage/test-pass data)
+  #   over an entirely unrelated lint issue. `always()` below bypasses that
+  #   default "needs must succeed" gate for the push case only - the pull_request
+  #   gate above is unaffected.
   # ---------------------------------------------------------------------------
   Test:
     needs: Validation
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    if: always() && (github.event_name == 'push' || (github.event_name == 'pull_request' && needs.Validation.result == 'success'))
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
       modules: '{{ MODULES }}'
