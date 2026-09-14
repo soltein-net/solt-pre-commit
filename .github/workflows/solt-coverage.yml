@@ -55,9 +55,15 @@ on:
           'changed': test only the modules in `modules` that actually have a changed file
           in this PR's diff (reuses the same changed-file detection the local pre-push
           hook already uses for `test_scope: changed` in .solt-hooks.yaml - see
-          checks_test_changed_modules.py). Falls back to the full `modules` list if
-          detection finds no changed modules among them (e.g. the diff only touched
-          non-module files), so this never silently skips real testing.
+          checks_test_changed_modules.py). Two distinct fallback cases:
+          - the diff changed files, but none map to any declared module (e.g. a
+            sibling-repo dependency bump) -> falls back to testing the full `modules`
+            list, so this never silently skips real testing for an ambiguous diff.
+          - the diff touched zero Odoo-module-shaped paths at all (e.g. CI config,
+            docs, non-addon scripts) -> the Test job (and its coverage report) is
+            skipped outright, reported as a pass with no coverage data, since no
+            module's behavior could possibly have changed and testing the full list
+            would be pure cost for a fixed answer.
           A repo with many modules in one addon repo (e.g. solt-llm's 24) should set this
           to 'changed' - most PRs there only ever touch 1-3 of them, and this job's own
           checkout/install overhead is fixed regardless of how many modules get tested, so
@@ -358,7 +364,21 @@ jobs:
                 echo "scope=changed: no declared module matched - falling back to the full list"
               fi
             else
-              echo "scope=changed: no changed modules detected - falling back to the full list"
+              # Distinct from the branch above: there, *something* changed but
+              # didn't match a declared module (e.g. a sibling dependency bump) -
+              # falling back to full is a real safety net worth its cost. Here,
+              # the diff touched zero Odoo-module-shaped paths at all - CI config,
+              # docs, non-addon scripts. No module's behavior could possibly have
+              # changed, so testing all `modules` provides zero additional signal
+              # about *this* diff - it is pure cost for a fixed answer. Skip
+              # outright rather than pay the full-scope run for nothing: this is
+              # what turned a 146-module Odoo repo's docs-only PR into a 2h40m
+              # run for a config change that touched no module at all.
+              echo "scope=changed: no changed modules detected - nothing to test, skipping"
+              echo "modules-tested=" >> "$GITHUB_OUTPUT"
+              echo "result=0" >> "$GITHUB_OUTPUT"
+              echo "skipped=true" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
           fi
 
@@ -391,7 +411,20 @@ jobs:
         env:
           MODULES: ${{ inputs.modules }}
           MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
+          SKIPPED: ${{ steps.test.outputs.skipped }}
         run: |
+          # scope=changed found nothing to test at all (see the "Run tests" step) -
+          # nothing ran, so there is no trace data to report. Reporting one anyway
+          # would compute 0% against every declared module (none of them loaded),
+          # which is not "this diff dropped coverage" - it is "coverage wasn't
+          # measured this run" - and could otherwise trip the org's
+          # max_coverage_drop ruleset rule for a PR that never touched a module.
+          if [ "$SKIPPED" = "true" ]; then
+            echo "Nothing was tested this run (scope=changed found no module-shaped changes) - skipping the coverage report."
+            echo "coverage_pct=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # Report coverage over exactly the modules the previous step actually
           # tested (steps.test's modules-tested output - already normalized,
           # already narrowed if scope=changed applied), not the full declared
