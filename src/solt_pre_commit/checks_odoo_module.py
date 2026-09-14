@@ -755,7 +755,17 @@ def _print_global_coverage_metrics(checks_objects, severity_config):
     print("-" * 60)
     print(f"  Modules analyzed: {len(checks_objects)}")
     print(f"  Models: {total_models} | Total Fields: {total_fields} | Public Methods: {public_methods}")
-    print(f"  Fields needing string: {fields_needing_string} | Fields needing help: {fields_needing_help}")
+    # "In scope for" here, not "needing" - this is the applicable population
+    # (every field not in skip_string_fields/skip_help_fields), regardless of
+    # whether it already has one. A prior "Fields needing string: N" reading
+    # right above a line saying "100.0% (N/N)" read as a contradiction - as if
+    # N fields still lacked a string when the check was reporting all N
+    # already have one. It's not a gap count: the two percentages just happen
+    # to reach 100% because python_field_missing_string is itself a blocking
+    # severity (see .solt-hooks.yaml) that has stopped any field from being
+    # committed without one since the day it was turned on - the informational
+    # summary here is reporting that steady state, not a live discovery of it.
+    print(f"  Fields in scope for string: {fields_needing_string} | Fields in scope for help: {fields_needing_help}")
     print("")
     print(
         f"  Docstrings:          {docstring_pct:5.1f}%  ({methods_with_docstring}/{public_methods})  "

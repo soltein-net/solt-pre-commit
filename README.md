@@ -4,9 +4,9 @@
 
 ---
 
-[![Tests (3.10)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-py3.10-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 [![Tests (3.11)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-py3.11-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 [![Tests (3.12)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-py3.12-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
+[![Tests (3.13)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-py3.13-tests.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 
 [![Integration (17.0)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-odoo17.0-integration.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
 [![Integration (18.0)](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SolteinCorp/147d543a086f6735d1ffa02172766e86/raw/solt-pre-commit-odoo18.0-integration.json)](https://github.com/soltein-net/solt-pre-commit/actions/workflows/ci.yml)
@@ -64,8 +64,10 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
     - [Branch Naming](#branch-naming)
   - [💻 CLI Usage](#-cli-usage)
   - [🛠️ Setup Script Commands](#️-setup-script-commands)
-    - [Full Setup (default)](#full-setup-default)
-    - [Update Version Only](#update-version-only)
+    - [`setup` - Full setup](#setup---full-setup)
+    - [`regenerate` - Refresh an already-configured repo](#regenerate---refresh-an-already-configured-repo)
+    - [`update-version` - Update only the version pin](#update-version---update-only-the-version-pin)
+    - [`badges` - Inject/refresh README badges](#badges---injectrefresh-readme-badges)
     - [Pre-commit Maintenance](#pre-commit-maintenance)
     - [All Options](#all-options)
   - [🤝 Contributing](#-contributing)
@@ -74,15 +76,19 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
 
 ## 📋 Supported Versions
 
-<!-- Per Odoo's own docs (odoo.com/documentation/<version>/administration/on_premise/source.html):
-     the Python minimum jumped 3.7->3.10 at 17.0 and held through 18.0 - it does
-     NOT bump every version. 19.0/20.0 below are not yet confirmed against Odoo's
-     docs; verify before assuming another bump. -->
+<!-- This is what we actually generate/test against (get_python_version() in
+     scripts/setup-repo.py), not Odoo's documented *minimum* - see that
+     function's own docstring for why: below 3.12, Odoo's requirements.txt
+     holds cryptography/pyOpenSSL to 2021-era pins nothing deploys against,
+     and 3.13 costs nothing over 3.12 in dependency coverage. get_python_version()
+     also maps 20.0 -> 3.13, but 20.0 isn't in this repo's own Integration Test
+     matrix (ci.yml) yet - not listed below until it is. Keep this table in
+     sync with that mapping by hand - there is no single source both read from. -->
 | Odoo Version | Python | Status |
 |--------------|--------|--------|
-| 17.0 | 3.11+ | ✅ Fully Supported |
-| 18.0 | 3.11+ | ✅ Fully Supported |
-| 19.0 | 3.11+ | ✅ Fully Supported |
+| 17.0 | 3.11 | ✅ Fully Supported |
+| 18.0 | 3.11 | ✅ Fully Supported |
+| 19.0 | 3.13 | ✅ Fully Supported |
 
 ---
 
@@ -268,65 +274,48 @@ Test:
     python-version: '3.11'  # pinned to what's actually deployed - see note below
 ```
 
-**Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.11.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. This comes from `get_python_version()` in `scripts/setup-repo.py`, mapped per Odoo version: `3.11` for 17.0-19.0, `3.12` for 20.0+. These track what's actually deployed (devcontainers and production images), not Odoo's documented *minimum* supported Python (3.10 for 17.0-19.0) — pinning to the minimum instead reliably broke CI on an unrelated toolchain mismatch (Odoo's own `requirements.txt` pins a `gevent` build for Python 3.10 that no longer compiles on current GitHub-hosted runners) while catching nothing real, since nothing in this fleet actually runs that minimum. An odoo-version with no entry in the mapping raises immediately when `setup-repo.py` runs, rather than silently guessing a Python version that might be wrong for it.
+**Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.11.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. This comes from `get_python_version()` in `scripts/setup-repo.py`, mapped per Odoo version: `3.11` for 17.0-18.0, `3.13` for 19.0-20.0 - see that function's own docstring for the reasoning (it's not a straight "one bump per Odoo release" progression: below Python 3.12, Odoo's own `requirements.txt` holds `cryptography`/`pyOpenSSL` to 2021-era pins nothing here actually deploys against). These track what's actually deployed (devcontainers and production images), not Odoo's documented *minimum* supported Python (3.10 for 17.0-19.0) — pinning to the minimum instead reliably broke CI on an unrelated toolchain mismatch (Odoo's own `requirements.txt` pins a `gevent` build for Python 3.10 that no longer compiles on current GitHub-hosted runners) while catching nothing real, since nothing in this fleet actually runs that minimum. An odoo-version with no entry in the mapping raises immediately when `setup-repo.py` runs, rather than silently guessing a Python version that might be wrong for it.
 
 ### Test/Coverage Scope (many-module repos)
 
-`solt-coverage.yml`'s `Test` job has a `scope` input, `'full'` (default) or `'changed'`. Not yet
-generated by `setup-repo.py` — as of v1.5.1 it's a hand-added `with:` line, so add it yourself and
-expect to re-add it if the file is ever regenerated from scratch until the generator learns about it.
+`solt-coverage.yml`'s `Test` job has a `scope` input, `'full'` (default) or `'changed'`. As of v1.6.0
+this is generated automatically — `setup-repo.py setup`/`regenerate` render it as
+`scope: ${{ github.event_name == 'push' && 'full' || 'changed' }}` (see "Recommended pattern" below),
+no hand-added `with:` line needed.
 
 `scope: 'full'` tests every module in `modules`, unconditionally — unchanged default behavior for
 every caller. `scope: 'changed'` narrows that down to only the declared modules that actually have a
 changed file in the current diff (same detection the local pre-push hook already uses for
-`test_scope: changed` — self-healing shallow-clone base-ref fetch, `GITHUB_BASE_REF`-aware in CI).
-Falls back to the full list whenever detection finds nothing, so it only ever narrows, never silently
-skips real testing. Worth setting on a repo with many modules in one addon repo (e.g. 24) where most
-PRs only ever touch 1-3 of them — the job's own checkout/install overhead is fixed regardless, so
-`'changed'` only saves the minutes actually spent running every *other* module's tests for a change
-that never touched them.
+`test_scope: changed` — self-healing shallow-clone base-ref fetch, `GITHUB_BASE_REF`-aware in CI). Two
+distinct outcomes when nothing declared matches:
+- the diff changed files, but none map to a declared module (e.g. a sibling-repo dependency bump) —
+  falls back to testing the full `modules` list, a safety net for an ambiguous diff.
+- the diff touched zero Odoo-module-shaped paths at all (docs, CI config, non-addon scripts) — the
+  `Test` job is skipped entirely (not even the Postgres service/Odoo checkout run, via a cheap `Detect`
+  job ahead of it), reported as a pass with no coverage data, since nothing declared could possibly
+  have changed behavior.
+
+Worth setting on a repo with many modules in one addon repo (e.g. 24) where most PRs only ever touch
+1-3 of them — for a real, module-touching diff the job's own checkout/install overhead is fixed
+regardless, so `'changed'` saves the minutes actually spent running every *other* module's tests for a
+change that never touched them.
 
 **Coverage reporting follows whatever was actually tested**, not the full declared list — the
 `Coverage report` step reads the `Test` step's own `modules-tested` output rather than re-deriving
 from `modules`, so a `scope: 'changed'` run's percentage reflects only the modules it exercised
 (otherwise every untested module's untraced source would count as 0% and drag the number down for no
-reason).
+reason). It's also skipped outright (no percentage computed at all) when `Test` itself was skipped, for
+the same reason.
 
-**Recommended pattern for many-module repos**: run `scope: 'changed'` on `pull_request` for fast
-per-PR feedback, and re-run the same jobs `scope: 'full'` on `push` to the target branch (post-merge)
-so the coverage/lint badges get refreshed from one authoritative whole-repo run per merge instead of
-tracking whatever subset the last merged PR happened to touch. Since `Validation` is cheap (seconds),
-running it full-scope too on push costs nothing meaningful and keeps `Badges`' other inputs
-(`solt-check-errors`/`pylint-changed`/`ruff-changed`) genuinely computed rather than defaulted:
-
-```yaml
-on:
-  pull_request:
-    branches: [ '17.0' ]
-  push:
-    branches: [ '17.0' ]
-
-jobs:
-  Validation:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@v1.5.1
-    with:
-      validation-scope: ${{ github.event_name == 'push' && 'full' || 'changed' }}
-      # ...
-
-  Test:
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
-    uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@v1.5.1
-    with:
-      scope: ${{ github.event_name == 'push' && 'full' || 'changed' }}
-      # ...
-
-  Badges:
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
-    # ... unchanged - needs: [ Validation, Test ]
-```
-
-See `soltein-net/solt-llm`'s `.github/workflows/solt-validate.yml` for this pattern in production.
+**Recommended pattern for many-module repos**, generated automatically: run `scope: 'changed'` on
+`pull_request` for fast per-PR feedback, and re-run the same jobs `scope: 'full'` on `push` to the
+target branch (post-merge) so the coverage/lint badges get refreshed from one authoritative whole-repo
+run per merge instead of tracking whatever subset the last merged PR happened to touch, non-blocking
+(a full-scope run can surface pre-existing debt no single PR introduced - see
+`soltein-net/solt-llm#110`). Since `Validation` is cheap (seconds), running it full-scope too on push
+costs nothing meaningful and keeps `Badges`' other inputs
+(`solt-check-errors`/`pylint-changed`/`ruff-changed`) genuinely computed rather than defaulted. Run
+`setup-repo.py regenerate` against an already-configured repo to pick this up.
 
 ### Pre-Push Test Blocking
 

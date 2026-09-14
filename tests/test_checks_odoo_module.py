@@ -986,7 +986,7 @@ class TestPrintGlobalCoverageMetrics:
         mod._print_global_coverage_metrics([("m", obj)], config)
         out = capsys.readouterr().out
         # 2 total fields, but "name" is skip-listed - only custom_field counts.
-        assert "Fields needing string: 1" in out
+        assert "Fields in scope for string: 1" in out
 
     def test_related_fields_are_excluded_entirely(self, tmp_path, capsys):
         config = _make_config(tmp_path)
