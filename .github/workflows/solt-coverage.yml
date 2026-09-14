@@ -167,7 +167,16 @@ jobs:
   Coverage:
     name: Run tests + coverage
     needs: Detect
-    if: needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true'
+    # always() is required here, not optional: a bare `if:` (without always(),
+    # success(), failure(), or cancelled()) is implicitly ANDed with success()
+    # by GitHub Actions, and a *skipped* needs job does not count as
+    # "success" - so without always(), this job silently skipped on every
+    # single `scope: 'full'` run (Detect's own `if: inputs.scope == 'changed'`
+    # means it is *always* skipped for scope='full', by design), from the day
+    # this Detect/Coverage split landed until this line was added. Found by
+    # running solt-suite's real post-merge push (scope='full') end to end and
+    # finding this job never even started, coverage_pct always empty.
+    if: always() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true')
     runs-on: ubuntu-latest
     outputs:
       test_result: ${{ steps.test.outputs.result }}
