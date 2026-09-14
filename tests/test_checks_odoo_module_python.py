@@ -126,6 +126,145 @@ class MyModel(models.Model):
         )
         assert checks.checks_errors["python_tracking_without_mail_thread"] == []
 
+    def test_transitive_same_module_mixin_not_flagged(self, tmp_path):
+        # Real false positive shipped in soltein-net/solt-suite#660:
+        # BudgetExpenseConcept (_inherit = "budget.expense.mixin") was
+        # flagged even though budget.expense.mixin itself (a different
+        # class, same module) declares `_inherit = ["mail.thread", ...]` -
+        # the checker never looked that chain up. Both classes have to be
+        # in the same ChecksOdooModulePython scan (same module - here, the
+        # same file) for the transitive lookup to have anything to resolve.
+        checks = _run_checks(
+            tmp_path,
+            """
+from odoo import fields, models
+
+
+class ExpenseMixin(models.AbstractModel):
+    _name = "budget.expense.mixin"
+    _inherit = ["mail.thread"]
+    _description = "Expense Mixin"
+
+
+class ExpenseConcept(models.Model):
+    _name = "budget.expense.concept"
+    _inherit = "budget.expense.mixin"
+    _description = "Expense Concept"
+
+    chapter_id = fields.Many2one("budget.expense.chapter", tracking=True)
+""",
+        )
+        assert checks.checks_errors["python_tracking_without_mail_thread"] == []
+
+    def test_abstract_mixins_own_tracking_field_not_flagged(self, tmp_path):
+        # An AbstractModel is never instantiated on its own - whether
+        # tracking on its own fields "works" depends entirely on whatever
+        # OTHER concrete model composes it later via _inherit alongside
+        # something that may already have mail.thread, which this
+        # single-file/single-module static scan cannot see. Flagging a pure
+        # mixin's own fields is a near-guaranteed false positive for the
+        # common, deliberate "mixin doesn't declare mail.thread itself,
+        # expects the consumer to already have it" pattern.
+        checks = _run_checks(
+            tmp_path,
+            """
+from odoo import fields, models
+
+
+class StampableMixin(models.AbstractModel):
+    _name = "some.stampable.mixin"
+    _description = "Stampable Mixin"
+
+    state = fields.Selection([("sent", "Sent")], tracking=True)
+""",
+        )
+        assert checks.checks_errors["python_tracking_without_mail_thread"] == []
+
+    def test_unresolvable_cross_module_inherit_target_not_flagged(self, tmp_path):
+        # Real false positive shipped in solt-suite#660: several models
+        # extend `l10n_mx_cfdi.catalog.mixin`, which itself has
+        # `_inherit = ["mail.thread"]` - but that mixin is declared in a
+        # *different* module, invisible to a scan of just this one. An
+        # unresolvable inherit target must be treated as inconclusive, not
+        # "assume no mail.thread" - the whole point of this fix.
+        checks = _run_checks(
+            tmp_path,
+            """
+from odoo import fields, models
+
+
+class CustomsRegime(models.Model):
+    _name = "l10n_mx_cfdi.customs.regime"
+    _inherit = "l10n_mx_cfdi.catalog.mixin"
+    _description = "Customs Regime"
+
+    goods_direction = fields.Selection([("in", "In")], tracking=True)
+""",
+        )
+        assert checks.checks_errors["python_tracking_without_mail_thread"] == []
+
+    def test_inherit_via_name_variable_reference_not_flagged(self, tmp_path):
+        # Real false positive shipped in solt-suite#660: `_inherit = [...,
+        # _name]` (referencing the class's own already-assigned `_name`
+        # variable instead of retyping the literal string) is a real,
+        # documented Odoo idiom for extending an existing model while
+        # adding mixins (see solt_l10n_mx_edi_pos's PosOrder). The old AST
+        # extraction silently dropped the bare Name node (not an
+        # ast.Constant), misclassifying this _inherit-only extension of the
+        # existing "pos.order" model as a brand-new model definition.
+        checks = _run_checks(
+            tmp_path,
+            """
+from odoo import fields, models
+
+
+class PosOrder(models.Model):
+    _name = "pos.order"
+    _inherit = [
+        "some.mixin",
+        _name,
+    ]
+
+    my_field = fields.Char(tracking=True)
+""",
+        )
+        assert checks.checks_errors["python_tracking_without_mail_thread"] == []
+
+    def test_genuine_bug_still_flagged_alongside_decoys(self, tmp_path):
+        # The fix must not over-suppress: a model with no mail.thread
+        # anywhere in a fully-resolvable chain, sitting right next to every
+        # false-positive shape this fix addresses, must still be caught.
+        checks = _run_checks(
+            tmp_path,
+            """
+from odoo import fields, models
+
+
+class RealMixin(models.AbstractModel):
+    _name = "real.mixin"
+    _inherit = ["mail.thread"]
+    _description = "Real mixin"
+
+
+class ExtendsRealMixin(models.Model):
+    _name = "extends.real.mixin"
+    _inherit = "real.mixin"
+    _description = "Extends the real mixin"
+
+    extra = fields.Char(tracking=True)
+
+
+class GenuineBug(models.Model):
+    _name = "genuine.bug"
+    _description = "Genuine bug"
+
+    name = fields.Char(tracking=True)
+""",
+        )
+        errors = checks.checks_errors["python_tracking_without_mail_thread"]
+        assert len(errors) == 1
+        assert "GenuineBug" in errors[0] or "genuine.bug" in errors[0]
+
 
 class TestParsePythonFile:
     def test_valid_file_populates_models_fields_and_methods(self, tmp_path):
