@@ -1081,6 +1081,159 @@ def refresh_solt_hooks(config_file: Path, template_text: str, dry_run: bool = Fa
         print_step("⚠️ ", f"Could not carry over '{key}' - check it by hand")
 
 
+def _repo_block(text: str, repo_key: str) -> tuple[int, int] | None:
+    """Locate a `- repo: <repo_key>` entry's own lines in a repos: list -
+    from its `- repo:` line up to just before the next `- repo:` entry at
+    the same indentation, or end of file. Mirrors _yaml_block's approach,
+    scoped to one list entry instead of one top-level key."""
+    lines = text.splitlines(keepends=True)
+    start = None
+    indent = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("- repo:") and stripped.split(":", 1)[1].strip() == repo_key:
+            start = index
+            indent = line[: len(line) - len(line.lstrip())]
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].strip().startswith("- repo:") and lines[index].startswith(indent):
+            end = index
+            break
+    return start, end
+
+
+def _hook_ids(block_text: str) -> list[str]:
+    """Ordered `id:` values of every hook inside a repo block's hooks: list."""
+    ids = []
+    for line in block_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- id:"):
+            ids.append(stripped.split(":", 1)[1].strip())
+    return ids
+
+
+def _hook_block(block_text: str, hook_id: str) -> str | None:
+    """A single hook's own lines within a repo block - its `- id: X` line
+    through the line before the next `- id:` (or the block's end),
+    comments included, same "comments travel with the value" reasoning as
+    _yaml_block."""
+    lines = block_text.splitlines(keepends=True)
+    start = None
+    for index, line in enumerate(lines):
+        if line.strip() == f"- id: {hook_id}":
+            start = index
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].strip().startswith("- id:"):
+            end = index
+            break
+    return "".join(lines[start:end])
+
+
+def sync_precommit_hooks(config_file: Path, template_text: str, dry_run: bool = False) -> None:
+    """Add solt-pre-commit hooks the template gained after this repo's
+    .pre-commit-config.yaml was first written - without touching anything
+    else already in the file.
+
+    .pre-commit-config.yaml is force-overwritten only on a brand-new repo's
+    first setup; every already-configured repo is regenerated with
+    --update-only --regenerate instead, precisely so a repo's own hook
+    customizations (extra args, a locally re-added solt-check-branch, a
+    pinned rev override) are never silently discarded on a routine refresh.
+    That safety means the hook list itself freezes at whatever the template
+    offered when the repo was first set up - a hook the template gains
+    later never reaches an already-configured repo on its own (solt-suite
+    never got solt-check-requirements or solt-test-changed-modules this
+    way, despite both existing in the template for a long time). This
+    closes that gap the same way refresh_solt_hooks() closes it for
+    .solt-hooks.yaml: the template supplies new structure, the repo keeps
+    everything it already has - this only ever adds hook entries, never
+    removes or reorders one.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return
+
+    current_text = config_file.read_text()
+    try:
+        current = yaml.safe_load(current_text) or {}
+        template = yaml.safe_load(template_text) or {}
+    except yaml.YAMLError as exc:
+        print_step("⚠️ ", f"Leaving {config_file.name} alone, it does not parse: {exc}")
+        return
+
+    def _solt_entry(parsed):
+        for entry in parsed.get("repos") or []:
+            repo_key = entry.get("repo")
+            if repo_key == SOLT_REPO_URL or repo_key == "local":
+                return repo_key, entry
+        return None, None
+
+    current_key, current_entry = _solt_entry(current)
+    template_key, template_entry = _solt_entry(template)
+    if not current_entry or not template_entry or current_key != template_key:
+        # Different repo family (e.g. this repo uses the "local" monorepo
+        # variant but template_text is the remote one) - comparing hook ids
+        # across the two would be meaningless. Caller picks the matching
+        # template variant; nothing to do if it still doesn't match.
+        return
+
+    current_ids = {h.get("id") for h in (current_entry.get("hooks") or [])}
+    template_ids = [h.get("id") for h in (template_entry.get("hooks") or [])]
+    missing = [hook_id for hook_id in template_ids if hook_id not in current_ids]
+    if not missing:
+        return
+
+    current_range = _repo_block(current_text, current_key)
+    template_range = _repo_block(template_text, template_key)
+    if not current_range or not template_range:
+        print_step(
+            "⚠️ ",
+            f"Could not locate the solt-pre-commit hooks block in {config_file.name} - "
+            f"add manually: {', '.join(missing)}",
+        )
+        return
+
+    template_lines = template_text.splitlines(keepends=True)
+    template_block = "".join(template_lines[template_range[0] : template_range[1]])
+
+    added = []
+    new_blocks = []
+    for hook_id in missing:
+        hook_block = _hook_block(template_block, hook_id)
+        if hook_block is None:
+            continue
+        new_blocks.append(hook_block)
+        added.append(hook_id)
+
+    if not added:
+        return
+
+    current_lines = current_text.splitlines(keepends=True)
+    insert_at = current_range[1]
+    # Back up over trailing blank lines so new hooks land right after the
+    # last existing one in this block, not after a blank-line gap that
+    # precedes the next repo entry.
+    while insert_at > current_range[0] and not current_lines[insert_at - 1].strip():
+        insert_at -= 1
+
+    merged = "".join(current_lines[:insert_at]) + "".join(new_blocks) + "".join(current_lines[insert_at:])
+
+    if dry_run:
+        print_step("📄", f"Would add to {config_file.name}: {', '.join(added)}")
+        return
+
+    config_file.write_text(merged)
+    print_step("🔄", f"Added missing hook(s) to {config_file.name}: {', '.join(added)}")
+
+
 # The reusable coverage workflow (solt-coverage.yml) always checks Odoo core
 # out itself, via its own dedicated "Checkout Odoo core (public)" step - that
 # is not what sibling-repos is for. If a local workspace happens to have the
@@ -1165,6 +1318,28 @@ def detect_postgres_image(modules: dict[str, dict]) -> str:
             return image
 
     return DEFAULT_POSTGRES_IMAGE
+
+
+def sync_precommit_config(repo_path: Path, dry_run: bool = False) -> None:
+    """Bring an existing repo's .pre-commit-config.yaml hook list up to
+    date, via sync_precommit_hooks(). Called from --update-only
+    --regenerate, alongside generate_workflow_file() - the CI workflow and
+    the local hooks should gain new template capabilities together, not
+    have the workflow auto-regenerate every run while the hooks silently
+    lag behind it indefinitely.
+
+    Tries both known variants (remote repo: for standalone repos, repo:
+    local for monorepo submodules) rather than requiring the caller to
+    know which one this repo uses - sync_precommit_hooks() itself no-ops
+    against whichever variant doesn't match this file's own repo: key, so
+    only the matching one ever has an effect.
+    """
+    config_file = repo_path / ".pre-commit-config.yaml"
+    if not config_file.exists():
+        return
+    for template_src, _dest, _description in (PRECOMMIT_REMOTE, PRECOMMIT_LOCAL):
+        if template_src.exists():
+            sync_precommit_hooks(config_file, template_src.read_text(), dry_run)
 
 
 def generate_workflow_file(
@@ -1492,6 +1667,7 @@ Examples:
                         odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
                         sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
                         generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
+                        sync_precommit_config(repo_path, args.dry_run)
                         update_version_single(repo, args.version, args.dry_run)
                         print_step("✅", f"Regenerated: {repo}")
             elif args.path:
@@ -1500,6 +1676,7 @@ Examples:
                 odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
                 sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
                 generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
+                sync_precommit_config(repo_path, args.dry_run)
                 update_version_single(args.path, args.version, args.dry_run)
                 print_step("✅", f"Regenerated: {args.path}")
             else:
