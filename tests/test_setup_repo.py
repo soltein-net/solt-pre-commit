@@ -504,6 +504,82 @@ class TestSyncPrecommitHooks:
         assert config.read_text() == original
 
 
+class TestCliSubcommands:
+    """The CLI used to be one flat bag of boolean flags dispatched by a
+    hand-written if/elif chain. Two real bugs came from that shape, not
+    just unclear naming: `--regenerate` set without `--update-only` was
+    silently ignored - not an error, not a no-op, but a fall-through into
+    full setup mode's own force-overwrite-by-default behavior - and
+    `--badge-only` / `--inject-badges` were two flags for the identical
+    code path. Subcommands (this class) make an invalid combination a
+    parse error instead of silently running the wrong, more destructive
+    mode.
+    """
+
+    def test_regenerate_without_update_only_prefix_is_now_a_hard_error(self, monkeypatch):
+        """The exact footgun this fixes: what used to be spelled
+        `--update-only --regenerate` is now just `regenerate` - the old
+        spelling must fail loudly, not fall through to `setup`."""
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "--update-only", "--regenerate", "/tmp/some-repo"])
+        with pytest.raises(SystemExit):
+            setup_repo.main()
+
+    def test_no_subcommand_is_a_hard_error(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["setup-repo.py"])
+        with pytest.raises(SystemExit):
+            setup_repo.main()
+
+    def test_path_and_batch_together_is_a_hard_error(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "setup", "/tmp/some-repo", "--batch", "repos.txt"])
+        with pytest.raises(SystemExit):
+            setup_repo.main()
+
+    def test_neither_path_nor_batch_is_a_hard_error(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "regenerate"])
+        with pytest.raises(SystemExit):
+            setup_repo.main()
+
+    def test_regenerate_dispatches_workflow_generation_hook_sync_and_version_stamp(self, monkeypatch, tmp_path):
+        """The single-repo `regenerate` path must call all three steps that
+        used to require both --update-only and --regenerate together."""
+        calls = []
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "regenerate", str(tmp_path), "--dry-run"])
+        monkeypatch.setattr(setup_repo, "detect_modules", lambda repo_path: {})
+        monkeypatch.setattr(setup_repo, "detect_odoo_version_from_branch", lambda repo_path=None: "19.0")
+        monkeypatch.setattr(setup_repo, "detect_sibling_repos", lambda modules, repo_path: [])
+        monkeypatch.setattr(
+            setup_repo, "generate_workflow_file", lambda *a, **k: calls.append("generate_workflow_file") or True
+        )
+        monkeypatch.setattr(setup_repo, "sync_precommit_config", lambda *a, **k: calls.append("sync_precommit_config"))
+        monkeypatch.setattr(setup_repo, "update_version_single", lambda *a, **k: calls.append("update_version_single"))
+
+        setup_repo.main()
+
+        assert calls == ["generate_workflow_file", "sync_precommit_config", "update_version_single"]
+
+    def test_setup_scope_flag_writes_to_validation_scope_not_a_generic_scope(self, monkeypatch, tmp_path):
+        """--validation-scope (renamed from the old --scope) must reach
+        setup_single_repo's own `scope` parameter unchanged - it configures
+        .solt-hooks.yaml's validation_scope, a different concept from the
+        generated CI workflow's own Test/Validation `scope` input."""
+        captured = {}
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "setup", str(tmp_path), "--validation-scope", "full"])
+        monkeypatch.setattr(setup_repo, "setup_single_repo", lambda **kwargs: captured.update(kwargs) or True)
+
+        setup_repo.main()
+
+        assert captured["scope"] == "full"
+
+    def test_no_overwrite_flag_maps_to_force_false(self, monkeypatch, tmp_path):
+        captured = {}
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "setup", str(tmp_path), "--no-overwrite"])
+        monkeypatch.setattr(setup_repo, "setup_single_repo", lambda **kwargs: captured.update(kwargs) or True)
+
+        setup_repo.main()
+
+        assert captured["force"] is False
+
+
 
 
 class TestDetectPostgresImage:
