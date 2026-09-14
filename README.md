@@ -317,15 +317,29 @@ costs nothing meaningful and keeps `Badges`' other inputs
 (`solt-check-errors`/`pylint-changed`/`ruff-changed`) genuinely computed rather than defaulted. Run
 `setup-repo.py regenerate` against an already-configured repo to pick this up.
 
-**`Test` always runs on push, even if `Validation` fails.** `Validation`'s own `fail-on-warnings`/
-`pylint-blocking` are non-blocking on push, but `severity: error` checks are always blocking
-regardless of that setting - a full-scope scan can surface pre-existing *errors* just as easily as
-warnings (e.g. `python_tracking_without_mail_thread` on old code no recent PR touched). A plain
-`needs: Validation` would silently skip `Test` outright whenever that happens, discarding the one
-signal this whole pattern exists to produce post-merge - real, full-scope coverage/test-pass data -
-over an unrelated lint issue. `Test`'s generated `if:` explicitly bypasses that default "needs must
-succeed" gate for `push` only; the `pull_request` gate (Test only runs once Validation succeeds, the
-real per-PR merge gate) is unchanged.
+**Test runs regardless of `Validation`'s outcome on push, via a separate job, not a wider `if:`.**
+`Validation`'s own `fail-on-warnings`/`pylint-blocking` are non-blocking on push, but `severity:
+error` checks are always blocking regardless of that setting - a full-scope scan can surface
+pre-existing *errors* just as easily as warnings (e.g. `python_tracking_without_mail_thread` on old
+code no recent PR touched). A plain `needs: Validation` would silently skip `Test` outright whenever
+that happens, discarding the one signal this whole pattern exists to produce post-merge - real,
+full-scope coverage/test-pass data - over an unrelated lint issue.
+
+The fix is **not** `Test`'s own `if:` referencing `needs.Validation.result` (tried first, and it does
+not work reliably): a job's `needs` dependency on another job that itself calls a reusable workflow
+(like `Validation` does) does not reliably expose that job's outcome to `needs.<job>.result` /
+`success()` / `failure()` in a downstream job's `if:` - GitHub evaluates the reusable workflow's
+*internal* jobs, not the calling job as one opaque unit, and that internal state can leak into an
+unwanted skip regardless of `always()` (see
+[community discussion #189172](https://github.com/orgs/community/discussions/189172) and
+[#72708](https://github.com/orgs/community/discussions/72708) for other reports of the same class of
+bug). Instead, the generated workflow has **two separate jobs**: `Test` (`pull_request` only, `needs:
+Validation`, unchanged - Test only runs once Validation succeeds, the real per-PR merge gate) and
+`TestPostMerge` (`push` only, no `needs:` at all - nothing about `Validation`'s internal job structure
+can propagate into a job that was never made to depend on it). `Badges` reads whichever one actually
+ran (`needs.Test.outputs.test-result || needs.TestPostMerge.outputs.test-result` - GitHub Actions
+expressions treat an empty string as falsy, so this correctly falls through to whichever job produced
+a real value).
 
 ### Pre-Push Test Blocking
 
