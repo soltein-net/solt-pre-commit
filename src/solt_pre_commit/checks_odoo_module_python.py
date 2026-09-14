@@ -432,9 +432,7 @@ class ChecksOdooModulePython:
         # which file defines which link in the chain. Only models with a
         # `_name` are registrable targets; a plain `_inherit`-only extension
         # doesn't introduce a new resolvable name.
-        self._name_to_model: Dict[str, dict] = {
-            mi["_name"]: mi for mi in self.all_models.values() if mi.get("_name")
-        }
+        self._name_to_model: Dict[str, dict] = {mi["_name"]: mi for mi in self.all_models.values() if mi.get("_name")}
 
     def _parse_python_file(self, manifest_data: dict):
         """Parse a Python file and extract information."""
