@@ -76,6 +76,25 @@ on:
         required: false
         type: string
         default: 'full'
+      shards:
+        description: |
+          Number of parallel shards to split `modules` across (default 1 - no
+          sharding, today's behavior unchanged for any caller that doesn't set
+          this). Each shard pays this job's own fixed checkout/install
+          overhead independently (more total billed minutes), in exchange for
+          wall-clock roughly divided by N (a 146-module, ~2.5h full-scope run
+          split 8 ways is ~20 extra minutes of overhead for a ~20-minute wait
+          instead of ~2.5 hours). Modules are distributed round-robin across
+          shards (module i -> shard i % shards), not contiguous blocks - a
+          contiguous split would put an entire large module family (e.g. a
+          ~40-module l10n_*_edi family) in one or two shards, creating a
+          straggler that dominates wall-clock regardless of shard count.
+          Round-robin is a first approximation until real per-module timing
+          (see odoo_test_runner's odoo.modules.loading:INFO telemetry) is
+          available to rebalance by actual cost instead.
+        required: false
+        type: string
+        default: '1'
     secrets:
       CHECKOUT_TOKEN:
         description: 'Token with read access to sibling-repos. Only needed when sibling-repos is set.'
@@ -83,15 +102,44 @@ on:
     outputs:
       test-result:
         description: 'Test result: "0" (pass) or a nonzero exit code (fail)'
-        value: ${{ jobs.Coverage.outputs.test_result }}
+        value: ${{ jobs.Combine.outputs.test_result }}
       coverage-pct:
         description: 'Coverage percentage (integer, e.g. "40")'
-        value: ${{ jobs.Coverage.outputs.coverage_pct }}
+        value: ${{ jobs.Combine.outputs.coverage_pct }}
 
 env:
   SOLT_PRE_COMMIT_VERSION: v1.5.4
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # PLAN - computes the shard index list Coverage's matrix reads. Always runs
+  # (no `if:`), cheap (no checkout, pure arithmetic) - a static
+  # `matrix: shard: [0, 1, ..., N-1]` can't be written directly since `shards`
+  # is a runtime input, not a literal; GitHub Actions matrices only accept a
+  # literal list or `fromJSON(<a job output's actual JSON string>)`, so
+  # something has to produce that JSON first. Deliberately its own job, not
+  # folded into Detect - Detect only runs for scope='changed' (its own `if:`
+  # skips it for scope='full'), but sharding applies to full-scope runs too,
+  # so the shard list has to come from a job that always runs regardless of
+  # scope.
+  # ---------------------------------------------------------------------------
+  Plan:
+    name: Plan shard matrix
+    runs-on: ubuntu-latest
+    outputs:
+      shard-list: ${{ steps.plan.outputs.shard-list }}
+    steps:
+      - name: Compute shard list
+        id: plan
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          python3 -c "
+          import json, os
+          n = int(os.environ['SHARDS'])
+          print('shard-list=' + json.dumps(list(range(n))))
+          " >> "$GITHUB_OUTPUT"
+
   # ---------------------------------------------------------------------------
   # DETECT - scope='changed' only: is there anything at all worth spinning up
   # Coverage for? GitHub Actions provisions a job's `services:` containers (and
@@ -166,7 +214,7 @@ jobs:
 
   Coverage:
     name: Run tests + coverage
-    needs: Detect
+    needs: [ Detect, Plan ]
     # always() is required here, not optional: a bare `if:` (without always(),
     # success(), failure(), or cancelled()) is implicitly ANDed with success()
     # by GitHub Actions, and a *skipped* needs job does not count as
@@ -177,6 +225,10 @@ jobs:
     # running solt-suite's real post-merge push (scope='full') end to end and
     # finding this job never even started, coverage_pct always empty.
     if: always() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.Plan.outputs.shard-list) }}
     runs-on: ubuntu-latest
     outputs:
       test_result: ${{ steps.test.outputs.result }}
@@ -374,6 +426,8 @@ jobs:
           MODULES: ${{ inputs.modules }}
           SOLT_ODOO_VERSION: ${{ inputs.odoo-version }}
           SCOPE: ${{ inputs.scope }}
+          SHARDS: ${{ inputs.shards }}
+          SHARD_INDEX: ${{ matrix.shard }}
         run: |
           # solt-test-module (odoo_test_runner.py) requires a conf file to
           # exist at .devcontainer/dev_<major>/odoo.conf before it will run
@@ -469,6 +523,23 @@ jobs:
             fi
           fi
 
+          # shards > 1: further narrow MODULES_CSV to just this matrix leg's
+          # share, round-robin (module i -> shard i % SHARDS) - see the
+          # `shards` input's own description for why round-robin over
+          # contiguous blocks. A no-op when SHARDS=1 (every module's index
+          # modulo 1 is 0, so shard 0 keeps everything) - the common,
+          # unsharded case is exactly today's behavior, just routed through
+          # the same code path instead of a separate one.
+          if [ "$SHARDS" -gt 1 ]; then
+            MODULES_CSV=$(python3 -c "
+          import os
+          modules = '$MODULES_CSV'.split(',')
+          shard, shards = int(os.environ['SHARD_INDEX']), int(os.environ['SHARDS'])
+          print(','.join(m for i, m in enumerate(modules) if i % shards == shard))
+          ")
+            echo "Shard $SHARD_INDEX/$SHARDS: testing $MODULES_CSV"
+          fi
+
           # DB_HOST/DB_PORT/DB_USER/DB_PASSWORD are not set here - SoltConfig's
           # own defaults (localhost/5432/odoo/odoo) already match the postgres
           # service above exactly. Scratch-DB create/drop is now handled
@@ -485,11 +556,33 @@ jobs:
           # for modules that were actually well covered. Written before
           # solt-test-module runs, so it's captured even if the step then fails.
           echo "modules-tested=$MODULES_CSV" >> "$GITHUB_OUTPUT"
+
+          # Also written as plain files, not just GITHUB_OUTPUT: this step's
+          # own `steps.test.outputs.*` only feeds THIS matrix leg's own,
+          # single-leg Coverage report step below - a matrix job's outputs at
+          # the *job* level are last-leg-wins (see this repo's own README on
+          # solt-pre-commit's per-Python-version test badges for the same
+          # caveat), not reliable for the Combine job below to read every
+          # shard's result from. Uploaded as part of this shard's artifact
+          # instead, one file per shard, so Combine can read all of them.
+          mkdir -p shard-output
+          echo -n "$MODULES_CSV" > shard-output/modules-tested.txt
+
+          # COVERAGE_FILE: each shard writes its own, uniquely-named data
+          # file - shards run on separate runners, so there's no actual
+          # collision risk within one run, but an explicit, predictable name
+          # is what Combine downloads and passes to `coverage combine`
+          # afterwards, rather than relying on `coverage combine`'s own
+          # directory-scanning heuristics (which look for a specific
+          # parallel-mode suffix pattern that a plain default `.coverage`
+          # file downloaded into a shard-named subdirectory may not match).
+          export COVERAGE_FILE="$PWD/shard-output/.coverage.shard${SHARD_INDEX}"
           set +e
           solt-test-module "$MODULES_CSV" --addons-path "$ADDONS_PATH" --config repo/.solt-hooks.yaml 2>&1 | tee test_output.txt
           RESULT=${PIPESTATUS[0]}
           set -e
           echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo -n "$RESULT" > shard-output/result.txt
           exit "$RESULT"
 
       - name: Coverage report
@@ -499,7 +592,18 @@ jobs:
           MODULES: ${{ inputs.modules }}
           MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
           SKIPPED: ${{ steps.test.outputs.skipped }}
+          SHARD_INDEX: ${{ matrix.shard }}
         run: |
+          # This shard's own data file, same COVERAGE_FILE the "Run tests"
+          # step wrote to - env vars set with `export` there don't survive
+          # into this separate step's own shell, so it has to be repeated
+          # here. This step's own report is this *shard's* subset only,
+          # informational (visible per-shard in the run's summary/artifacts) -
+          # the authoritative, whole-repo-or-whole-scope number comes from the
+          # Combine job below, which downloads every shard's data file and
+          # runs `coverage combine` across all of them.
+          export COVERAGE_FILE="$PWD/shard-output/.coverage.shard${SHARD_INDEX}"
+
           # scope=changed found nothing to test at all (see the "Run tests" step) -
           # nothing ran, so there is no trace data to report. Reporting one anyway
           # would compute 0% against every declared module (none of them loaded),
@@ -557,6 +661,162 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-html-${{ github.run_id }}
+          # Shard-suffixed - with shards > 1, every matrix leg would otherwise
+          # try to upload an artifact with the exact same name
+          # (coverage-html-<run_id>), which actions/upload-artifact@v4
+          # rejects as a duplicate (unlike v3, it does not silently merge or
+          # overwrite). A no-op naming-wise when shards=1 (one leg, one name,
+          # same as before).
+          name: coverage-html-${{ github.run_id }}-shard${{ matrix.shard }}
           path: htmlcov/
+          retention-days: 30
+
+      - name: Upload shard data for Combine
+        # Not gated on always() the same way as the HTML upload above:
+        # nothing to upload at all when this shard's "Run tests" step exited
+        # early via the scope=changed/no-changes safety net (see that step's
+        # own comment) - shard-output/ is never created in that case. Combine
+        # already treats "no shard artifacts at all" as its own skip case,
+        # matching this job's own if: always() && (...) skip semantics one
+        # level up.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-data-${{ matrix.shard }}
+          path: shard-output/
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # COMBINE - merges every shard's coverage data + pass/fail into the one
+  # test-result/coverage-pct this reusable workflow actually promises callers
+  # (see on.workflow_call.outputs at the top). Always its own job, even when
+  # shards=1 (one shard, one artifact) - keeps a single code path instead of
+  # "sharded" and "unsharded" behaving differently, and Coverage's own
+  # per-matrix-leg `outputs:` are last-leg-wins across a real matrix (multiple
+  # legs setting the same job-level output name is not reliable - GitHub
+  # Actions keeps whichever leg happens to finish last), so something has to
+  # read every shard's own result from a side channel (the uploaded
+  # artifacts) regardless of shard count.
+  #
+  # needs: [ Detect, Coverage ] + if: always() is deliberate, same reasoning
+  # as Coverage's own if: above it: Coverage can legitimately be skipped
+  # entirely (Detect said should-skip=true), and a bare `if:` here would
+  # silently skip this job too the same way Coverage itself did before that
+  # bug was found and fixed - always() is not optional on any job whose
+  # `needs` can be skipped, not just failed.
+  # ---------------------------------------------------------------------------
+  Combine:
+    name: Combine shard results
+    needs: [ Detect, Coverage ]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      test_result: ${{ steps.combine.outputs.test_result }}
+      coverage_pct: ${{ steps.combine.outputs.coverage_pct }}
+    steps:
+      - name: Download every shard's data
+        # continue-on-error, not gating this job on the download succeeding:
+        # a pattern matching zero artifacts (Coverage was entirely skipped,
+        # or every shard's own "nothing to test" safety net fired) is a real,
+        # valid outcome here, not a failure - the combine step below checks
+        # for "no shard directories found" itself and reports the same
+        # skipped/unknown result Coverage's own report step would have.
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-data-*
+          path: shard-artifacts
+          merge-multiple: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install coverage
+        run: pip install coverage
+
+      - name: Combine shard data and report
+        id: combine
+        run: |
+          python3 - <<'PYEOF'
+          import glob
+          import json
+          import os
+          import subprocess
+          import sys
+
+          def write_output(**kwargs):
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  for key, value in kwargs.items():
+                      f.write(f"{key}={value}\n")
+
+          shard_dirs = sorted(d for d in glob.glob("shard-artifacts/*/") if os.path.isdir(d))
+          if not shard_dirs:
+              print("No shard data found (Coverage was skipped, or every shard found nothing "
+                    "to test) - nothing to combine, reporting a pass with no coverage data.")
+              write_output(test_result="0", coverage_pct="")
+              sys.exit(0)
+
+          modules = set()
+          overall_result = 0
+          data_files = []
+          for shard_dir in shard_dirs:
+              modules_tested_path = os.path.join(shard_dir, "modules-tested.txt")
+              result_path = os.path.join(shard_dir, "result.txt")
+              if os.path.exists(modules_tested_path):
+                  with open(modules_tested_path) as f:
+                      modules.update(m for m in f.read().split(",") if m)
+              if os.path.exists(result_path):
+                  with open(result_path) as f:
+                      if f.read().strip() != "0":
+                          overall_result = 1
+              # Explicit glob, not a bare directory arg to `coverage combine` -
+              # coverage.py's own directory-scanning combine logic looks for a
+              # specific parallel-mode suffix pattern; being explicit about
+              # which files these are removes any doubt it will find them.
+              data_files.extend(glob.glob(os.path.join(shard_dir, ".coverage.*")))
+
+          print(f"{len(shard_dirs)} shard(s), modules tested: {','.join(sorted(modules)) or '<none>'}")
+          print(f"Overall result: {overall_result} ({'pass' if overall_result == 0 else 'fail'})")
+          write_output(test_result=str(overall_result))
+
+          if not data_files:
+              print("No coverage data files among the shard artifacts - reporting coverage as unknown, not 0%.")
+              write_output(coverage_pct="")
+              sys.exit(0)
+
+          subprocess.run(["coverage", "combine", *data_files], check=True)
+          include = ",".join(f"*/{m}/*" for m in sorted(modules))
+          report = subprocess.run(
+              ["coverage", "report", f"--include={include}"], check=False, capture_output=True, text=True
+          )
+          print(report.stdout)
+          subprocess.run(["coverage", "html", f"--include={include}", "-d", "htmlcov"], check=False)
+          subprocess.run(["coverage", "json", f"--include={include}", "-o", "coverage.json"], check=False)
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a") as f:
+                  f.write(f"## Combined Coverage Report ({len(shard_dirs)} shard(s), {len(modules)} module(s))\n\n")
+                  f.write(f"```\n{report.stdout}```\n")
+
+          try:
+              with open("coverage.json") as f:
+                  pct = round(json.load(f)["totals"]["percent_covered"])
+              write_output(coverage_pct=str(pct))
+          except Exception as exc:
+              print(f"::warning::Could not parse coverage.json ({exc}) - reporting coverage as unknown, not 0%")
+              write_output(coverage_pct="")
+          PYEOF
+
+      - name: Upload combined HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-combined-${{ github.run_id }}
+          path: htmlcov/
+          if-no-files-found: ignore
           retention-days: 30
