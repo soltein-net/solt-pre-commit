@@ -1499,239 +1499,196 @@ def inject_badges_to_readme(
         return False
 
 
+def _add_path_or_batch(subparser: argparse.ArgumentParser) -> None:
+    """A subcommand operates on exactly one repo (positional `path`) or a
+    list of them (`--batch FILE`) - never both, never neither. A required
+    mutually exclusive group enforces that directly instead of the
+    hand-written `parser.error(...)` checks every mode used to repeat."""
+    group = subparser.add_mutually_exclusive_group(required=True)
+    group.add_argument("path", nargs="?", help="Path to the target repository")
+    group.add_argument("--batch", metavar="FILE", help="File with a list of repository paths (one per line)")
+
+
+def _add_dry_run(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
+
+
 def main() -> None:
-    """Main entry point."""
+    """Main entry point.
+
+    One subcommand per mode, each with only the options that apply to it -
+    replaces a single flat flag bag where every mode was a boolean checked
+    in a hardcoded if/elif chain. That shape had two real problems, not just
+    unclear naming: `--regenerate` set without `--update-only` was silently
+    ignored - not an error, not a no-op, but a fall-through into full setup
+    mode's own force-overwrite-by-default behavior - and `--badge-only` /
+    `--inject-badges` were two flags for the exact same code path. Subcommands
+    make an invalid combination a parse error instead of a silent wrong mode.
+    """
     parser = argparse.ArgumentParser(
-        description="Setup solt-pre-commit in client repositories",
+        description="Setup and maintain solt-pre-commit in client repositories",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Full setup (single repo)
-  python setup-repo.py /path/to/solt-budget
-  python setup-repo.py /path/to/solt-budget --scope full
-  python setup-repo.py /path/to/solt-budget --odoo-version 18.0
-  python setup-repo.py /path/to/solt-budget --dry-run
+  python setup-repo.py setup /path/to/solt-budget
+  python setup-repo.py setup /path/to/solt-budget --validation-scope full
+  python setup-repo.py setup /path/to/solt-budget --odoo-version 18.0
+  python setup-repo.py setup /path/to/solt-budget --dry-run
+  python setup-repo.py setup /path/to/solt-addons --local   # monorepo submodule
 
   # Full setup (batch)
-  python setup-repo.py --batch repos.txt
-  python setup-repo.py --batch repos.txt --dry-run
+  python setup-repo.py setup --batch repos.txt
 
-  # Update version only (doesn't copy files)
-  python setup-repo.py --update-only /path/to/solt-budget
-  python setup-repo.py --update-only --batch repos.txt
-  python setup-repo.py --update-only --batch repos.txt --version v1.0.1
+  # Regenerate the CI workflow + sync missing pre-commit hooks + stamp the
+  # current version, for a repo already set up (never force-overwrites
+  # .pre-commit-config.yaml/.solt-hooks.yaml - only adds what's missing)
+  python setup-repo.py regenerate /path/to/solt-budget
+  python setup-repo.py regenerate --batch repos.txt
+
+  # Update only the version pin, nothing else
+  python setup-repo.py update-version /path/to/solt-budget
+  python setup-repo.py update-version --batch repos.txt --version v1.0.1
+
+  # Badges
+  python setup-repo.py badges /path/to/repo
 
   # Pre-commit maintenance
-  python setup-repo.py --clean                           # Clean global cache
-  python setup-repo.py --reinstall-hooks /path/to/repo   # Reinstall hooks
-  python setup-repo.py --reinstall-hooks --batch repos.txt
-  python setup-repo.py --autoupdate /path/to/repo        # Run autoupdate
-  python setup-repo.py --autoupdate --batch repos.txt
-
-  # Monorepo setup
-  python setup-repo.py /path/to/solt-addons --local
+  python setup-repo.py clean-cache
+  python setup-repo.py reinstall-hooks /path/to/repo
+  python setup-repo.py reinstall-hooks --batch repos.txt
+  python setup-repo.py autoupdate /path/to/repo
+  python setup-repo.py autoupdate --batch repos.txt
         """,
     )
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    parser.add_argument(
-        "path",
-        nargs="?",
-        help="Path to the target repository (single mode)",
-    )
-    parser.add_argument(
-        "--batch",
-        metavar="FILE",
-        help="File with list of repository paths (one per line)",
-    )
-    parser.add_argument(
-        "--scope",
+    setup_parser = subparsers.add_parser("setup", help="Full setup: copy templates, detect modules, generate CI workflow")
+    _add_path_or_batch(setup_parser)
+    setup_parser.add_argument(
+        "--validation-scope",
         choices=["changed", "full"],
         default="changed",
-        help="Validation scope (default: changed)",
+        help="Local validation scope written into .solt-hooks.yaml (default: changed) - "
+        "unrelated to the generated CI workflow's own Test/Validation scope",
     )
-    parser.add_argument(
-        "--odoo-version",
-        choices=["auto", "17.0", "18.0", "19.0"],
-        default="auto",
-        help="Odoo version (default: auto)",
+    setup_parser.add_argument(
+        "--odoo-version", choices=["auto", "17.0", "18.0", "19.0"], default="auto", help="Odoo version (default: auto)"
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be done without making changes",
+    setup_parser.add_argument("--local", action="store_true", help="Use local hooks config (for monorepo submodules)")
+    setup_parser.add_argument(
+        "--no-overwrite", action="store_true", help="Skip files that already exist instead of overwriting them"
     )
-    parser.add_argument(
-        "--local",
-        action="store_true",
-        help="Use local hooks config (for monorepo)",
-    )
-    parser.add_argument(
-        "--no-force",
-        action="store_true",
-        help="Don't overwrite existing files",
-    )
+    _add_dry_run(setup_parser)
 
-    # Update-only mode
-    parser.add_argument(
-        "--update-only",
-        action="store_true",
-        help="Only update version references (don't copy files)",
+    regenerate_parser = subparsers.add_parser(
+        "regenerate",
+        help="Regenerate the CI workflow, sync missing pre-commit hooks, and stamp the current version "
+        "for an already-configured repo",
     )
-    parser.add_argument(
-        "--version",
-        default=CURRENT_VERSION,
-        help=f"Version to set (default: {CURRENT_VERSION})",
-    )
+    _add_path_or_batch(regenerate_parser)
+    regenerate_parser.add_argument("--version", default=CURRENT_VERSION, help=f"Version to set (default: {CURRENT_VERSION})")
+    _add_dry_run(regenerate_parser)
 
-    # Pre-commit maintenance
-    parser.add_argument(
-        "--clean",
-        action="store_true",
-        help="Clean global pre-commit cache",
+    update_version_parser = subparsers.add_parser("update-version", help="Update only the solt-pre-commit version pin")
+    _add_path_or_batch(update_version_parser)
+    update_version_parser.add_argument(
+        "--version", default=CURRENT_VERSION, help=f"Version to set (default: {CURRENT_VERSION})"
     )
-    parser.add_argument(
-        "--reinstall-hooks",
-        action="store_true",
-        help="Reinstall pre-commit hooks",
-    )
-    parser.add_argument(
-        "--autoupdate",
-        action="store_true",
-        help="Run pre-commit autoupdate for solt-pre-commit",
-    )
+    _add_dry_run(update_version_parser)
 
-    # New in v1.1.0: Auto-detection and generation
-    parser.add_argument(
-        "--regenerate",
-        action="store_true",
-        help="Regenerate workflow file from detected modules (with --update-only)",
+    badges_parser = subparsers.add_parser("badges", help="Inject/refresh badges in a repo's README")
+    badges_parser.add_argument("path", help="Path to the target repository")
+    badges_parser.add_argument(
+        "--gist-id", default="147d543a086f6735d1ffa02172766e86", help="GitHub Gist ID for badges (default: SolteinCorp gist)"
     )
-    parser.add_argument(
-        "--badge-only",
-        action="store_true",
-        help="Only inject/create badges in README (no other setup)",
-    )
-    parser.add_argument(
-        "--inject-badges",
-        action="store_true",
-        help="Inject badges into existing README",
-    )
-    parser.add_argument(
-        "--gist-id",
-        default="147d543a086f6735d1ffa02172766e86",
-        help="GitHub Gist ID for badges (default: SolteinCorp gist)",
-    )
-    parser.add_argument(
-        "--gist-owner",
-        default="SolteinCorp",
-        help="GitHub Gist owner (default: SolteinCorp)",
-    )
+    badges_parser.add_argument("--gist-owner", default="SolteinCorp", help="GitHub Gist owner (default: SolteinCorp)")
+    _add_dry_run(badges_parser)
+
+    reinstall_parser = subparsers.add_parser("reinstall-hooks", help="Reinstall pre-commit hooks")
+    _add_path_or_batch(reinstall_parser)
+    _add_dry_run(reinstall_parser)
+
+    autoupdate_parser = subparsers.add_parser("autoupdate", help="Run pre-commit autoupdate for solt-pre-commit")
+    _add_path_or_batch(autoupdate_parser)
+    _add_dry_run(autoupdate_parser)
+
+    clean_parser = subparsers.add_parser("clean-cache", help="Clean the global pre-commit cache")
+    _add_dry_run(clean_parser)
 
     args = parser.parse_args()
 
-    # Handle global clean (no path required)
-    if args.clean:
+    if args.command == "clean-cache":
         run_precommit_clean(args.dry_run)
-        return
 
-    # Handle reinstall-hooks
-    if args.reinstall_hooks:
+    elif args.command == "reinstall-hooks":
         if args.batch:
             reinstall_hooks_batch(args.batch, args.dry_run)
-        elif args.path:
-            reinstall_hooks_single(args.path, args.dry_run)
         else:
-            parser.error("--reinstall-hooks requires a path or --batch")
-        return
+            reinstall_hooks_single(args.path, args.dry_run)
 
-    # Handle autoupdate
-    if args.autoupdate:
+    elif args.command == "autoupdate":
         if args.batch:
             autoupdate_batch(args.batch, args.dry_run)
-        elif args.path:
+        else:
             autoupdate_single(args.path, args.dry_run)
-        else:
-            parser.error("--autoupdate requires a path or --batch")
-        return
 
-    # Handle update-only mode
-    if args.update_only:
-        if args.regenerate:
-            # Update-only with regenerate: update version AND regenerate workflow
-            if args.batch:
-                for repo_line in Path(args.batch).read_text().splitlines():
-                    repo = repo_line.strip()
-                    if repo and not repo.startswith("#"):
-                        repo_path = Path(repo).resolve()
-                        modules = detect_modules(repo_path)
-                        odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
-                        sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
-                        generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
-                        sync_precommit_config(repo_path, args.dry_run)
-                        update_version_single(repo, args.version, args.dry_run)
-                        print_step("✅", f"Regenerated: {repo}")
-            elif args.path:
-                repo_path = Path(args.path).resolve()
-                modules = detect_modules(repo_path)
-                odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
-                sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
-                generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
-                sync_precommit_config(repo_path, args.dry_run)
-                update_version_single(args.path, args.version, args.dry_run)
-                print_step("✅", f"Regenerated: {args.path}")
-            else:
-                parser.error("--update-only --regenerate requires a path or --batch")
+    elif args.command == "update-version":
+        if args.batch:
+            update_version_batch(args.batch, args.version, args.dry_run)
         else:
-            # Standard update-only (just version pins)
-            if args.batch:
-                update_version_batch(args.batch, args.version, args.dry_run)
-            elif args.path:
-                update_version_single(args.path, args.version, args.dry_run)
-            else:
-                parser.error("--update-only requires a path or --batch")
-        return
+            update_version_single(args.path, args.version, args.dry_run)
 
-    # Handle badge-only mode (NEW in v1.1.0)
-    if args.badge_only or args.inject_badges:
-        if args.path:
-            inject_badges_to_readme(
-                Path(args.path),
-                Path(args.path).name,
-                github_org="soltein-net",
-                gist_owner=args.gist_owner,
-                gist_id=args.gist_id,
-                odoo_version=detect_odoo_version_from_branch(repo_path=Path(args.path)),
+    elif args.command == "regenerate":
+        repos = []
+        if args.batch:
+            for repo_line in Path(args.batch).read_text().splitlines():
+                repo = repo_line.strip()
+                if repo and not repo.startswith("#"):
+                    repos.append(repo)
+        else:
+            repos.append(args.path)
+        for repo in repos:
+            repo_path = Path(repo).resolve()
+            modules = detect_modules(repo_path)
+            odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
+            sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
+            generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
+            sync_precommit_config(repo_path, args.dry_run)
+            update_version_single(repo, args.version, args.dry_run)
+            print_step("✅", f"Regenerated: {repo}")
+
+    elif args.command == "badges":
+        inject_badges_to_readme(
+            Path(args.path),
+            Path(args.path).name,
+            github_org="soltein-net",
+            gist_owner=args.gist_owner,
+            gist_id=args.gist_id,
+            odoo_version=detect_odoo_version_from_branch(repo_path=Path(args.path)),
+            dry_run=args.dry_run,
+        )
+        print_step("✅", "Badges processed")
+
+    elif args.command == "setup":
+        if args.batch:
+            setup_batch(
+                repos_file=args.batch,
+                scope=args.validation_scope,
                 dry_run=args.dry_run,
+                local=args.local,
+                force=not args.no_overwrite,
+                odoo_version=args.odoo_version,
             )
-            print_step("✅", "Badges processed")
         else:
-            parser.error("--badge-only/--inject-badges requires a path")
-        return
-
-    # Validate arguments for setup mode
-    if args.batch and args.path:
-        parser.error("Cannot use both --batch and a single path")
-    if not args.batch and not args.path:
-        parser.error("Either provide a path or use --batch")
-
-    if args.batch:
-        setup_batch(
-            repos_file=args.batch,
-            scope=args.scope,
-            dry_run=args.dry_run,
-            local=args.local,
-            force=not args.no_force,
-            odoo_version=args.odoo_version,
-        )
-    else:
-        setup_single_repo(
-            target_path=args.path,
-            scope=args.scope,
-            dry_run=args.dry_run,
-            local=args.local,
-            force=not args.no_force,
-            odoo_version=args.odoo_version,
-        )
+            setup_single_repo(
+                target_path=args.path,
+                scope=args.validation_scope,
+                dry_run=args.dry_run,
+                local=args.local,
+                force=not args.no_overwrite,
+                odoo_version=args.odoo_version,
+            )
 
 
 if __name__ == "__main__":

@@ -92,7 +92,7 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
 
 ```bash
 # Setup your Odoo repository (auto-detects modules, dependencies, Odoo version)
-python solt-pre-commit/scripts/setup-repo.py /path/to/your-odoo-repo
+python solt-pre-commit/scripts/setup-repo.py setup /path/to/your-odoo-repo
 
 # Generates:
 # - .github/workflows/solt-validate.yml (auto-filled with detected modules)
@@ -109,20 +109,21 @@ echo /path/to/solt-crm >> repos.txt
 echo /path/to/solt-base >> repos.txt
 
 # Setup all at once
-python solt-pre-commit/scripts/setup-repo.py --batch repos.txt
+python solt-pre-commit/scripts/setup-repo.py setup --batch repos.txt
 ```
 
 ### Update Existing Repos
 
 ```bash
-# Update version pin only
-python solt-pre-commit/scripts/setup-repo.py --update-only --batch repos.txt
+# Update the version pin only, nothing else
+python solt-pre-commit/scripts/setup-repo.py update-version --batch repos.txt
 
-# Regenerate workflows based on current modules
-python solt-pre-commit/scripts/setup-repo.py --update-only --regenerate /path/to/repo
+# Regenerate the CI workflow from current modules, sync any pre-commit hook
+# the repo is missing, and stamp the current version - all three together
+python solt-pre-commit/scripts/setup-repo.py regenerate /path/to/repo
 
 # Inject badges into existing README
-python solt-pre-commit/scripts/setup-repo.py --badge-only /path/to/repo
+python solt-pre-commit/scripts/setup-repo.py badges /path/to/repo
 ```
 
 ### Manual Setup (For Existing Repos)
@@ -150,7 +151,7 @@ If your repo *also* has
 `--local` flag instead:
 
 ```bash
-python solt-pre-commit/scripts/setup-repo.py /path/to/your-odoo-repo --local
+python solt-pre-commit/scripts/setup-repo.py setup /path/to/your-odoo-repo --local
 ```
 
 This copies `templates/.pre-commit-config-local.yaml` instead of the default
@@ -369,7 +370,7 @@ If a push fails:
 git diff --name-only origin/17.0...HEAD
 
 # Run tests manually (same way pre-push does)
-python scripts/setup-repo.py /path/to/repo  # setup if needed
+python scripts/setup-repo.py setup /path/to/repo  # setup if needed
 
 # Run specific module tests
 solt-test-module solt_crm
@@ -626,49 +627,84 @@ solt-check-branch feature/SOLT-123-my-feature
 
 ## 🛠️ Setup Script Commands
 
-The `setup-repo.py` script provides multiple operation modes:
+`setup-repo.py` is a subcommand CLI - each mode is its own subcommand with only
+the options that apply to it, so an invalid combination is a parse error
+instead of silently falling through to a different (and possibly more
+destructive) mode.
 
-### Full Setup (default)
+### `setup` - Full setup
+
+Copies templates, detects modules/dependencies, generates the CI workflow,
+installs hooks. Force-overwrites files that already exist (pass
+`--no-overwrite` to skip them instead) - this is the mode for a repo's
+*first* setup; an already-configured repo should use `regenerate` below.
 
 ```bash
 # Single repo
-python setup-repo.py /path/to/repo
+python setup-repo.py setup /path/to/repo
 
 # Batch setup
-python setup-repo.py --batch repos.txt
+python setup-repo.py setup --batch repos.txt
 
 # With options
-python setup-repo.py /path/to/repo --scope full --odoo-version 18.0
+python setup-repo.py setup /path/to/repo --validation-scope full --odoo-version 18.0
+
+# Monorepo submodule (repo: local instead of a pinned GitHub rev)
+python setup-repo.py setup /path/to/repo --local
 ```
 
-### Update Version Only
+`--validation-scope` sets `.solt-hooks.yaml`'s local `validation_scope` -
+unrelated to the generated CI workflow's own `Test`/`Validation` `scope`
+input, despite the similar name.
+
+### `regenerate` - Refresh an already-configured repo
+
+Regenerates `.github/workflows/solt-validate.yml` from the repo's current
+modules, adds any pre-commit hook the repo is missing (via
+`sync_precommit_hooks()` - never touches hooks the repo already has), and
+stamps the current version - all three together, safe to run repeatedly.
+Never force-overwrites `.pre-commit-config.yaml` or `.solt-hooks.yaml`.
 
 ```bash
-# Update solt-pre-commit version in .pre-commit-config.yaml
-python setup-repo.py --update-only /path/to/repo
-python setup-repo.py --update-only --batch repos.txt
-python setup-repo.py --update-only --batch repos.txt --version v1.0.2
+python setup-repo.py regenerate /path/to/repo
+python setup-repo.py regenerate --batch repos.txt
+python setup-repo.py regenerate /path/to/repo --version v1.6.0
+```
+
+### `update-version` - Update only the version pin
+
+```bash
+python setup-repo.py update-version /path/to/repo
+python setup-repo.py update-version --batch repos.txt
+python setup-repo.py update-version --batch repos.txt --version v1.0.2
+```
+
+### `badges` - Inject/refresh README badges
+
+```bash
+python setup-repo.py badges /path/to/repo
 ```
 
 ### Pre-commit Maintenance
 
 ```bash
 # Clean global pre-commit cache
-python setup-repo.py --clean
+python setup-repo.py clean-cache
 
 # Reinstall hooks in repos
-python setup-repo.py --reinstall-hooks /path/to/repo
-python setup-repo.py --reinstall-hooks --batch repos.txt
+python setup-repo.py reinstall-hooks /path/to/repo
+python setup-repo.py reinstall-hooks --batch repos.txt
 
 # Run autoupdate for solt-pre-commit
-python setup-repo.py --autoupdate /path/to/repo
-python setup-repo.py --autoupdate --batch repos.txt
+python setup-repo.py autoupdate /path/to/repo
+python setup-repo.py autoupdate --batch repos.txt
 ```
 
 ### All Options
 
 ```bash
 python setup-repo.py --help
+python setup-repo.py <command> --help   # e.g. setup-repo.py regenerate --help
 ```
 
 ---

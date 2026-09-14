@@ -166,9 +166,10 @@ git push origin v1.x.0
 ```
 
 1. Everyone consuming this repo picks up the new version by running
-   `setup-repo.py --update-only --batch repos.txt` against their own repos
-   (or `--update-only` for a single repo) - it re-derives the current
-   version from this repo's latest tag and stamps it into each consumer's
+   `setup-repo.py update-version --batch repos.txt` against their own repos
+   (or `setup-repo.py update-version /path/to/repo` for a single one) - it
+   re-derives the current version from this repo's latest tag and stamps
+   it into each consumer's
    `.pre-commit-config.yaml` / `solt-validate.yml`.
 
 2. The CI will automatically create a GitHub release
