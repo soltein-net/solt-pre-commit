@@ -72,37 +72,28 @@ jobs:
       show-info: false
 
   # ---------------------------------------------------------------------------
-  # TEST - Run Odoo module tests with coverage
-  # Runs on Pull Requests (scope=changed) and on push to '{{ ODOO_VERSION }}'
-  # post-merge (scope=full)
+  # TEST - Run Odoo module tests with coverage (pull_request only)
   # Note: Requires modules and sibling-repos to be auto-detected from manifests
   # If tests fail, this job fails and blocks the PR
   #
-  # needs: Validation, gated differently per event - deliberate, not the same rule
-  # both times:
-  # - pull_request: Test only runs once Validation succeeds. Validation is cheap
-  #   (seconds) and already blocks merge on its own, so a PR that fails Validation
-  #   can never merge regardless of Test's result - running the far more expensive
-  #   Test job (DB setup, sibling-repo checkouts, coverage across every module) in
-  #   parallel with a doomed Validation run wastes CI minutes on every validation
-  #   failure, which is common during iterative development.
-  # - push: Test always runs regardless of Validation's outcome. Validation's own
-  #   `fail-on-warnings`/`pylint-blocking` are already non-blocking here (see
-  #   Validation's own comment) specifically so pre-existing debt a full-scope scan
-  #   surfaces doesn't redden this branch - but `severity: error` checks (unlike
-  #   warnings) are *always* blocking regardless of that setting, and a repo can
-  #   easily carry pre-existing *errors* across modules no recent PR touched too
-  #   (e.g. python_tracking_without_mail_thread on old code). Left as a plain
-  #   `needs: Validation` dependency, GitHub Actions skips Test outright whenever
-  #   Validation fails for any reason - silently discarding the one signal this
-  #   job exists to produce post-merge (real, full-scope coverage/test-pass data)
-  #   over an entirely unrelated lint issue. `always()` below bypasses that
-  #   default "needs must succeed" gate for the push case only - the pull_request
-  #   gate above is unaffected.
+  # needs: Validation is deliberate: Validation is cheap (seconds) and already blocks merge
+  # on its own, so a PR that fails Validation can never merge regardless of Test's
+  # result. Running the far more expensive Test job (DB setup, sibling-repo
+  # checkouts, coverage across every module) in parallel with a doomed Validation
+  # run wastes CI minutes on every validation failure. Serializing costs green PRs
+  # Validation's runtime (seconds) in added wall-clock latency, in exchange for
+  # skipping all of Test's runtime (minutes) whenever Validation fails - a clear net
+  # win given Validation failures are common during iterative development. If Validation
+  # is skipped or fails, Test is automatically skipped too (default GitHub
+  # Actions behavior for a job whose `needs` didn't succeed) - no separate
+  # `if` needed here for that.
+  #
+  # This job is pull_request-only on purpose - see TestPostMerge below for why
+  # push doesn't just reuse this one with a wider `if:`.
   # ---------------------------------------------------------------------------
   Test:
     needs: Validation
-    if: always() && (github.event_name == 'push' || (github.event_name == 'pull_request' && needs.Validation.result == 'success'))
+    if: github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
       modules: '{{ MODULES }}'
@@ -110,27 +101,69 @@ jobs:
       odoo-version: '{{ ODOO_VERSION }}'
       python-version: '{{ PYTHON_VERSION }}'
       postgres-image: '{{ POSTGRES_IMAGE }}'
-      # 'changed' on pull_request (most PRs only touch a handful of this
-      # repo's modules - see soltein-net/solt-pre-commit#36 for the
-      # narrowing/fallback/skip logic); 'full' on push (post-merge - one
-      # authoritative whole-repo run per merge instead of per PR-push, feeding
-      # the coverage badge a real full-repo number instead of whatever subset
-      # the last PR happened to touch).
-      scope: ${{ github.event_name == 'push' && 'full' || 'changed' }}
+      # 'changed' - most PRs only touch a handful of this repo's modules -
+      # see soltein-net/solt-pre-commit#36 for the narrowing/fallback/skip logic.
+      scope: 'changed'
+    secrets:
+      CHECKOUT_TOKEN: ${{ secrets.SOLT_CROSS_REPO_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # TEST (POST-MERGE) - Run Odoo module tests with coverage, full scope, on
+  # push to '{{ ODOO_VERSION }}' only
+  #
+  # Deliberately its OWN job with no `needs: Validation` at all, rather than
+  # widening Test's own `if:` to cover push too (e.g. `always() &&
+  # (needs.Validation.result == 'success' || github.event_name == 'push')`) -
+  # tried exactly that first and it does not work reliably: a job's `needs`
+  # dependency on another job that itself calls a reusable workflow (`uses:`,
+  # like Validation above) does not reliably expose that job's outcome to
+  # `needs.<job>.result` / `success()` / `failure()` in a downstream job's own
+  # `if:` - GitHub evaluates the *reusable workflow's internal jobs*, not the
+  # calling job as one opaque unit, and that internal state can "leak" into
+  # this job being skipped regardless of `always()` (see
+  # https://github.com/orgs/community/discussions/189172 and
+  # https://github.com/orgs/community/discussions/72708 for other reports of
+  # the same class of bug). Confirmed the hard way: this repo's own push run
+  # after the `always() && needs.Validation.result == 'success'` version
+  # landed still showed Test's internal Detect/Coverage jobs as "skipped",
+  # despite Validation only failing on real, pre-existing severity:error
+  # issues that should have been irrelevant to the push-side override.
+  #
+  # The fix that's actually reliable: don't depend on Validation's outcome via
+  # `needs` for the push case at all. This job has no `needs:` entry, so
+  # nothing about Validation's internal job structure can propagate into its
+  # own skip/run decision - only `github.event_name` does.
+  # ---------------------------------------------------------------------------
+  TestPostMerge:
+    if: github.event_name == 'push'
+    uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
+    with:
+      modules: '{{ MODULES }}'
+      sibling-repos: '{{ SIBLING_REPOS }}'
+      odoo-version: '{{ ODOO_VERSION }}'
+      python-version: '{{ PYTHON_VERSION }}'
+      postgres-image: '{{ POSTGRES_IMAGE }}'
+      # 'full' - one authoritative whole-repo run per merge instead of per
+      # PR-push, feeding the coverage badge a real full-repo number instead of
+      # whatever subset the last PR happened to touch.
+      scope: 'full'
     secrets:
       CHECKOUT_TOKEN: ${{ secrets.SOLT_CROSS_REPO_TOKEN }}
 
   # ---------------------------------------------------------------------------
   # BADGES - Report Validation and Test results to Gist badges
-  # Runs after Validation and Test (whether they passed or failed), on both
-  # pull_request and push - on push this reports the full-scope post-merge
-  # run's real numbers, not defaults (Validation also runs full-scope on
-  # push, so solt-check-errors/pylint-changed/ruff-changed below are always
-  # genuinely computed this run, never a stale or default value).
+  # Runs after Validation and both Test jobs (whether they passed, failed, or
+  # were skipped), on both pull_request and push - on push this reports the
+  # full-scope post-merge run's real numbers, not defaults (Validation also
+  # runs full-scope on push, so solt-check-errors/pylint-changed/ruff-changed
+  # below are always genuinely computed this run, never a stale or default
+  # value). Exactly one of Test/TestPostMerge ever runs per event (their
+  # `if:` conditions are mutually exclusive on github.event_name), so exactly
+  # one of the two `||` fallbacks below is ever non-empty.
   # ---------------------------------------------------------------------------
   Badges:
     if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
-    needs: [ Validation, Test ]
+    needs: [ Validation, Test, TestPostMerge ]
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-check-badges.yml@{{ SOLT_VERSION }}
     with:
       odoo-version: '{{ ODOO_VERSION }}'
@@ -139,8 +172,8 @@ jobs:
       pylint-blocking: true
       ruff-changed: ${{ needs.Validation.outputs.ruff-changed }}
       ruff-blocking: false
-      test-result: ${{ needs.Test.outputs.test-result }}
-      coverage-pct: ${{ needs.Test.outputs.coverage-pct }}
+      test-result: ${{ needs.Test.outputs.test-result || needs.TestPostMerge.outputs.test-result }}
+      coverage-pct: ${{ needs.Test.outputs.coverage-pct || needs.TestPostMerge.outputs.coverage-pct }}
     secrets:
       GIST_SECRET: ${{ secrets.GIST_SECRET }}
 
