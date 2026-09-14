@@ -60,15 +60,19 @@ on:
             sibling-repo dependency bump) -> falls back to testing the full `modules`
             list, so this never silently skips real testing for an ambiguous diff.
           - the diff touched zero Odoo-module-shaped paths at all (e.g. CI config,
-            docs, non-addon scripts) -> the Test job (and its coverage report) is
-            skipped outright, reported as a pass with no coverage data, since no
+            docs, non-addon scripts) -> the Coverage job never runs at all (see the
+            Detect job above it), reported as a pass with no coverage data, since no
             module's behavior could possibly have changed and testing the full list
-            would be pure cost for a fixed answer.
+            would be pure cost for a fixed answer. This is a job-level skip, not just
+            a fast exit inside it - no Postgres service, no Odoo checkout/install pay
+            their ~4 minutes either, which is what actually mattered for a repo whose
+            own tests, once running, take hours (see solt-suite's own 2h40m incident,
+            entirely paid for a diff that turned out to touch zero modules).
           A repo with many modules in one addon repo (e.g. solt-llm's 24) should set this
           to 'changed' - most PRs there only ever touch 1-3 of them, and this job's own
           checkout/install overhead is fixed regardless of how many modules get tested, so
-          the only thing 'changed' saves is the wasted minutes actually running every
-          *other* module's full test suite for a change that never touched them.
+          the only thing 'changed' saves for a real, module-touching diff is the wasted
+          minutes actually running every *other* module's full test suite.
         required: false
         type: string
         default: 'full'
@@ -88,8 +92,82 @@ env:
   SOLT_PRE_COMMIT_VERSION: v1.5.4
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # DETECT - scope='changed' only: is there anything at all worth spinning up
+  # Coverage for? GitHub Actions provisions a job's `services:` containers (and
+  # this job's own disk-space-free/checkout/Odoo-install steps run) before any
+  # step gets a chance to decide there's nothing to test - the scope='changed'
+  # skip inside "Run tests with coverage" below already avoids the expensive
+  # *test run* for a diff with zero module-shaped changes, but every one of
+  # those runs still paid ~4 minutes of Postgres-service-provisioning +
+  # checkout + Odoo install first, just to reach that decision. This job makes
+  # the same decision with none of that: a plain checkout and a `pip install`
+  # of solt-pre-commit itself (no Odoo, no Postgres, no system build deps -
+  # nothing this repo's manifests declare is needed to run the *detector*,
+  # only to run the tests it might decide to skip). When it says skip, Coverage
+  # below never starts at all - no service container, no disk-space cleanup,
+  # no Odoo checkout, nothing.
+  #
+  # Only meaningful for scope='changed' - scope='full' (default) always tests
+  # everything unconditionally, so there is nothing to detect; this job's own
+  # `if:` skips it outright in that case, and Coverage's `if:` treats a skipped
+  # Detect the same as "nothing to skip", i.e. proceeds exactly as before.
+  # ---------------------------------------------------------------------------
+  Detect:
+    name: Detect whether there is anything to test
+    if: inputs.scope == 'changed'
+    runs-on: ubuntu-latest
+    outputs:
+      should-skip: ${{ steps.detect.outputs.should-skip }}
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          path: repo
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: 'pip'
+
+      - name: Install solt-pre-commit
+        run: pip install "git+https://github.com/soltein-net/solt-pre-commit.git@${SOLT_PRE_COMMIT_VERSION}"
+
+      - name: Detect changed modules
+        id: detect
+        run: |
+          # Same detection as the "Run tests with coverage" step's own
+          # scope='changed' branch below (SoltConfig.changed_detector - self-
+          # heals a shallow clone by fetching the base ref if needed, reads
+          # GITHUB_BASE_REF automatically in this context). Deliberately not
+          # shared as a script file both jobs source - see that step's own
+          # comment for why the `| tail -n 1` matters (debug noise on stdout).
+          CHANGED_MODULES=$(cd repo && python3 -c "
+          from pathlib import Path
+          from solt_pre_commit.checks_odoo_module import _detect_modules_from_paths
+          from solt_pre_commit.config_loader import SoltConfig
+
+          config = SoltConfig('.solt-hooks.yaml')
+          changed = config.changed_detector.get_changed_files()
+          modules = _detect_modules_from_paths(sorted(changed))
+          print(','.join(sorted({Path(m).name for m in modules})))
+          " | tail -n 1)
+          echo "Changed-module detection found: ${CHANGED_MODULES:-<none>}"
+          if [ -n "$CHANGED_MODULES" ]; then
+            # Something changed - whether it matches a declared module or not,
+            # Coverage below needs to run (either to test it, or to fall back
+            # to the full list as its own safety net for an unmatched diff).
+            echo "should-skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should-skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
   Coverage:
     name: Run tests + coverage
+    needs: Detect
+    if: needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true'
     runs-on: ubuntu-latest
     outputs:
       test_result: ${{ steps.test.outputs.result }}
