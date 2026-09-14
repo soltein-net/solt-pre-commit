@@ -317,6 +317,16 @@ costs nothing meaningful and keeps `Badges`' other inputs
 (`solt-check-errors`/`pylint-changed`/`ruff-changed`) genuinely computed rather than defaulted. Run
 `setup-repo.py regenerate` against an already-configured repo to pick this up.
 
+**`Test` always runs on push, even if `Validation` fails.** `Validation`'s own `fail-on-warnings`/
+`pylint-blocking` are non-blocking on push, but `severity: error` checks are always blocking
+regardless of that setting - a full-scope scan can surface pre-existing *errors* just as easily as
+warnings (e.g. `python_tracking_without_mail_thread` on old code no recent PR touched). A plain
+`needs: Validation` would silently skip `Test` outright whenever that happens, discarding the one
+signal this whole pattern exists to produce post-merge - real, full-scope coverage/test-pass data -
+over an unrelated lint issue. `Test`'s generated `if:` explicitly bypasses that default "needs must
+succeed" gate for `push` only; the `pull_request` gate (Test only runs once Validation succeeds, the
+real per-PR merge gate) is unchanged.
+
 ### Pre-Push Test Blocking
 
 When you push, the pre-push hook runs tests. **If tests fail, the push is blocked:**
