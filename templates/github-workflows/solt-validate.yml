@@ -37,7 +37,21 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # push (post-merge full-scope run) groups by commit SHA, not ref - every
+  # push to the same branch has a different SHA, so this group is always
+  # unique and cancel-in-progress never actually cancels anything for push.
+  # Deliberate: a post-merge full-scope run represents one specific merged
+  # commit's own validation result and has standalone value (this is the
+  # authoritative signal solt-suite's TestPostMerge/Badges depend on) - it
+  # must not be thrown away just because another, unrelated merge lands a
+  # minute later. On a repo with an actively-merging team, sharing ref-scoped
+  # groups with pull_request meant every full-scope run raced the *next*
+  # merge and usually lost, cancelled before ever completing (confirmed the
+  # hard way: a 3+ hour solt-suite run was cancelled this way by an unrelated
+  # merge). pull_request keeps its ref-scoped group unchanged - cancelling a
+  # stale run in favor of a newer push to the SAME PR is exactly what you
+  # want during iterative development.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
