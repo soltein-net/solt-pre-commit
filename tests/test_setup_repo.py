@@ -371,6 +371,139 @@ class TestRefreshSoltHooks:
         assert config.read_text() == "odoo_version: [unclosed\n"
 
 
+class TestSyncPrecommitHooks:
+    """.pre-commit-config.yaml is force-overwritten only on a brand-new
+    repo's first setup; every already-configured repo is regenerated with
+    --update-only --regenerate instead, which never touches this file at
+    all - so a hook the template gains later (solt-check-requirements,
+    solt-test-changed-modules) never reaches a repo already set up before
+    it existed. sync_precommit_hooks() closes that gap by adding only the
+    hook entries the repo is missing, never touching or reordering
+    anything already there.
+
+    Real incident this fixes: solt-suite's .pre-commit-config.yaml was
+    missing both solt-check-requirements and solt-test-changed-modules
+    despite both existing in templates/.pre-commit-config.yaml for a long
+    time - --update-only --regenerate had been run against it repeatedly
+    and never added them, because it never looked at this file.
+    """
+
+    REMOTE_TEMPLATE = (
+        "repos:\n"
+        "  - repo: https://github.com/soltein-net/solt-pre-commit\n"
+        "    rev: v1.5.4\n"
+        "    hooks:\n"
+        "      - id: solt-check-odoo\n"
+        "        verbose: true\n"
+        "      - id: solt-check-requirements\n"
+        "        # args: [--fix]  # Uncomment to auto-regenerate instead of just checking\n"
+        "      - id: solt-test-changed-modules\n"
+        "        # Runs Odoo tests for modules changed vs. the base branch.\n"
+        "  - repo: https://github.com/astral-sh/ruff-pre-commit\n"
+        "    rev: v0.15.10\n"
+        "    hooks:\n"
+        "      - id: ruff-check\n"
+    )
+
+    def test_missing_hooks_are_added_after_the_ones_the_repo_already_has(self, tmp_path):
+        config = tmp_path / ".pre-commit-config.yaml"
+        config.write_text(
+            "repos:\n"
+            "  - repo: https://github.com/soltein-net/solt-pre-commit\n"
+            "    rev: v1.5.4\n"
+            "    hooks:\n"
+            "      - id: solt-check-branch\n"
+            "        stages: [ pre-commit, pre-push ]\n"
+            "      - id: solt-check-odoo\n"
+            "        verbose: true\n"
+            "  - repo: https://github.com/astral-sh/ruff-pre-commit\n"
+            "    rev: v0.15.10\n"
+            "    hooks:\n"
+            "      - id: ruff-check\n"
+        )
+
+        setup_repo.sync_precommit_hooks(config, self.REMOTE_TEMPLATE)
+
+        result = config.read_text()
+        assert "solt-check-requirements" in result
+        assert "solt-test-changed-modules" in result
+        # An existing customization the template doesn't even have
+        # (solt-check-branch here) must survive untouched.
+        assert "solt-check-branch" in result
+        # The unrelated ruff-pre-commit block must be untouched, and the
+        # new hooks must land inside the solt-pre-commit block, not after it.
+        assert result.index("solt-test-changed-modules") < result.index("ruff-pre-commit")
+        yaml.safe_load(result)  # still valid YAML
+
+    def test_a_comment_explaining_a_new_hook_travels_with_it(self, tmp_path):
+        config = tmp_path / ".pre-commit-config.yaml"
+        config.write_text(
+            "repos:\n"
+            "  - repo: https://github.com/soltein-net/solt-pre-commit\n"
+            "    rev: v1.5.4\n"
+            "    hooks:\n"
+            "      - id: solt-check-odoo\n"
+        )
+
+        setup_repo.sync_precommit_hooks(config, self.REMOTE_TEMPLATE)
+
+        result = config.read_text()
+        assert "Runs Odoo tests for modules changed vs. the base branch." in result
+
+    def test_nothing_missing_leaves_the_file_byte_for_byte_unchanged(self, tmp_path):
+        config = tmp_path / ".pre-commit-config.yaml"
+        original = (
+            "repos:\n"
+            "  - repo: https://github.com/soltein-net/solt-pre-commit\n"
+            "    rev: v1.5.4\n"
+            "    hooks:\n"
+            "      - id: solt-check-odoo\n"
+            "      - id: solt-check-requirements\n"
+            "      - id: solt-test-changed-modules\n"
+        )
+        config.write_text(original)
+
+        setup_repo.sync_precommit_hooks(config, self.REMOTE_TEMPLATE)
+
+        assert config.read_text() == original
+
+    def test_repo_local_variant_is_never_touched_by_the_remote_template(self, tmp_path):
+        """A monorepo submodule's `repo: local` config must not be compared
+        against the standalone-repo `repo: <github url>` template - the
+        hook id sets look similar but the entry key differs, and mixing
+        them would either no-op forever or, worse, misattribute hooks."""
+        config = tmp_path / ".pre-commit-config.yaml"
+        original = "repos:\n  - repo: local\n    hooks:\n      - id: solt-check-branch\n"
+        config.write_text(original)
+
+        setup_repo.sync_precommit_hooks(config, self.REMOTE_TEMPLATE)
+
+        assert config.read_text() == original
+
+    def test_a_file_that_does_not_parse_is_left_alone(self, tmp_path):
+        config = tmp_path / ".pre-commit-config.yaml"
+        config.write_text("repos: [unclosed\n")
+
+        setup_repo.sync_precommit_hooks(config, self.REMOTE_TEMPLATE)
+
+        assert config.read_text() == "repos: [unclosed\n"
+
+    def test_dry_run_does_not_write(self, tmp_path):
+        config = tmp_path / ".pre-commit-config.yaml"
+        original = (
+            "repos:\n"
+            "  - repo: https://github.com/soltein-net/solt-pre-commit\n"
+            "    rev: v1.5.4\n"
+            "    hooks:\n"
+            "      - id: solt-check-odoo\n"
+        )
+        config.write_text(original)
+
+        setup_repo.sync_precommit_hooks(config, self.REMOTE_TEMPLATE, dry_run=True)
+
+        assert config.read_text() == original
+
+
 
 
 class TestDetectPostgresImage:
