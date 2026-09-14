@@ -108,17 +108,28 @@ class OdooFieldVisitor(ast.NodeVisitor):
             "_description": None,
             "has_mail_thread": False,
             "is_odoo_model": False,
+            "is_abstract_model": False,
         }
+
+        # _name first, in its own pass - `_inherit = [..., _name]` (extend an
+        # existing model by the name you already assigned two lines up,
+        # without retyping the string - a real, documented Odoo idiom, see
+        # e.g. solt_l10n_mx_edi_pos's PosOrder) needs _name's own literal
+        # value resolved before _inherit is processed, regardless of which
+        # assignment appears first in the class body.
+        for item in node.body:
+            if isinstance(item, ast.Assign):
+                for target in item.targets:
+                    if isinstance(target, ast.Name) and target.id == "_name" and isinstance(item.value, ast.Constant):
+                        model_info["_name"] = item.value.value
+                        model_info["is_odoo_model"] = True
 
         for item in node.body:
             if isinstance(item, ast.Assign):
                 for target in item.targets:
                     if isinstance(target, ast.Name):
-                        if target.id == "_name" and isinstance(item.value, ast.Constant):
-                            model_info["_name"] = item.value.value
-                            model_info["is_odoo_model"] = True
-                        elif target.id == "_inherit":
-                            model_info["_inherit"] = self._extract_inherit(item.value)
+                        if target.id == "_inherit":
+                            model_info["_inherit"] = self._extract_inherit(item.value, model_info["_name"])
                             model_info["is_odoo_model"] = True
                         elif target.id == "_description" and isinstance(item.value, ast.Constant):
                             model_info["_description"] = item.value.value
@@ -127,6 +138,8 @@ class OdooFieldVisitor(ast.NodeVisitor):
             if isinstance(base, ast.Attribute):
                 if base.attr in ("Model", "TransientModel", "AbstractModel"):
                     model_info["is_odoo_model"] = True
+                    if base.attr == "AbstractModel":
+                        model_info["is_abstract_model"] = True
 
         model_info["has_mail_thread"] = self._check_mail_thread(model_info["_inherit"])
         self.models[node.name] = model_info
@@ -134,12 +147,29 @@ class OdooFieldVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         self.current_class = None
 
-    def _extract_inherit(self, node) -> List[str]:
-        """Extract _inherit values."""
+    def _extract_inherit(self, node, own_name: Optional[str] = None) -> List[str]:
+        """Extract _inherit values.
+
+        Handles the `_inherit = [..., _name]` idiom: a bare `ast.Name` node
+        referencing the class's own already-assigned `_name` (rather than
+        repeating the string) is substituted with `own_name` when its id is
+        `_name`. Without this, that element was silently dropped (it isn't
+        an ast.Constant) - which then misclassified a plain `_inherit`-only
+        extension of an existing model as a brand-new model definition
+        downstream (check_tracking_without_mail_thread's own `is_new_model`
+        test is exactly "_name not in _inherit", which a dropped element
+        defeats).
+        """
         if isinstance(node, ast.Constant):
             return [node.value]
         elif isinstance(node, ast.List):
-            return [elt.value for elt in node.elts if isinstance(elt, ast.Constant)]
+            values = []
+            for elt in node.elts:
+                if isinstance(elt, ast.Constant):
+                    values.append(elt.value)
+                elif isinstance(elt, ast.Name) and elt.id == "_name" and own_name is not None:
+                    values.append(own_name)
+            return values
         return []
 
     def _check_mail_thread(self, inherit_list: List[str]) -> bool:
@@ -396,6 +426,14 @@ class ChecksOdooModulePython:
         for manifest_data in manifest_datas:
             self._parse_python_file(manifest_data)
 
+        # Built after every file in the module has been parsed (not
+        # incrementally per-file) - resolving an _inherit chain needs every
+        # model this module declares to already be registered, regardless of
+        # which file defines which link in the chain. Only models with a
+        # `_name` are registrable targets; a plain `_inherit`-only extension
+        # doesn't introduce a new resolvable name.
+        self._name_to_model: Dict[str, dict] = {mi["_name"]: mi for mi in self.all_models.values() if mi.get("_name")}
+
     def _parse_python_file(self, manifest_data: dict):
         """Parse a Python file and extract information."""
         filename = manifest_data["filename"]
@@ -487,6 +525,44 @@ class ChecksOdooModulePython:
                         f"using compute='{compute_method}'"
                     )
 
+    def _resolves_to_mail_thread(self, inherit_list: List[str], _visited: Optional[Set[str]] = None) -> Optional[bool]:
+        """Whether `inherit_list` resolves to mail.thread, directly or
+        transitively through another model this SAME module also declares.
+
+        Returns True (has it), False (definitively does not - every name in
+        the chain resolved to a model this module also declares, and none of
+        them had it), or None (inconclusive - the chain includes a name this
+        single-module scan cannot resolve: a mixin declared in a *different*
+        module, or a bare Odoo core model this module never redeclares).
+
+        None deliberately does NOT count as "flag it" - see
+        check_tracking_without_mail_thread's own docstring for why treating
+        an unresolvable name as "assume no mail.thread" produces exactly the
+        false positives this method exists to stop (e.g. a custom mixin
+        defined in a dependency module that itself inherits mail.thread,
+        invisible to a scan scoped to one module's own files).
+        """
+        visited = _visited if _visited is not None else set()
+        mail_mixins = MAIL_MIXINS_BY_VERSION.get(self.odoo_version, MAIL_MIXINS_BY_VERSION[DEFAULT_ODOO_VERSION])
+        if set(inherit_list) & mail_mixins:
+            return True
+
+        inconclusive = False
+        for name in inherit_list:
+            if name in visited:
+                continue  # cycle guard - shouldn't happen in real Odoo code, cheap to guard anyway
+            target = self._name_to_model.get(name)
+            if target is None:
+                inconclusive = True
+                continue
+            visited.add(name)
+            result = self._resolves_to_mail_thread(target.get("_inherit", []), visited)
+            if result:
+                return True
+            if result is None:
+                inconclusive = True
+        return None if inconclusive else False
+
     def check_tracking_without_mail_thread(self):
         """Detect tracking=True on fields of models that don't inherit mail.thread.
 
@@ -505,13 +581,39 @@ class ChecksOdooModulePython:
         Only a `_name` that is NOT among the model's own `_inherit` values
         marks an actual new model definition (`_inherit` empty or naming
         something else entirely).
+
+        Two further carve-outs, added after real false positives shipped
+        (see soltein-net/solt-suite#660's review):
+
+        - AbstractModel classes are skipped entirely, even when they declare
+          a brand-new model name. An AbstractModel is never instantiated on
+          its own - it only ever contributes fields to whatever OTHER
+          concrete model composes it later via `_inherit` alongside
+          something that may already have mail.thread. Whether tracking
+          "works" depends entirely on that future composition, which this
+          static, per-file scan cannot see - the common, deliberate pattern
+          (a mixin doesn't declare mail.thread itself, expects the consumer
+          to already have it) would otherwise dominate the findings.
+        - `_resolves_to_mail_thread` (not a flat `has_mail_thread` lookup)
+          walks the model's `_inherit` chain transitively through every
+          other model this SAME module declares, and treats a name it can't
+          resolve (e.g. a mixin from a *different* module) as inconclusive
+          rather than "doesn't have it" - both are real cases that produced
+          false positives before this fix: a same-module custom mixin that
+          itself inherits mail.thread, and a cross-module one.
         """
         for model_key, fields in self.all_fields.items():
             model_info = self.all_models[model_key]
             filename = model_info["filename"]
 
+            if model_info.get("is_abstract_model"):
+                continue
+
             is_new_model = model_info.get("_name") and model_info["_name"] not in model_info.get("_inherit", [])
-            if not is_new_model or model_info.get("has_mail_thread"):
+            if not is_new_model:
+                continue
+
+            if self._resolves_to_mail_thread(model_info.get("_inherit", [])) is not False:
                 continue
 
             for field in fields:
