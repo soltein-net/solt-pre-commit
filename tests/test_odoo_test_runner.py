@@ -174,6 +174,30 @@ class TestRunDbLifecycle:
         # Still needs to reach odoo-bin's psycopg2/libpq connection somehow.
         assert captured["env"]["PGPASSWORD"] == config.test_db_password
 
+    def test_module_loading_logger_is_reopened_to_info_for_per_module_timing(self, fake_env):
+        """--log-handler=:WARNING silences the general INFO firehose, but
+        odoo.modules.loading specifically must be re-opened to INFO -
+        otherwise "Loading module X (n/N)" never appears in a run's log at
+        all, and per-module timing (the gap between two consecutive such
+        lines' CI timestamps) is unrecoverable after the fact."""
+        tmp_path, config = fake_env
+        captured = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = cmd
+            proc = mock.Mock()
+            proc.stdout = iter([])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", side_effect=fake_popen
+        ):
+            otr.run(["fake_module"], config, env_root=tmp_path)
+
+        assert "--log-handler=:WARNING" in captured["cmd"]
+        assert "--log-handler=odoo.modules.loading:INFO" in captured["cmd"]
+
 
 class TestAddonsPathOverride:
     def _run_capturing_popen(self, tmp_path, config, **run_kwargs):

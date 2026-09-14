@@ -159,9 +159,20 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
         try:
             # --logfile= (empty) overrides the conf's `logfile` setting so output lands here,
             # not in a shared log file an interactive dev server might also be writing to.
-            # --log-handler=:WARNING drops the INFO-level "Loading module X (n/N)" firehose -
-            # per-test FAIL/ERROR lines and the final "N failed, M error(s) of K tests" summary
-            # are already logged at WARNING/ERROR, so nothing evidentiary is lost, just the noise.
+            # --log-handler=:WARNING drops the INFO-level firehose in general - per-test
+            # FAIL/ERROR lines and the final "N failed, M error(s) of K tests" summary are
+            # already logged at WARNING/ERROR, so nothing evidentiary is lost, just the noise.
+            #
+            # --log-handler=odoo.modules.loading:INFO re-opens exactly one logger back up to
+            # INFO on top of that: "Loading module X (n/N)" - Odoo doesn't attach a duration to
+            # that line itself, but every CI log line already carries a timestamp, so the gap
+            # between two consecutive "Loading module" lines is that module's own install+test
+            # wall-clock cost. Without this, per-module timing simply isn't recoverable from a
+            # run's log at all - the exact gap this closes: a repo can *see* that its full suite
+            # took N hours but never *which* module(s) actually spent it (see solt-suite's own
+            # 2h40m run, investigated purely from FAIL/ERROR line gaps for lack of anything
+            # better). 146 extra lines on a 146-module repo is not the firehose the WARNING
+            # default exists to avoid - it's the one thing worth re-enabling in isolation.
             # No --db_password here: PGPASSWORD is already set in env above, and psycopg2
             # (via libpq) picks it up the same way createdb/dropdb do - passing the password
             # as a plain CLI arg would otherwise make it visible to anyone on the box via
@@ -188,6 +199,7 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
                 f"--gevent-port={config.test_gevent_port}",
                 "--logfile=",
                 "--log-handler=:WARNING",
+                "--log-handler=odoo.modules.loading:INFO",
                 f"--test-tags={test_tags}",
                 "--stop-after-init",
             ]
