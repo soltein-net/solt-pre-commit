@@ -42,6 +42,7 @@ Comprehensive pre-commit and CI/CD infrastructure for Odoo modules. **Catches er
     - [Branch Handling for Sibling Repos (Per-Module PR/Branch CI)](#branch-handling-for-sibling-repos-per-module-prbranch-ci)
     - [Generated Workflow Files](#generated-workflow-files)
     - [Test/Coverage Scope (many-module repos)](#testcoverage-scope-many-module-repos)
+    - [Sharding a full-scope run (`shards`)](#sharding-a-full-scope-run-shards)
     - [Pre-Push Test Blocking](#pre-push-test-blocking)
   - [📚 Pre-Push Test Blocking Explained](#-pre-push-test-blocking-explained)
   - [🐛 Debugging Failed Pre-Push Tests](#-debugging-failed-pre-push-tests)
@@ -340,6 +341,31 @@ can propagate into a job that was never made to depend on it). `Badges` reads wh
 ran (`needs.Test.outputs.test-result || needs.TestPostMerge.outputs.test-result` - GitHub Actions
 expressions treat an empty string as falsy, so this correctly falls through to whichever job produced
 a real value).
+
+### Sharding a full-scope run (`shards`)
+
+`solt-coverage.yml` also takes a `shards` input (default `'1'` - no sharding, unchanged behavior for
+every caller that doesn't set it). With `shards > 1`, `Coverage` becomes a matrix job over
+`shard: [0, ..., shards-1]`, and `modules` is distributed **round-robin** across shards (module `i` ->
+shard `i % shards`), not contiguous blocks - a contiguous split would put an entire large module
+family (e.g. a ~40-module `l10n_*_edi` family) in one or two shards, creating a straggler that
+dominates wall-clock regardless of shard count. Each shard still pays this job's own fixed
+checkout/install overhead independently (more total billed minutes: N shards x ~4 min instead of one),
+in exchange for wall-clock roughly divided by N (`solt-suite`'s own ~2.5h full-scope run split 8 ways
+is a real cost of ~28 extra minutes for a ~20-minute wait instead of ~2.5 hours).
+
+A new `Combine` job (always its own job, even at `shards: '1'` - one code path, not two) downloads
+every shard's uploaded coverage data file and pass/fail result, runs `coverage combine` across all of
+them, and produces the one `test-result`/`coverage-pct` this reusable workflow actually promises
+callers. This has to be a separate job reading from uploaded artifacts, not `Coverage`'s own per-leg
+`outputs:` - a *matrix* job's outputs at the job level are last-leg-wins (whichever shard happens to
+finish last "wins", silently discarding every other shard's result), not reliable for aggregating
+across shards.
+
+Round-robin-by-count is a first approximation, not a real balance - it assumes every module costs
+roughly the same, which isn't true. Once real per-module timing is available (see
+`odoo_test_runner`'s `odoo.modules.loading:INFO` telemetry), shards should be rebalanced by actual
+cost instead of module count.
 
 ### Pre-Push Test Blocking
 
