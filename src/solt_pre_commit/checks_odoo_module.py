@@ -1041,18 +1041,26 @@ def main():
     # DETECT MODULES AUTOMATICALLY
     # =========================================================================
     if paths:
-        if _is_file_list(paths):
-            detected_modules = _detect_modules_from_paths(paths)
-            if detected_modules:
-                if not args.quiet:
-                    print(f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {len(paths)} file(s)")
-                    for mod in detected_modules:
-                        print(f"  -> {Path(mod).name}")
-                paths = detected_modules
-            else:
-                if not args.quiet:
-                    print("[solt-check-odoo] No Odoo modules detected from provided files")
-                sys.exit(0)
+        # Always route explicit paths through _detect_modules_from_paths,
+        # whether they're files (_is_file_list True) or directories - a
+        # directory arg used to skip this filter entirely and go straight
+        # to `paths`, on the assumption that every directory you name is
+        # already a module. That broke the moment a non-module directory
+        # was in the list (e.g. `solt-check-odoo --scope full */` picking
+        # up a repo's docs/ alongside its real modules): with no manifest
+        # to load, it failed with a confusing "Manifest Syntax Error"
+        # instead of being skipped like any other non-module path.
+        detected_modules = _detect_modules_from_paths(paths)
+        if detected_modules:
+            if not args.quiet:
+                print(f"[solt-check-odoo] Detected {len(detected_modules)} module(s) from {len(paths)} path(s)")
+                for mod in detected_modules:
+                    print(f"  -> {Path(mod).name}")
+            paths = detected_modules
+        else:
+            if not args.quiet:
+                print("[solt-check-odoo] No Odoo modules detected from provided paths")
+            sys.exit(0)
     else:
         # No paths - detect from staged files (pre-commit with pass_filenames: false)
         detected_modules = _detect_modules_from_staged_files()
