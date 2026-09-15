@@ -684,6 +684,20 @@ jobs:
         with:
           name: coverage-shard-data-${{ matrix.shard }}
           path: shard-output/
+          # actions/upload-artifact@v4 drops dotfiles by default (its glob
+          # doesn't match hidden files unless told to) - the whole point of
+          # this artifact is .coverage.shard${SHARD_INDEX}, so without this
+          # the upload silently succeeds with everything *except* the one
+          # file Combine actually needs. Confirmed live on
+          # soltein-net/solt-suite#667: this shard's own Coverage report
+          # step read the file fine and printed a real percentage, but the
+          # uploaded artifact only had modules-tested.txt and result.txt -
+          # Combine then found no `.coverage.*` files at all and fell back
+          # to reporting coverage as unknown, which the org's CI Gate
+          # ruleset's code_coverage rule can't resolve against its
+          # minimum_coverage/max_coverage_drop thresholds, leaving the PR
+          # blocked indefinitely with no failing check pointing at why.
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
 
