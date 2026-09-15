@@ -173,17 +173,35 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # BADGES - Report Validation and Test results to Gist badges
-  # Runs after Validation and both Test jobs (whether they passed, failed, or
-  # were skipped), on both pull_request and push - on push this reports the
-  # full-scope post-merge run's real numbers, not defaults (Validation also
-  # runs full-scope on push, so solt-check-errors/pylint-changed/ruff-changed
-  # below are always genuinely computed this run, never a stale or default
-  # value). Exactly one of Test/TestPostMerge ever runs per event (their
-  # `if:` conditions are mutually exclusive on github.event_name), so exactly
-  # one of the two `||` fallbacks below is ever non-empty.
+  # push only - these badges are keyed by branch (e.g. solt-suite-19.0-tests),
+  # not by PR/branch-of-origin, so they're meant to answer "does 19.0 itself
+  # currently pass" for anyone glancing at the README, not "did this one PR's
+  # own diff pass". A developer's own PR/branch status is already fully
+  # visible in the PR's own Checks list - it doesn't need a badge.
+  #
+  # Previously also ran on pull_request, on the theory that Validation runs
+  # full-scope on push so the numbers would always be genuine there - true,
+  # but Test still runs scope='changed' on a PR (only the modules that PR's
+  # diff touched), and every open PR against the same base branch writes to
+  # the exact same badge file. Whichever PR's own narrow, near-always-passing
+  # result finished last silently overwrote the real branch state from the
+  # last actual merge - confirmed live on soltein-net/solt-suite: the
+  # post-merge run on 19.0 correctly found real failures and set the tests
+  # badge to failing, then an unrelated PR's own passing (but irrelevant)
+  # scope='changed' result clobbered it back to passing minutes later.
+  #
+  # Runs after Validation and TestPostMerge (whether they passed, failed, or
+  # were skipped) - on push, Validation also runs full-scope, so
+  # solt-check-errors/pylint-changed/ruff-changed below are always genuinely
+  # computed this run, never a stale or default value. Test never runs on
+  # push (see its own `if:`), so needs.Test.outputs.test-result is always
+  # empty here and the `||` fallback to needs.TestPostMerge.outputs below
+  # always wins - kept as `||` rather than switched to just
+  # needs.TestPostMerge directly, so a future caller that reintroduces a
+  # pull_request path here doesn't have to remember to change this too.
   # ---------------------------------------------------------------------------
   Badges:
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'push')
+    if: always() && github.event_name == 'push'
     needs: [ Validation, Test, TestPostMerge ]
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-check-badges.yml@{{ SOLT_VERSION }}
     with:
