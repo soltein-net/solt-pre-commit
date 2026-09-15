@@ -13,6 +13,7 @@ to validating the repo root itself as a fake module and fail with a
 confusing "could not be loaded" error. It should now skip cleanly instead."""
 
 import subprocess
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -64,13 +65,27 @@ class TestEmptyDiffFallback:
         assert "No Odoo modules detected from staged files" in out
 
     def test_explicit_paths_with_no_modules_also_skips_cleanly(self, capsys):
-        with (
-            mock.patch.object(mod, "_is_file_list", return_value=True),
-            mock.patch.object(mod, "_detect_modules_from_paths", return_value=[]),
-        ):
+        with mock.patch.object(mod, "_detect_modules_from_paths", return_value=[]):
             rc = _run_main(["some_file.md"])
         assert rc == 0
-        assert "No Odoo modules detected from provided files" in capsys.readouterr().out
+        assert "No Odoo modules detected from provided paths" in capsys.readouterr().out
+
+    def test_explicit_directory_paths_are_filtered_through_manifest_detection(self, tmp_path, capsys):
+        # Regression test: a directory arg used to bypass _detect_modules_from_paths
+        # entirely (only file args went through it), so a non-module directory
+        # among the args - e.g. `solt-check-odoo --scope full */` picking up a
+        # repo's docs/ alongside its real modules - reached run() unfiltered and
+        # failed with a confusing "Manifest Syntax Error" instead of being skipped.
+        _make_module(tmp_path, name="real_module")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "readme.md").write_text("not a module")
+
+        with mock.patch.object(mod, "run", return_value=0) as mock_run:
+            _run_main([str(tmp_path / "real_module"), str(tmp_path / "docs")])
+
+        detected = mock_run.call_args.kwargs["manifest_paths"]
+        assert len(detected) == 1
+        assert Path(detected[0]).name == "real_module"
 
 
 class TestGetStagedFiles:
@@ -1342,7 +1357,7 @@ class TestMain:
             _run_main([str(py_file)])
         assert run_mock.call_args.kwargs["manifest_paths"] == [str(module_dir)]
         out = capsys.readouterr().out
-        assert "Detected 1 module(s) from 1 file(s)" in out
+        assert "Detected 1 module(s) from 1 path(s)" in out
         assert "my_module" in out
 
     def test_staged_files_resolve_to_their_module_and_print_detection_message(self, tmp_path, capsys):
