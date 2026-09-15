@@ -743,19 +743,55 @@ jobs:
           path: shard-artifacts
           merge-multiple: false
 
+      - name: Checkout this repo
+        # coverage.py's data files record absolute source paths from the
+        # shard runners (e.g. .../solt-suite/repo/solt_base/__init__.py) -
+        # `coverage report`/`html`/`json` below need those files actually
+        # present at that same path to resolve statement counts, or every
+        # module fails with "No source for code" and the JSON report never
+        # gets written at all - same end symptom as no data files at all:
+        # coverage reported as unknown, just one step later. Same `path:
+        # repo` the shard job itself uses, so the recorded paths resolve
+        # identically here.
+        #
+        # Unconditional, same as the job itself (if: always() above) - a
+        # checkout on a run with no shard data to combine is a few wasted
+        # seconds, not worth a second signal to keep in sync with the
+        # combine step's own "nothing to combine" check below.
+        uses: actions/checkout@v4
+        with:
+          path: repo
+          fetch-depth: 1
+
+      - name: Checkout sibling repos (declared module dependencies)
+        # Same reasoning as "Checkout this repo" above - a module measured
+        # by this run could live in a sibling repo, not just this one.
+        if: inputs.sibling-repos != ''
+        env:
+          CHECKOUT_TOKEN: ${{ secrets.CHECKOUT_TOKEN }}
+          SIBLING_REPOS: ${{ inputs.sibling-repos }}
+        run: |
+          if [ -z "$CHECKOUT_TOKEN" ]; then
+            echo "::error::sibling-repos is set but no CHECKOUT_TOKEN secret was provided - cannot clone private dependency repos"
+            exit 1
+          fi
+          SIBLING_REPOS=$(printf '%s' "$SIBLING_REPOS" | tr -s ' ' '\n')
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            repo_ref="${line%%:*}"
+            path="${line##*:}"
+            repo="${repo_ref%%@*}"
+            ref="${repo_ref##*@}"
+            echo "Cloning $repo@$ref into $path"
+            git clone --depth 1 --branch "$ref" "https://x-access-token:${CHECKOUT_TOKEN}@github.com/${repo}.git" "$path"
+          done <<< "$SIBLING_REPOS"
+
       - name: Setup Python
-        # No `cache: 'pip'` here (unlike other jobs in this workflow) - pip's
-        # cache key is hashed from a requirements.txt/pyproject.toml in the
-        # checked-out repo, and this job deliberately never checks out the
-        # repo (it only downloads artifacts and runs an inline script) - there
-        # is nothing to hash. With cache enabled, setup-python hard-errors:
-        # "No file in .../solt-suite matched to [**/requirements.txt or
-        # **/pyproject.toml], make sure you have checked out the target
-        # repository" - failing this job on every run regardless of shard
-        # data (confirmed live on soltein-net/solt-suite#669, the first
-        # real-infra exercise of this job since it was added). A single `pip
-        # install coverage` per run is cheap enough that caching buys nothing
-        # worth reintroducing a checkout step for.
+        # Still no cache: 'pip' - this job's own dependency is just
+        # `pip install coverage` below, a single package with no
+        # requirements.txt/pyproject.toml of its own to key a cache off of.
+        # The checkout above exists to give coverage.py source files to
+        # resolve, not to change what this step installs.
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
