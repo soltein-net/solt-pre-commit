@@ -1342,12 +1342,44 @@ def sync_precommit_config(repo_path: Path, dry_run: bool = False) -> None:
             sync_precommit_hooks(config_file, template_src.read_text(), dry_run)
 
 
+def detect_current_shards(repo_path: Path) -> str:
+    """The post-merge full-scope run's current shard count, read back from
+    this repo's own already-generated workflow file.
+
+    `shards` has no manifest or branch name to derive it from the way
+    odoo-version/python-version/postgres-image do - it's a judgment call
+    about this repo's own test suite size, made once and then meant to
+    stick. Regenerating always rebuilds the whole file from the template,
+    so without reading the old value back first, every regenerate would
+    silently reset a repo that had opted into sharding back to the
+    template's own unsharded default - the exact "regeneration quietly
+    undoes a repo's own answer" failure this replaces
+    detect_postgres_image's hand-edited-line problem with, for a value that
+    (unlike the Postgres image) has no manifest to re-derive it from.
+
+    Returns '1' (no sharding - today's behavior) for a repo that has never
+    set it, matching solt-coverage.yml's own default so an unconfigured
+    repo's behavior doesn't change.
+    """
+    workflow_file = repo_path / ".github" / "workflows" / "solt-validate.yml"
+    if not workflow_file.exists():
+        return "1"
+
+    # TestPostMerge's own `shards:` line - Test (pull_request, scope=changed)
+    # deliberately never gets one: a PR only ever narrows to a handful of
+    # modules, so sharding it would just multiply fixed per-shard overhead
+    # (its own checkout/Postgres/Odoo install) for no wall-clock benefit.
+    match = re.search(r"TestPostMerge:.*?shards:\s*'(\d+)'", workflow_file.read_text(), re.DOTALL)
+    return match.group(1) if match else "1"
+
+
 def generate_workflow_file(
     repo_path: Path,
     modules: dict[str, dict],
     odoo_version: str,
     sibling_repos: list[str],
     dry_run: bool = False,
+    shards: str | None = None,
 ) -> bool:
     """Generate .github/workflows/solt-validate.yml from template."""
     workflow_dest = repo_path / ".github" / "workflows" / "solt-validate.yml"
@@ -1371,6 +1403,7 @@ def generate_workflow_file(
             "{{ PYTHON_VERSION }}": python_version,
             "{{ SOLT_VERSION }}": CURRENT_VERSION,
             "{{ POSTGRES_IMAGE }}": detect_postgres_image(modules),
+            "{{ SHARDS }}": shards if shards is not None else detect_current_shards(repo_path),
         }
 
         for placeholder, value in replacements.items():
@@ -1588,6 +1621,12 @@ Examples:
     )
     _add_path_or_batch(regenerate_parser)
     regenerate_parser.add_argument("--version", default=CURRENT_VERSION, help=f"Version to set (default: {CURRENT_VERSION})")
+    regenerate_parser.add_argument(
+        "--shards",
+        default=None,
+        help="Shards for the post-merge full-scope run (default: keep whatever this repo's own "
+        "generated workflow already has, or '1' - no sharding - if it never set one)",
+    )
     _add_dry_run(regenerate_parser)
 
     update_version_parser = subparsers.add_parser("update-version", help="Update only the solt-pre-commit version pin")
@@ -1653,7 +1692,7 @@ Examples:
             modules = detect_modules(repo_path)
             odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
             sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
-            generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run)
+            generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run, shards=args.shards)
             sync_precommit_config(repo_path, args.dry_run)
             update_version_single(repo, args.version, args.dry_run)
             print_step("✅", f"Regenerated: {repo}")

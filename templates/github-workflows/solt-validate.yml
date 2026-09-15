@@ -161,6 +161,13 @@ jobs:
       # PR-push, feeding the coverage badge a real full-repo number instead of
       # whatever subset the last PR happened to touch.
       scope: 'full'
+      # Splits this full-scope run's modules across N parallel shards (see
+      # solt-coverage.yml's own `shards` input for the partitioning logic) -
+      # '1' (no sharding) unless this repo's own setup-repo.py regenerate
+      # call chose otherwise (see detect_current_shards() - regenerating
+      # preserves whatever value is already here instead of silently
+      # resetting it back to '1').
+      shards: '{{ SHARDS }}'
     secrets:
       CHECKOUT_TOKEN: ${{ secrets.SOLT_CROSS_REPO_TOKEN }}
 

@@ -617,5 +617,99 @@ class TestDetectPostgresImage:
         assert setup_repo.detect_postgres_image(modules) == setup_repo.DEFAULT_POSTGRES_IMAGE
 
 
+class TestDetectCurrentShards:
+    """detect_current_shards() must read a repo's own already-generated
+    workflow file back before regenerate rebuilds it, or a repo that opted
+    into sharding would get silently reset to '1' (no sharding) on its next
+    regenerate - the same class of bug detect_postgres_image already avoids
+    for the Postgres image, for a value with no manifest to re-derive it
+    from.
+    """
+
+    def test_no_workflow_file_yet_defaults_to_unsharded(self, tmp_path):
+        assert setup_repo.detect_current_shards(tmp_path) == "1"
+
+    def test_reads_back_an_already_configured_shard_count(self, tmp_path):
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "solt-validate.yml").write_text(
+            "  TestPostMerge:\n"
+            "    if: github.event_name == 'push'\n"
+            "    uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@v1.6.7\n"
+            "    with:\n"
+            "      scope: 'full'\n"
+            "      shards: '8'\n"
+        )
+        assert setup_repo.detect_current_shards(tmp_path) == "8"
+
+    def test_does_not_pick_up_a_shards_line_belonging_to_a_different_job(self, tmp_path):
+        """Test (pull_request, scope=changed) never gets a `shards:` line of
+        its own - if it ever did, detect_current_shards must not confuse it
+        for TestPostMerge's."""
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "solt-validate.yml").write_text(
+            "  Test:\n"
+            "    if: github.event_name == 'pull_request'\n"
+            "    with:\n"
+            "      shards: '3'\n"
+            "  TestPostMerge:\n"
+            "    if: github.event_name == 'push'\n"
+            "    with:\n"
+            "      scope: 'full'\n"
+        )
+        assert setup_repo.detect_current_shards(tmp_path) == "1"
+
+    def test_workflow_file_present_but_never_configured_defaults_to_unsharded(self, tmp_path):
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "solt-validate.yml").write_text(
+            "  TestPostMerge:\n    if: github.event_name == 'push'\n    with:\n      scope: 'full'\n"
+        )
+        assert setup_repo.detect_current_shards(tmp_path) == "1"
+
+
+class TestGenerateWorkflowFileShardsWiring:
+    """generate_workflow_file()'s `shards` parameter must reach the
+    template's {{ SHARDS }} placeholder, and preserve an existing repo's
+    value by default rather than resetting it."""
+
+    def _write_template(self, templates_dir: Path) -> None:
+        workflow_dir = templates_dir / "github-workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "solt-validate.yml").write_text(
+            "  TestPostMerge:\n"
+            "    with:\n"
+            "      modules: '{{ MODULES }}'\n"
+            "      odoo-version: '{{ ODOO_VERSION }}'\n"
+            "      python-version: '{{ PYTHON_VERSION }}'\n"
+            "      postgres-image: '{{ POSTGRES_IMAGE }}'\n"
+            "      scope: 'full'\n"
+            "      shards: '{{ SHARDS }}'\n"
+        )
+
+    def test_explicit_shards_argument_is_written_through(self, tmp_path, monkeypatch):
+        self._write_template(tmp_path / "templates")
+        monkeypatch.setattr(setup_repo, "TEMPLATES_DIR", tmp_path / "templates")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        setup_repo.generate_workflow_file(repo_path, {}, "19.0", [], shards="8")
+        content = (repo_path / ".github" / "workflows" / "solt-validate.yml").read_text()
+        assert "shards: '8'" in content
+
+    def test_omitted_shards_argument_preserves_the_repos_existing_value(self, tmp_path, monkeypatch):
+        self._write_template(tmp_path / "templates")
+        monkeypatch.setattr(setup_repo, "TEMPLATES_DIR", tmp_path / "templates")
+        repo_path = tmp_path / "repo"
+        workflow_dir = repo_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "solt-validate.yml").write_text(
+            "  TestPostMerge:\n    with:\n      scope: 'full'\n      shards: '8'\n"
+        )
+        setup_repo.generate_workflow_file(repo_path, {}, "19.0", [])
+        content = (repo_path / ".github" / "workflows" / "solt-validate.yml").read_text()
+        assert "shards: '8'" in content
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
