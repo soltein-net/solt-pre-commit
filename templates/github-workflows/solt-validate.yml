@@ -125,31 +125,26 @@ jobs:
   # TEST (POST-MERGE) - Run Odoo module tests with coverage, full scope, on
   # push to '{{ ODOO_VERSION }}' only
   #
-  # Deliberately its OWN job with no `needs: Validation` at all, rather than
-  # widening Test's own `if:` to cover push too (e.g. `always() &&
-  # (needs.Validation.result == 'success' || github.event_name == 'push')`) -
-  # tried exactly that first and it does not work reliably: a job's `needs`
-  # dependency on another job that itself calls a reusable workflow (`uses:`,
-  # like Validation above) does not reliably expose that job's outcome to
-  # `needs.<job>.result` / `success()` / `failure()` in a downstream job's own
-  # `if:` - GitHub evaluates the *reusable workflow's internal jobs*, not the
-  # calling job as one opaque unit, and that internal state can "leak" into
-  # this job being skipped regardless of `always()` (see
+  # This job ITSELF still always runs on push, unconditionally - `if: always()
+  # && github.event_name == 'push'` overrides the implicit success() gating
+  # `needs: [ Validation ]` would otherwise add, exactly like Badges below
+  # (needs on several `uses:`-based jobs + always() + reading .outputs, not
+  # .result) already does reliably in production today. `needs: [Validation]`
+  # exists ONLY so `skip-if-errors` below can read its errors-count output -
+  # a previous attempt to gate this job's own SCHEDULING on
+  # `needs.Validation.result == 'success'` inside an always()-OR'd condition
+  # was confirmed broken (GitHub's reusable-workflow internal job state leaked
+  # into an incorrect skip regardless of always() - see
   # https://github.com/orgs/community/discussions/189172 and
-  # https://github.com/orgs/community/discussions/72708 for other reports of
-  # the same class of bug). Confirmed the hard way: this repo's own push run
-  # after the `always() && needs.Validation.result == 'success'` version
-  # landed still showed Test's internal Detect/Coverage jobs as "skipped",
-  # despite Validation only failing on real, pre-existing severity:error
-  # issues that should have been irrelevant to the push-side override.
-  #
-  # The fix that's actually reliable: don't depend on Validation's outcome via
-  # `needs` for the push case at all. This job has no `needs:` entry, so
-  # nothing about Validation's internal job structure can propagate into its
-  # own skip/run decision - only `github.event_name` does.
+  # https://github.com/orgs/community/discussions/72708). That's why the skip
+  # decision itself lives inside solt-coverage.yml's own Coverage job, as a
+  # plain data comparison against a passed-through output value (proven safe
+  # by Badges' own existing use of the identical .outputs mechanism), never as
+  # a `.result`/success()/failure() check on this job's own scheduling.
   # ---------------------------------------------------------------------------
   TestPostMerge:
-    if: github.event_name == 'push'
+    needs: [ Validation ]
+    if: always() && github.event_name == 'push'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
       modules: '{{ MODULES }}'
@@ -168,6 +163,12 @@ jobs:
       # preserves whatever value is already here instead of silently
       # resetting it back to '1').
       shards: '{{ SHARDS }}'
+      # Skip the multi-hour Coverage run outright when Validation already
+      # found real errors on this exact commit - see that input's own
+      # description in solt-coverage.yml. Combine reports 'skipped' (not a
+      # fabricated pass) in that case, which Badges below renders as a
+      # neutral "not verified", not a stale or wrong pass/fail.
+      skip-if-errors: ${{ needs.Validation.outputs.errors-count }}
     secrets:
       CHECKOUT_TOKEN: ${{ secrets.SOLT_CROSS_REPO_TOKEN }}
 
@@ -199,6 +200,18 @@ jobs:
   # always wins - kept as `||` rather than switched to just
   # needs.TestPostMerge directly, so a future caller that reintroduces a
   # pull_request path here doesn't have to remember to change this too.
+  # TestPostMerge's own output is now sometimes the literal string 'skipped'
+  # (Coverage was gated off by validation errors, see TestPostMerge's own
+  # with: block) - solt-update-check-badges.yml renders that as a distinct
+  # grey "not verified" badge, never as a fabricated pass or a silently stale
+  # previous value.
+  #
+  # commit-timestamp guards against a real race: push doesn't cancel a prior
+  # push's own run (see this file's own concurrency block below), so an
+  # older commit's run can finish - and write this same badge - *after* a
+  # newer commit's run already did. Passing it lets the badge writer refuse
+  # to let an older commit's out-of-order finish regress a newer commit's
+  # already-posted result.
   # ---------------------------------------------------------------------------
   Badges:
     if: always() && github.event_name == 'push'
@@ -213,6 +226,7 @@ jobs:
       ruff-blocking: false
       test-result: ${{ needs.Test.outputs.test-result || needs.TestPostMerge.outputs.test-result }}
       coverage-pct: ${{ needs.Test.outputs.coverage-pct || needs.TestPostMerge.outputs.coverage-pct }}
+      commit-timestamp: ${{ github.event.head_commit.timestamp }}
     secrets:
       GIST_SECRET: ${{ secrets.GIST_SECRET }}
 

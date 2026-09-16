@@ -28,11 +28,42 @@ instead of requiring the dev server to be stopped first.
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
 from .config_loader import SoltConfig
+
+
+class _CancelledError(Exception):
+    """Raised from the SIGTERM handler installed in run() below."""
+
+
+def _handle_sigterm(signum, frame):
+    raise _CancelledError()
+
+
+def _terminate(proc: subprocess.Popen, grace_seconds: float = 10) -> None:
+    """Best-effort kill of a still-running Odoo test process.
+
+    A CI job cancellation (or a local Ctrl-C) has to reach this specific
+    child - Python's default SIGTERM handling terminates the *wrapper*
+    process immediately, without running any `finally` block, which leaves
+    `proc` (odoo-bin, still holding the scratch DB connection and burning
+    CPU) as an orphan that GitHub Actions' own cancellation never reliably
+    reaps on its own. `run()` installs a SIGTERM handler that turns it into
+    a normal Python exception specifically so this function gets a chance
+    to run before the wrapper actually exits.
+    """
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
 
 
 def find_env_root() -> Path:
@@ -155,6 +186,8 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
     modules_arg = ",".join(modules)
     print(f"Running tests for: {modules_arg} (test-tags: {test_tags})")
 
+    proc = None
+    previous_sigterm_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
     try:
         try:
             # --logfile= (empty) overrides the conf's `logfile` setting so output lands here,
@@ -233,13 +266,29 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
             print("[solt-test-module] `coverage` not on PATH, cannot run tests.", file=sys.stderr)
             return 1
 
-        summary = ""
-        for line in proc.stdout:
-            print(line, end="")
-            if "failed," in line and "error(s) of" in line and "tests" in line:
-                summary = line.strip()
-        result = proc.wait()
+        try:
+            summary = ""
+            for line in proc.stdout:
+                print(line, end="")
+                if "failed," in line and "error(s) of" in line and "tests" in line:
+                    summary = line.strip()
+            result = proc.wait()
+        except (_CancelledError, KeyboardInterrupt) as exc:
+            print("\n[solt-test-module] Cancelled - stopping the Odoo test process...", file=sys.stderr)
+            # _terminate(proc) + _dropdb() below (the outer finally) still run
+            # before this return takes effect. Conventional 128+signal exit
+            # code (143 for SIGTERM, 130 for SIGINT), not a raw traceback -
+            # main() just does sys.exit(run(...)), and an escaped exception
+            # here would otherwise print a scary stack trace for what is, from
+            # the CI job's perspective, a completely ordinary cancellation.
+            return 143 if isinstance(exc, _CancelledError) else 130
     finally:
+        # Runs on every exit path (normal completion, cancellation, or any
+        # other exception) - proc, if still alive, must die *before* _dropdb()
+        # tries to drop a DB it might still hold a connection to.
+        if proc is not None:
+            _terminate(proc)
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
         _dropdb()
 
     print("=" * 60)
