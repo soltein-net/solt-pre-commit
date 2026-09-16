@@ -847,7 +847,13 @@ jobs:
           if not data_files:
               print("No coverage data files among the shard artifacts - reporting coverage as unknown, not 0%.")
               write_output(coverage_pct="")
-              sys.exit(0)
+              # overall_result, not a bare 0 - missing coverage data says
+              # nothing about whether the tests themselves passed. Exiting 0
+              # unconditionally here would report this job (and any required
+              # check pointed at it) as green even when a shard's tests
+              # actually failed, just because its data file also happened to
+              # go missing.
+              sys.exit(overall_result)
 
           subprocess.run(["coverage", "combine", *data_files], check=True)
           include = ",".join(f"*/{m}/*" for m in sorted(modules))
@@ -871,6 +877,14 @@ jobs:
           except Exception as exc:
               print(f"::warning::Could not parse coverage.json ({exc}) - reporting coverage as unknown, not 0%")
               write_output(coverage_pct="")
+
+          # This job's own exit code, not just the test_result *output* above -
+          # test_result feeds the Badges job, but a required status check
+          # (e.g. an org ruleset) gates on this job's actual conclusion, which
+          # was always "success" regardless of overall_result until now. A
+          # shard's tests failing has to fail this job too, or nothing
+          # required-status-check-based ever blocks on a real test failure.
+          sys.exit(overall_result)
           PYEOF
 
       - name: Upload combined HTML coverage report
