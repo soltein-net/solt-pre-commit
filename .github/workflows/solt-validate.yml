@@ -217,6 +217,29 @@ jobs:
             echo "Validation will run once you add a module with \`__manifest__.py\`." >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Check committed module list for drift
+        # solt-coverage.yml's Test/TestPostMerge jobs take a static `modules:`
+        # string baked into this repo's own solt-validate.yml by `setup-repo.py
+        # regenerate` - unlike this step's own find-modules scan above, it is
+        # NOT recomputed at run time, so a module added on disk without
+        # re-running that script is silently never exercised by either job,
+        # in either scope. Non-blocking (a warning, not a solt-check-odoo-style
+        # error) since this is new and several repos may already have drifted -
+        # promote it to blocking once those are cleaned up.
+        if: steps.find-modules.outputs.count != '0'
+        run: |
+          WORKFLOW_FILE=".github/workflows/solt-validate.yml"
+          if [ ! -f "$WORKFLOW_FILE" ]; then
+            exit 0
+          fi
+          COMMITTED=$(grep -oP "(?<=modules: ')[^']+" "$WORKFLOW_FILE" | head -1 | tr ' ' '\n' | sort -u)
+          ACTUAL=$(echo "${{ steps.find-modules.outputs.modules }}" | tr ' ' '\n' | xargs -n1 basename | sort -u)
+          MISSING=$(comm -13 <(echo "$COMMITTED") <(echo "$ACTUAL"))
+          EXTRA=$(comm -23 <(echo "$COMMITTED") <(echo "$ACTUAL"))
+          if [ -n "$MISSING" ] || [ -n "$EXTRA" ]; then
+            echo "::warning::$WORKFLOW_FILE's committed module list has drifted from what's actually on disk - run 'python setup-repo.py regenerate' to refresh it. Missing from the list (never tested by Test/TestPostMerge): ${MISSING:-<none>}. Listed but no longer on disk: ${EXTRA:-<none>}."
+          fi
+
       - name: Fetch base branch
         if: github.event_name == 'pull_request' && steps.find-modules.outputs.count != '0'
         run: |
