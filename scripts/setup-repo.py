@@ -1365,11 +1365,13 @@ def detect_current_shards(repo_path: Path) -> str:
     if not workflow_file.exists():
         return "1"
 
-    # TestPostMerge's own `shards:` line - Test (pull_request, scope=changed)
-    # deliberately never gets one: a PR only ever narrows to a handful of
-    # modules, so sharding it would just multiply fixed per-shard overhead
-    # (its own checkout/Postgres/Odoo install) for no wall-clock benefit.
-    match = re.search(r"TestPostMerge:.*?shards:\s*'(\d+)'", workflow_file.read_text(), re.DOTALL)
+    # NightlyTest's own `shards:` line (still matches the older TestPostMerge
+    # name too, for a repo not yet regenerated past that rename) - Test
+    # (pull_request, scope=changed) deliberately never gets one: a PR only
+    # ever narrows to a handful of modules, so sharding it would just
+    # multiply fixed per-shard overhead (its own checkout/Postgres/Odoo
+    # install) for no wall-clock benefit.
+    match = re.search(r"(?:NightlyTest|TestPostMerge):.*?shards:\s*'(\d+)'", workflow_file.read_text(), re.DOTALL)
     return match.group(1) if match else "1"
 
 
