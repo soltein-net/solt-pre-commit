@@ -335,12 +335,49 @@ jobs:
             || echo "::warning::Could not update integration badge (non-fatal)"
 
   # ───────────────────────────────────────────────────────────────────────────
+  # VERIFY VERSION PINS - solt-validate.yml, solt-coverage.yml and
+  # solt-update-badges.yml each hardcode their own env.SOLT_PRE_COMMIT_VERSION,
+  # used to `pip install git+...@${SOLT_PRE_COMMIT_VERSION}` to actually run
+  # the checks at validation time - independent of the @<tag> ref a consumer
+  # uses to select the reusable workflow file itself (see solt-validate.yml's
+  # own comment: "Bump all three files' env block on every release"). A missed
+  # bump is invisible until someone notices consumers are still getting an old
+  # checker's behavior regardless of which tag they pin - #59 found this stuck
+  # at v1.5.4 for 7 releases, silently keeping a real bugfix (v1.6.5's
+  # python_tracking_without_mail_thread false-positive fix) out of every
+  # consumer's CI. Blocks the tag build (and therefore the release) if any of
+  # the three don't pin the tag actually being released.
+  # ───────────────────────────────────────────────────────────────────────────
+  verify-version-pins:
+    name: 🔒 Verify SOLT_PRE_COMMIT_VERSION pins
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check reusable workflows pin this release's tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          FAIL=0
+          for f in .github/workflows/solt-validate.yml \
+                   .github/workflows/solt-coverage.yml \
+                   .github/workflows/solt-update-badges.yml; do
+            PIN=$(sed -n 's/^\s*SOLT_PRE_COMMIT_VERSION:\s*\(\S*\)\s*$/\1/p' "$f" | head -1)
+            if [ "$PIN" != "$TAG" ]; then
+              echo "::error file=$f::SOLT_PRE_COMMIT_VERSION is '$PIN', expected '$TAG' (this release's own tag) - bump it before retagging"
+              FAIL=1
+            fi
+          done
+          exit "$FAIL"
+
+  # ───────────────────────────────────────────────────────────────────────────
   # BUILD & PUBLISH
   # ───────────────────────────────────────────────────────────────────────────
   build:
     name: 📦 Build Package
     runs-on: ubuntu-latest
-    needs: [ integration ]
+    needs: [ integration, verify-version-pins ]
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
