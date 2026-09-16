@@ -163,9 +163,39 @@ jobs:
   # this cron from the weekly docstring one below - both are 'schedule'
   # events.
   # ---------------------------------------------------------------------------
+  NightlyGate:
+    # A quiet night (nothing merged to {{ ODOO_VERSION }} since yesterday's
+    # run) has nothing new to test - the previous night's result is still
+    # entirely accurate, so there's no reason to spend ~200+ minutes
+    # re-confirming it. This is the actual point of "nightly, not per-push":
+    # cost now scales with days that had at least one merge, not with merge
+    # count or with the calendar. "25 hours ago", not 24 - a 1-hour overlap
+    # margin against cron drift or a late-starting runner, so a commit that
+    # lands right at the boundary is never missed.
+    if: github.event_name == 'schedule' && github.event.schedule == '0 4 * * *'
+    runs-on: ubuntu-latest
+    outputs:
+      has-new-commits: ${{ steps.check.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: '{{ ODOO_VERSION }}'
+          fetch-depth: 0
+      - id: check
+        run: |
+          COUNT=$(git log --since="25 hours ago" --oneline | wc -l)
+          echo "Found $COUNT commit(s) to {{ ODOO_VERSION }} in the last 25 hours"
+          if [ "$COUNT" -gt 0 ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
   NightlyTest:
-    needs: [ Validation ]
-    if: always() && github.event_name == 'schedule' && github.event.schedule == '0 4 * * *'
+    needs: [ Validation, NightlyGate ]
+    if: |
+      always() && github.event_name == 'schedule' && github.event.schedule == '0 4 * * *' &&
+      needs.NightlyGate.outputs.has-new-commits == 'true'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
       modules: '{{ MODULES }}'
@@ -190,6 +220,13 @@ jobs:
       # fabricated pass) in that case, which Badges below renders as a
       # neutral "not verified", not a stale or wrong pass/fail.
       skip-if-errors: ${{ needs.Validation.outputs.errors-count }}
+      # github.ref on a schedule event is always this repo's *default*
+      # branch, not necessarily '{{ ODOO_VERSION }}' - see checkout-ref's own
+      # description in solt-coverage.yml for why an explicit override is
+      # required here specifically (and only here - Test above must NOT set
+      # this, or it would test the base branch instead of the PR's own
+      # changes).
+      checkout-ref: '{{ ODOO_VERSION }}'
     secrets:
       CHECKOUT_TOKEN: ${{ secrets.SOLT_CROSS_REPO_TOKEN }}
 
@@ -213,12 +250,16 @@ jobs:
   # scope='changed' result clobbered it back to passing minutes later.
   #
   # Runs after Validation, Test, and NightlyTest (whether they passed, failed,
-  # or were skipped) - on push AND on the nightly schedule (two distinct
-  # signals now: push refreshes the cheap solt-check/pylint/ruff badges from
-  # that commit's full-scope Validation; the nightly run additionally
-  # refreshes tests/coverage from NightlyTest, which only runs then). Test
-  # never runs outside pull_request, and NightlyTest never runs outside the
-  # nightly schedule, so on any given trigger at most one of the two `||`
+  # or were skipped) - on push AND on the nightly schedule, but the nightly
+  # branch additionally requires needs.NightlyGate.outputs.has-new-commits:
+  # on a quiet night (nothing merged since the last run - see NightlyGate's
+  # own comment), skip this too, rather than spend a run re-publishing
+  # yesterday's still-accurate numbers. (Two distinct signals now: push
+  # refreshes the cheap solt-check/pylint/ruff badges from that commit's
+  # full-scope Validation; the nightly run additionally refreshes
+  # tests/coverage from NightlyTest, which only runs then.) Test never runs
+  # outside pull_request, and NightlyTest never runs outside the nightly
+  # schedule, so on any given trigger at most one of the two `||`
   # fallbacks below is ever non-empty - kept as `||` rather than switched to
   # just one side so a future caller reintroducing a pull_request path here
   # doesn't have to remember to change this too. A plain push (no nightly run
@@ -246,8 +287,9 @@ jobs:
   Badges:
     if: |
       always() && (github.event_name == 'push' ||
-      (github.event_name == 'schedule' && github.event.schedule == '0 4 * * *'))
-    needs: [ Validation, Test, NightlyTest ]
+      (github.event_name == 'schedule' && github.event.schedule == '0 4 * * *' &&
+      needs.NightlyGate.outputs.has-new-commits == 'true'))
+    needs: [ Validation, Test, NightlyTest, NightlyGate ]
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-update-check-badges.yml@{{ SOLT_VERSION }}
     with:
       odoo-version: '{{ ODOO_VERSION }}'
