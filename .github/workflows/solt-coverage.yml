@@ -95,6 +95,36 @@ on:
         required: false
         type: string
         default: '1'
+      skip-if-errors:
+        description: |
+          A caller-supplied error count from its own cheap validation job
+          (e.g. Validation's own errors-count output), passed through as
+          plain data - never as a `needs.<job>.result`/success() check on a
+          job that itself calls a reusable workflow, which is unreliable for
+          exactly that shape (see solt-validate.yml's TestPostMerge comment
+          for the confirmed incident). Empty or '0' runs Coverage normally
+          (fail-open: an unreadable value must never silently skip a real
+          test run, same philosophy as Detect's own should-skip default).
+          Any other value skips the whole Coverage job outright - there is no
+          point spending a multi-hour Odoo test run validating a commit
+          already known to fail its own cheap lint/structure check.
+        required: false
+        type: string
+        default: ''
+      coverage-timeout-minutes:
+        description: |
+          Hard per-shard backstop against a genuine hang, not an SLA - real
+          full-scope runs on a large, unsharded repo take 2.5-4h today (see
+          `shards` above for cutting that down). 90 comfortably covers every
+          current caller: solt-suite once sharded per that input's own
+          numbers, and every other today's caller's much smaller module
+          count regardless of sharding. A caller with a large module count
+          that hasn't turned on sharding yet should raise this rather than
+          hit false timeouts - lowering the ceiling to match reality belongs
+          in `shards`, not here.
+        required: false
+        type: number
+        default: 90
     secrets:
       CHECKOUT_TOKEN:
         description: 'Token with read access to sibling-repos. Only needed when sibling-repos is set.'
@@ -224,12 +254,23 @@ jobs:
     # this Detect/Coverage split landed until this line was added. Found by
     # running solt-suite's real post-merge push (scope='full') end to end and
     # finding this job never even started, coverage_pct always empty.
-    if: always() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true')
+    # inputs.skip-if-errors is plain data (a string the caller computed
+    # itself), not a cross-job success()/.result check - see that input's own
+    # description for why this specific comparison is safe where the
+    # documented .result-based approach was not.
+    if: |
+      always() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true') &&
+      (inputs.skip-if-errors == '' || inputs.skip-if-errors == '0')
     strategy:
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.Plan.outputs.shard-list) }}
     runs-on: ubuntu-latest
+    # See coverage-timeout-minutes' own description above for why this is a
+    # backstop against a genuine hang (e.g. a cancellation that somehow still
+    # didn't reach the Odoo child - see odoo_test_runner.py's own SIGTERM
+    # handling), not a number chosen to match today's expected runtime.
+    timeout-minutes: ${{ inputs.coverage-timeout-minutes }}
     outputs:
       test_result: ${{ steps.test.outputs.result }}
       coverage_pct: ${{ steps.report.outputs.coverage_pct }}
@@ -801,6 +842,8 @@ jobs:
 
       - name: Combine shard data and report
         id: combine
+        env:
+          SKIP_IF_ERRORS: ${{ inputs.skip-if-errors }}
         run: |
           python3 - <<'PYEOF'
           import glob
@@ -816,9 +859,22 @@ jobs:
 
           shard_dirs = sorted(d for d in glob.glob("shard-artifacts/*/") if os.path.isdir(d))
           if not shard_dirs:
-              print("No shard data found (Coverage was skipped, or every shard found nothing "
-                    "to test) - nothing to combine, reporting a pass with no coverage data.")
-              write_output(test_result="0", coverage_pct="")
+              skip_if_errors = os.environ.get("SKIP_IF_ERRORS", "")
+              if skip_if_errors and skip_if_errors != "0":
+                  # Distinct from the branch below: here, Coverage never even
+                  # attempted a run - it was gated off because validation
+                  # already reported real errors. "0/pass" would be actively
+                  # wrong (the false-confidence scenario this whole gate
+                  # exists to avoid), so this gets its own sentinel the
+                  # caller's badge-writer renders as a neutral "not verified",
+                  # never as a fabricated pass.
+                  print(f"No shard data - Coverage was gated off (validation reported {skip_if_errors} error(s)). "
+                        "Tests were never run for this commit.")
+                  write_output(test_result="skipped", coverage_pct="")
+              else:
+                  print("No shard data found (every shard found nothing to test, scope=changed with no "
+                        "matching module) - nothing to combine, reporting a pass with no coverage data.")
+                  write_output(test_result="0", coverage_pct="")
               sys.exit(0)
 
           modules = set()

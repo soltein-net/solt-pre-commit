@@ -57,12 +57,34 @@ on:
         type: boolean
         default: false
       test-result:
-        description: 'Test job result: "0" (pass) or nonzero (fail). Omit if there is no test job.'
+        description: |
+          Test job result: "0" (pass), nonzero (fail), "skipped" (a test job
+          existed but didn't run this time - e.g. TestPostMerge was gated off
+          because Validation already failed - writes a distinct grey "not
+          verified" badge rather than leaving the previous run's pass/fail
+          color sitting there looking like a fresh result for a commit whose
+          tests were never actually re-run). Omit entirely (empty) only when
+          there is no test job configured for this repo at all.
         required: false
         type: string
         default: ''
       coverage-pct:
         description: 'Coverage percentage. Omit if there is no test job.'
+        required: false
+        type: string
+        default: ''
+      commit-timestamp:
+        description: |
+          The commit this run's results are for (github.event.head_commit.timestamp
+          on a push), used to guard against a stale, out-of-order write. Push
+          events don't cancel a prior push's own run (see solt-validate.yml's
+          concurrency comment for why), so two runs for different commits can
+          legitimately be in flight together, and the older one can finish
+          *after* the newer one - without this, whichever run's Badges step
+          happens to execute last wins the shared gist regardless of which
+          commit is actually newer, silently regressing the badge back to a
+          stale result. Omitted (empty, default): no ordering check, today's
+          behavior - only worth passing from a push-triggered caller.
         required: false
         type: string
         default: ''
@@ -87,6 +109,18 @@ jobs:
           PREFIX="${{ inputs.badge-filename-prefix }}"
           if [ -z "$PREFIX" ]; then PREFIX="${{ github.event.repository.name }}"; fi
           VERSION="${{ inputs.odoo-version }}"
+          META_FILE="${PREFIX}-${VERSION}-badge-meta.json"
+
+          COMMIT_TS="${{ inputs.commit-timestamp }}"
+          if [ -n "$COMMIT_TS" ]; then
+            # ISO 8601 timestamps of the same fixed-width format sort
+            # correctly as plain strings - no date parsing needed.
+            EXISTING_TS=$(gh api "/gists/${{ inputs.gist-id }}" --jq ".files[\"$META_FILE\"].content // empty" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null || echo "")
+            if [ -n "$EXISTING_TS" ] && [[ "$EXISTING_TS" > "$COMMIT_TS" ]]; then
+              echo "::notice::Skipping badge update - gist already reflects a newer commit ($EXISTING_TS is newer than this run's $COMMIT_TS)"
+              exit 0
+            fi
+          fi
 
           badge_json() {
             local label="$1" count="$2" blocking="$3"
@@ -114,23 +148,40 @@ jobs:
           add_file "${PREFIX}-${VERSION}-ruff.json" "$RUFF_CONTENT"
 
           TEST_RESULT="${{ inputs.test-result }}"
-          if [ -n "$TEST_RESULT" ]; then
+          if [ "$TEST_RESULT" = "skipped" ]; then
+            # A test job exists for this repo but didn't run this time (e.g.
+            # gated off because Validation already failed) - grey "not
+            # verified" beats silently leaving last run's green/red sitting
+            # there looking like a fresh result for a commit that was never
+            # actually tested.
+            TEST_CONTENT=$(jq -nc --arg l "tests (${VERSION})" --arg m "not verified" --arg c "lightgrey" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
+            add_file "${PREFIX}-${VERSION}-tests.json" "$TEST_CONTENT"
+            COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "n/a" --arg c "lightgrey" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
+            add_file "${PREFIX}-${VERSION}-coverage.json" "$COV_CONTENT"
+          elif [ -n "$TEST_RESULT" ]; then
             if [ "$TEST_RESULT" = "0" ]; then TEST_MSG="passing"; TEST_COLOR="brightgreen";
             else TEST_MSG="failing"; TEST_COLOR="red"; fi
             TEST_CONTENT=$(jq -nc --arg l "tests (${VERSION})" --arg m "$TEST_MSG" --arg c "$TEST_COLOR" \
               '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
             add_file "${PREFIX}-${VERSION}-tests.json" "$TEST_CONTENT"
+
+            COV="${{ inputs.coverage-pct }}"
+            if [ -n "$COV" ]; then
+              if [ "$COV" -ge 80 ]; then COV_COLOR="brightgreen";
+              elif [ "$COV" -ge 60 ]; then COV_COLOR="yellow";
+              elif [ "$COV" -ge 40 ]; then COV_COLOR="orange";
+              else COV_COLOR="red"; fi
+              COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "${COV}%" --arg c "$COV_COLOR" \
+                '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
+              add_file "${PREFIX}-${VERSION}-coverage.json" "$COV_CONTENT"
+            fi
           fi
 
-          COV="${{ inputs.coverage-pct }}"
-          if [ -n "$COV" ]; then
-            if [ "$COV" -ge 80 ]; then COV_COLOR="brightgreen";
-            elif [ "$COV" -ge 60 ]; then COV_COLOR="yellow";
-            elif [ "$COV" -ge 40 ]; then COV_COLOR="orange";
-            else COV_COLOR="red"; fi
-            COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "${COV}%" --arg c "$COV_COLOR" \
-              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
-            add_file "${PREFIX}-${VERSION}-coverage.json" "$COV_CONTENT"
+          if [ -n "$COMMIT_TS" ]; then
+            META_CONTENT=$(jq -nc --arg ts "$COMMIT_TS" --arg sha "${{ github.sha }}" '{timestamp:$ts, sha:$sha}')
+            add_file "$META_FILE" "$META_CONTENT"
           fi
 
           jq -n --argjson files "$FILES_JSON" '{files: $files}' | \

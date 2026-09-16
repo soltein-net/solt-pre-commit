@@ -3,8 +3,11 @@
 # License LGPL-3 or later (http://www.gnu.org/licenses/lgpl.html)
 
 """Tests for odoo_test_runner.py: env-root resolution, the missing-environment
-skip path, self-healing dropdb, and the coverage/FileNotFoundError guard."""
+skip path, self-healing dropdb, the coverage/FileNotFoundError guard, and
+cancellation actually killing the Odoo child process."""
 
+import signal
+import subprocess
 from unittest import mock
 
 import pytest
@@ -296,6 +299,102 @@ class TestReportCoverage:
         with mock.patch("subprocess.run", side_effect=FileNotFoundError):
             otr._report_coverage(["fake_module"], tmp_path)  # must not raise
         assert "not on PATH" in capsys.readouterr().err
+
+
+class TestTerminate:
+    """_terminate() is the actual fix: a cancelled job's SIGTERM used to kill
+    only the Python wrapper, orphaning the still-running odoo-bin child
+    forever (see the real incident this closes - a job stayed "in progress"
+    for 90+ minutes after being cancelled from the GitHub UI, repeatedly)."""
+
+    def test_already_exited_process_is_left_alone(self):
+        proc = mock.Mock()
+        proc.poll.return_value = 0  # already exited
+        otr._terminate(proc)
+        proc.terminate.assert_not_called()
+
+    def test_running_process_is_terminated(self):
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        proc.wait.return_value = 0
+        otr._terminate(proc)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_not_called()
+
+    def test_escalates_to_kill_when_terminate_does_not_stop_it_in_time(self):
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        # First wait() (post-terminate) times out; second (post-kill) succeeds.
+        proc.wait.side_effect = [subprocess.TimeoutExpired(cmd="odoo-bin", timeout=10), 0]
+        otr._terminate(proc)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()
+
+
+class TestCancellation:
+    """run() must actually stop the Odoo child on cancellation, not just let
+    the wrapper die and orphan it - reproduces the exact failure mode found
+    live: TestPostMerge's 'Run tests with coverage' step stayed in_progress
+    for 90+ minutes after being cancelled from the GitHub UI, repeatedly,
+    because nothing ever told the odoo-bin child to stop."""
+
+    def test_sigterm_during_test_run_kills_child_and_still_drops_db(self, fake_env):
+        tmp_path, config = fake_env
+        dropdb_calls = []
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "dropdb":
+                dropdb_calls.append(1)
+            return mock.Mock(returncode=0)
+
+        proc = mock.Mock()
+        proc.poll.return_value = None  # still running when _terminate() checks
+        proc.wait.return_value = 0
+
+        def fake_stdout():
+            # Simulates the SIGTERM handler firing mid-read, exactly like a
+            # real signal arriving while blocked on the pipe.
+            raise otr._CancelledError()
+            yield  # pragma: no cover - unreachable, makes this a generator
+
+        proc.stdout = fake_stdout()
+
+        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch(
+            "subprocess.Popen", return_value=proc
+        ):
+            rc = otr.run(["fake_module"], config, env_root=tmp_path)
+
+        assert rc == 143  # conventional 128+SIGTERM, not an unhandled traceback
+        proc.terminate.assert_called_once()
+        assert len(dropdb_calls) == 2  # pre-emptive self-heal + the finally-block cleanup
+
+    def test_sigterm_handler_is_installed_and_restored(self, fake_env):
+        tmp_path, config = fake_env
+        original = signal.getsignal(signal.SIGTERM)
+
+        proc = mock.Mock()
+        proc.poll.return_value = None
+        proc.wait.return_value = 0
+        proc.stdout = iter(["0 failed, 0 error(s) of 1 tests\n"])
+
+        installed_handler = {}
+
+        real_signal = signal.signal
+
+        def spy_signal(signum, handler):
+            if signum == signal.SIGTERM and handler is not original:
+                installed_handler["handler"] = handler
+            return real_signal(signum, handler)
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", return_value=proc
+        ), mock.patch("signal.signal", side_effect=spy_signal):
+            otr.run(["fake_module"], config, env_root=tmp_path)
+
+        assert installed_handler.get("handler") is otr._handle_sigterm
+        # Restored afterwards - a long-lived caller (e.g. a test suite runner
+        # invoking run() more than once) must not keep a stale handler installed.
+        assert signal.getsignal(signal.SIGTERM) == original
 
 
 if __name__ == "__main__":
