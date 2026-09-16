@@ -660,6 +660,23 @@ class TestDetectCurrentShards:
         )
         assert setup_repo.detect_current_shards(tmp_path) == "1"
 
+    def test_reads_back_a_shard_count_under_the_renamed_nightly_job(self, tmp_path):
+        """TestPostMerge was renamed to NightlyTest (moved off every push,
+        onto a nightly schedule, to fix the real cost blowup: sharding cuts
+        wall-clock, not total billed minutes, and this job used to run on
+        every merge) - a repo already regenerated past that rename must still
+        have its shard count read back correctly."""
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "solt-validate.yml").write_text(
+            "  NightlyTest:\n"
+            "    if: always() && github.event_name == 'schedule' && github.event.schedule == '0 4 * * *'\n"
+            "    with:\n"
+            "      scope: 'full'\n"
+            "      shards: '8'\n"
+        )
+        assert setup_repo.detect_current_shards(tmp_path) == "8"
+
     def test_workflow_file_present_but_never_configured_defaults_to_unsharded(self, tmp_path):
         workflow_dir = tmp_path / ".github" / "workflows"
         workflow_dir.mkdir(parents=True)
