@@ -159,19 +159,32 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # PLAN - computes the shard index list Coverage's matrix reads. Always runs
-  # (no `if:`), cheap (no checkout, pure arithmetic) - a static
-  # `matrix: shard: [0, 1, ..., N-1]` can't be written directly since `shards`
-  # is a runtime input, not a literal; GitHub Actions matrices only accept a
-  # literal list or `fromJSON(<a job output's actual JSON string>)`, so
-  # something has to produce that JSON first. Deliberately its own job, not
-  # folded into Detect - Detect only runs for scope='changed' (its own `if:`
-  # skips it for scope='full'), but sharding applies to full-scope runs too,
-  # so the shard list has to come from a job that always runs regardless of
-  # scope.
+  # PLAN - computes the shard index list Coverage's matrix reads. Runs
+  # regardless of Detect's own outcome (needs: [Detect] + if: always() -
+  # Detect is a plain job, not one that itself calls a reusable workflow, so
+  # this doesn't risk the .result/success() propagation bug documented
+  # elsewhere in this repo) - a static `matrix: shard: [0, 1, ..., N-1]` can't
+  # be written directly since `shards` is a runtime input, not a literal;
+  # GitHub Actions matrices only accept a literal list or
+  # `fromJSON(<a job output's actual JSON string>)`, so something has to
+  # produce that JSON first.
+  #
+  # For scope='changed', `shards` (the caller's static, one-time-configured
+  # value, meant for a full-scope run's own module count) is overridden by a
+  # count derived from Detect's own matched-count: "a PR only ever narrows to
+  # a handful of modules" doesn't hold for every PR (a broad/infrastructure
+  # change can touch a third of the repo - confirmed live: a 50-module PR
+  # ran unsharded for over an hour, roughly what an unsharded ~1/3-of-the-
+  # repo run should cost). ~15 modules/shard, capped at 8 (the same ceiling
+  # a full-scope run uses - a single PR needing more parallelism than the
+  # whole repo's own scheduled run would is not worth planning for) keeps a
+  # true "handful of modules" PR at 1 shard (no needless overhead) while
+  # actually parallelizing the outlier ones.
   # ---------------------------------------------------------------------------
   Plan:
     name: Plan shard matrix
+    needs: [ Detect ]
+    if: always()
     runs-on: ubuntu-latest
     outputs:
       shard-list: ${{ steps.plan.outputs.shard-list }}
@@ -180,11 +193,22 @@ jobs:
         id: plan
         env:
           SHARDS: ${{ inputs.shards }}
+          SCOPE: ${{ inputs.scope }}
+          MATCHED_COUNT: ${{ needs.Detect.outputs.matched-count }}
         run: |
           python3 -c "
-          import json, os
-          n = int(os.environ['SHARDS'])
-          print('shard-list=' + json.dumps(list(range(n))))
+          import json, math, os
+
+          scope = os.environ['SCOPE']
+          shards = int(os.environ['SHARDS'])
+
+          if scope == 'changed':
+              matched_raw = os.environ.get('MATCHED_COUNT', '')
+              if matched_raw.isdigit() and int(matched_raw) > 0:
+                  shards = max(1, min(8, math.ceil(int(matched_raw) / 15)))
+
+          shards = max(1, shards)
+          print('shard-list=' + json.dumps(list(range(shards))))
           " >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
@@ -214,6 +238,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should-skip: ${{ steps.detect.outputs.should-skip }}
+      # How many modules Coverage's own scope='changed' narrowing (the "Run
+      # tests with coverage" step below) will actually end up testing -
+      # Plan reads this to size the shard count for a PR whose diff is much
+      # bigger than "a handful of modules" (see Plan's own comment for why
+      # that assumption doesn't always hold). Duplicates that step's own
+      # narrowing logic rather than sharing a script - same reasoning as the
+      # "Same detection..." comment below already gives for should-skip.
+      matched-count: ${{ steps.detect.outputs.matched-count }}
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
@@ -232,6 +264,8 @@ jobs:
 
       - name: Detect changed modules
         id: detect
+        env:
+          MODULES: ${{ inputs.modules }}
         run: |
           # Same detection as the "Run tests with coverage" step's own
           # scope='changed' branch below (SoltConfig.changed_detector - self-
@@ -250,13 +284,39 @@ jobs:
           print(','.join(sorted({Path(m).name for m in modules})))
           " | tail -n 1)
           echo "Changed-module detection found: ${CHANGED_MODULES:-<none>}"
+
+          MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
+          MODULES_CSV="${MODULES_CSV#,}"
+          MODULES_CSV="${MODULES_CSV%,}"
+          MODULE_COUNT=$(echo "$MODULES_CSV" | tr ',' '\n' | grep -c .)
+
           if [ -n "$CHANGED_MODULES" ]; then
             # Something changed - whether it matches a declared module or not,
             # Coverage below needs to run (either to test it, or to fall back
             # to the full list as its own safety net for an unmatched diff).
             echo "should-skip=false" >> "$GITHUB_OUTPUT"
+
+            # Mirrors the "Run tests with coverage" step's own intersection
+            # exactly, purely to size the shard count - the actual module
+            # list used to run tests is still computed independently there.
+            DECLARED=",$MODULES_CSV,"
+            INTERSECT_COUNT=0
+            IFS=',' read -ra CHANGED_ARR <<< "$CHANGED_MODULES"
+            for m in "${CHANGED_ARR[@]}"; do
+              case "$DECLARED" in
+                *",$m,"*) INTERSECT_COUNT=$((INTERSECT_COUNT + 1)) ;;
+              esac
+            done
+            if [ "$INTERSECT_COUNT" -gt 0 ]; then
+              echo "matched-count=$INTERSECT_COUNT" >> "$GITHUB_OUTPUT"
+            else
+              # No declared module matched - Coverage falls back to the full
+              # list, so that's the count that actually matters for sizing.
+              echo "matched-count=$MODULE_COUNT" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "should-skip=true" >> "$GITHUB_OUTPUT"
+            echo "matched-count=0" >> "$GITHUB_OUTPUT"
           fi
 
   Coverage:
