@@ -478,7 +478,16 @@ jobs:
           # unpinned dependency that creeps upward, and that one still lands on
           # Odoo's tested version because nothing asks it to move.
           pip install -r odoo/requirements.txt
-          pip install -r repo/requirements.txt
+          # Guarded like the sibling-repos loop below: a repo with no Python
+          # deps beyond Odoo itself (e.g. a themes-only repo) legitimately
+          # has no requirements.txt at all. Unconditionally installing it
+          # failed the whole step under `bash -e`, which meant `pip install
+          # coverage` further down never ran either - "coverage: command not
+          # found" in every later step, from a repo that was never wrong to
+          # not ship a requirements.txt (hit in soltein-net/solt-themes).
+          if [ -f repo/requirements.txt ]; then
+            pip install -r repo/requirements.txt
+          fi
           if [ -n "$SIBLING_REPOS" ]; then
             # See the "Checkout sibling repos" step - same space-vs-newline
             # normalization, needed here too since this is a separate step
