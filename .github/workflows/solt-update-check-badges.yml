@@ -176,7 +176,37 @@ jobs:
               COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "${COV}%" --arg c "$COV_COLOR" \
                 '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
               add_file "${PREFIX}-${VERSION}-coverage.json" "$COV_CONTENT"
+            else
+              # Tests genuinely ran ($TEST_RESULT is 0/1, not skipped) but no
+              # coverage percentage came back - e.g. the Test job crashed
+              # before Combine ever saw a data file (confirmed live on
+              # soltein-net/solt-themes: repo/requirements.txt was missing,
+              # "Install Odoo + coverage" died before any shard could report
+              # coverage). Leaving this file unwritten left the gist key
+              # entirely absent - shields.io then renders a bright red
+              # "resource not found" rather than a neutral "not measured",
+              # which reads as far more alarming than a grey badge and never
+              # self-corrects into a clean state once the underlying failure
+              # stops happening (a `default: skipped`-shaped run overwrites
+              # it fine; this had nothing to overwrite it with). Same grey
+              # "n/a" the `skipped` branch above already uses.
+              COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "n/a" --arg c "lightgrey" \
+                '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
+              add_file "${PREFIX}-${VERSION}-coverage.json" "$COV_CONTENT"
             fi
+          else
+            # $TEST_RESULT itself came back completely empty - neither
+            # "skipped" nor a real 0/1. Shouldn't normally happen (Combine
+            # always writes one or the other), but if it ever does, this is
+            # the same "never leave a gist key silently absent" principle as
+            # both branches above, applied to both badges this time since
+            # there's no result to report at all.
+            TEST_CONTENT=$(jq -nc --arg l "tests (${VERSION})" --arg m "not verified" --arg c "lightgrey" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"github", logoColor:"white"}')
+            add_file "${PREFIX}-${VERSION}-tests.json" "$TEST_CONTENT"
+            COV_CONTENT=$(jq -nc --arg l "coverage (${VERSION})" --arg m "n/a" --arg c "lightgrey" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c, namedLogo:"python", logoColor:"white"}')
+            add_file "${PREFIX}-${VERSION}-coverage.json" "$COV_CONTENT"
           fi
 
           if [ -n "$COMMIT_TS" ]; then
