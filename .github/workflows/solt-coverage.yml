@@ -767,7 +767,20 @@ jobs:
           INCLUDE=""
           for m in "${MODULE_ARR[@]}"; do INCLUDE="${INCLUDE}*/${m}/*,"; done
           INCLUDE="${INCLUDE%,}"
-          coverage report --include="$INCLUDE" | tee coverage_report.txt
+
+          # `coverage report`/`html`/`json` each raise CoverageException("No
+          # data to report.") and exit 1 when nothing in $INCLUDE was actually
+          # exercised - e.g. a module with zero test cases (solt-test-module
+          # still runs and legitimately reports "0 failed, 0 error(s) of 0
+          # tests"), or a declared module name that never got loaded. That's a
+          # real, non-error outcome distinct from the $SKIPPED case above
+          # (solt-test-module did run here) - under `set -e` it was instead
+          # aborting this step outright, which is why coverage.json below
+          # never got a chance to report itself as unknown the way it's meant
+          # to. `|| true` on each, same graceful-degradation treatment the
+          # Combine job's own equivalent step already gives these three calls
+          # via subprocess(..., check=False).
+          coverage report --include="$INCLUDE" | tee coverage_report.txt || true
           {
             echo "## Coverage Report ($MODULES_CSV)"
             echo ""
@@ -775,8 +788,8 @@ jobs:
             cat coverage_report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          coverage html --include="$INCLUDE" -d htmlcov
-          coverage json --include="$INCLUDE" -o coverage.json
+          coverage html --include="$INCLUDE" -d htmlcov || true
+          coverage json --include="$INCLUDE" -o coverage.json || true
 
           if [ -s coverage.json ] && COV=$(python3 -c "import json,sys; d=json.load(open('coverage.json')); print(round(d['totals']['percent_covered']))" 2>/tmp/coverage_parse_err); then
             echo "coverage_pct=$COV" >> "$GITHUB_OUTPUT"
