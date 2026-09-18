@@ -713,6 +713,118 @@ jobs:
           echo -n "$RESULT" > shard-output/result.txt
           exit "$RESULT"
 
+      - name: Summarize test failures
+        # Odoo's own raw test log is unittest-shaped noise: per-module
+        # "Loading module X (n/N)" INFO lines (re-enabled above for
+        # per-module timing) interleaved with hundreds/thousands of query
+        # counts, and only ONE aggregate "N failed, M error(s) of K tests"
+        # line - a developer chasing a CI failure has no way to see *which*
+        # tests actually failed without scrolling/grepping the entire raw
+        # Action log (confirmed complaint: developers reported this as
+        # genuinely hard to read).
+        #
+        # Odoo's test runner logs each individual failure as its own
+        # ERROR-level record - `FAIL: <TestClass>.<method>` or `ERROR:
+        # setUpClass (<module.TestClass>)` - immediately followed by a plain
+        # Python traceback. Extracts those into a short, pytest-style
+        # summary (one line per failing test plus its final exception
+        # message) with the full traceback collapsed underneath, written
+        # into this job's own Step Summary - shown right on the run/PR
+        # Checks tab, no need to open the raw log for the common case. Also
+        # files each as a `::error::` annotation, which surfaces the same
+        # short message at the top of the Checks UI. Both are GitHub
+        # Actions' own standard, built-in mechanisms for this - reused here
+        # rather than inventing a bespoke report format, matching the
+        # `::warning::` already used by the Coverage report step below for
+        # the same reason.
+        #
+        # A failure that happened before any test ran at all (e.g. a module
+        # failed to install) has no matching FAIL/ERROR record - the
+        # fallback branch below says so plainly rather than producing an
+        # empty, misleadingly-reassuring summary.
+        if: always() && steps.test.outputs.skipped != 'true'
+        env:
+          RESULT: ${{ steps.test.outputs.result }}
+          MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import re
+
+          result = os.environ.get("RESULT", "")
+          modules = os.environ.get("MODULES_TESTED") or "?"
+
+          if result == "0" or not os.path.exists("test_output.txt"):
+              raise SystemExit(0)
+
+          with open("test_output.txt", errors="replace") as f:
+              lines = f.readlines()
+
+          # Marks the start of the *next* log record, however it's leveled -
+          # used only to know where the current failure's traceback block
+          # ends, not to identify failures itself.
+          RECORD_START = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ \d+ (ERROR|WARNING|INFO) ")
+          FAILURE = re.compile(
+              r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ \d+ ERROR \S+ \S+: (FAIL|ERROR): (.+?)\s*$"
+          )
+          SUMMARY_LINE = re.compile(r"(\d+ failed, \d+ error\(s\) of \d+ tests.*)$")
+
+          failures = []
+          overall_summary = None
+          i = 0
+          while i < len(lines):
+              m = FAILURE.match(lines[i])
+              if m:
+                  kind, test_id = m.group(1), m.group(2)
+                  block = []
+                  j = i + 1
+                  while j < len(lines) and not RECORD_START.match(lines[j]):
+                      block.append(lines[j].rstrip("\n"))
+                      j += 1
+                  detail = next((l for l in reversed(block) if l.strip()), "").strip()
+                  failures.append((kind, test_id, detail, "\n".join(block).strip()))
+                  i = j
+                  continue
+              sm = SUMMARY_LINE.search(lines[i])
+              if sm:
+                  overall_summary = sm.group(1)
+              i += 1
+
+          out = [f"## ❌ Failed tests ({modules})\n"]
+          if overall_summary:
+              out.append(f"{overall_summary}\n")
+
+          if not failures:
+              out.append(
+                  f"Test run exited with code {result}, but no per-test FAIL/ERROR records "
+                  "were found in the log - this usually means something broke before any "
+                  "test ran (e.g. a module failed to install). See the full job log above.\n"
+              )
+          else:
+              for kind, test_id, detail, _ in failures:
+                  out.append(f"- **{kind}** `{test_id}` — {detail or '(see full output below)'}")
+              out.append("")
+              for kind, test_id, _, block in failures:
+                  out.append(f"<details><summary><code>{kind}</code> {test_id}</summary>\n")
+                  out.append("```")
+                  out.append(block or "(no output captured)")
+                  out.append("```")
+                  out.append("</details>\n")
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a") as f:
+                  f.write("\n".join(out) + "\n")
+
+          # GitHub itself only renders the first 10 annotations per step -
+          # capped to match, a run with more than that has bigger problems
+          # than a long annotation list.
+          for kind, test_id, detail, _ in failures[:10]:
+              msg = f"{test_id}: {detail}" if detail else test_id
+              msg = msg.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
+              print(f"::error::{msg}")
+          PYEOF
+
       - name: Coverage report
         id: report
         if: always()
