@@ -112,8 +112,49 @@ class TestCheckPoPrintfFormatValidation:
         (message,) = checks.checks_errors["po_python_parse_format"]
         assert "Translation parse error (format)" in message
 
-    def test_mismatch_without_python_format_flag_is_not_checked(self, tmp_path):
+    def test_mismatch_without_python_format_flag_is_still_checked(self, tmp_path):
+        """Odoo's exporter rarely emits '#, python-format', so the flag must
+        not decide whether an entry gets validated."""
         path = _write_po(tmp_path, "a.po", '#. module: my_module\nmsgid "Value: %s"\nmsgstr "Valor: %d"\n')
+        checks = ChecksOdooModulePO([_manifest_data(path)], "my_module")
+        checks.check_po()
+        (message,) = checks.checks_errors["po_python_parse_printf"]
+        assert "Translation parse error (printf)" in message
+
+    def test_unflagged_translation_glued_onto_another_is_reported(self, tmp_path):
+        """A msgstr holding two concatenated translations doubles the
+        placeholders, so formatting it with the msgid's arguments raises."""
+        path = _write_po(
+            tmp_path,
+            "a.po",
+            '#. module: my_module\nmsgid "Invalid contacts: %s"\nmsgstr "Contactos: %sContactos no validos: %s"\n',
+        )
+        checks = ChecksOdooModulePO([_manifest_data(path)], "my_module")
+        checks.check_po()
+        (message,) = checks.checks_errors["po_python_parse_printf"]
+        assert "Translation parse error (printf)" in message
+
+    def test_unflagged_translated_named_placeholder_is_reported(self, tmp_path):
+        """Translating the placeholder's own name raises KeyError at runtime."""
+        path = _write_po(
+            tmp_path,
+            "a.po",
+            '#. module: my_module\nmsgid "Sheet name \'%(name)s\' is invalid"\nmsgstr "Sayfa adi \'%(ad)s\' gecersiz"\n',
+        )
+        checks = ChecksOdooModulePO([_manifest_data(path)], "my_module")
+        checks.check_po()
+        (message,) = checks.checks_errors["po_python_parse_printf"]
+        assert "Translation parse error (printf)" in message
+
+    def test_unflagged_literal_percent_text_is_not_reported(self, tmp_path):
+        """A bare '%' in prose is not a format string - the msgid guard in
+        parse_printf keeps these out, which is what makes the ungated check
+        usable."""
+        path = _write_po(
+            tmp_path,
+            "a.po",
+            '#. module: my_module\nmsgid "100% of available balance"\nmsgstr "100% del saldo disponible"\n',
+        )
         checks = ChecksOdooModulePO([_manifest_data(path)], "my_module")
         checks.check_po()
         assert checks.checks_errors == {}

@@ -171,8 +171,17 @@ class ChecksOdooModulePO:
                 f"{manifest_data['filename']}:{entry.linenum} Translation requires comment '#. module: MODULE'"
             )
 
-        # Verify variables in translation
-        if entry.msgstr and "python-format" in entry.flags:
+        # Verify variables in translation.
+        #
+        # Deliberately NOT gated on "python-format" in entry.flags. Odoo's own
+        # exporter almost never emits that flag - across a 148-module repo only
+        # 81 entries in 16 of 191 .po files carry it - so gating on it made this
+        # check silently inert on essentially every catalogue it was pointed at.
+        # parse_printf/parse_format already refuse to blame msgstr for a msgid
+        # that isn't a valid format string (see their own early return), and
+        # that guard, not the flag, is what keeps literal "100% of balance"
+        # style text from being reported.
+        if entry.msgstr:
             try:
                 self.parse_printf(entry.msgid, entry.msgstr)
                 self.parse_format(entry.msgid, entry.msgstr)
