@@ -122,7 +122,6 @@ jobs:
     if: github.event_name == 'pull_request'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
-      modules: '{{ MODULES }}'
       sibling-repos: '{{ SIBLING_REPOS }}'
       odoo-version: '{{ ODOO_VERSION }}'
       python-version: '{{ PYTHON_VERSION }}'
@@ -198,7 +197,6 @@ jobs:
       needs.NightlyGate.outputs.has-new-commits == 'true'
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
-      modules: '{{ MODULES }}'
       sibling-repos: '{{ SIBLING_REPOS }}'
       odoo-version: '{{ ODOO_VERSION }}'
       python-version: '{{ PYTHON_VERSION }}'

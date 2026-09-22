@@ -44,12 +44,13 @@ from .config_loader import SoltConfig
 
 def _detect_all_modules(repo_root: Path) -> list:
     """Every Odoo module this repo itself ships, regardless of what changed -
-    the same universe CI's Test job installs together (setup-repo.py's
-    detect_modules(), which is what populates solt-validate.yml's `modules:`
-    input). Used by test_scope: full so a local pre-push run can catch a
-    conflict that only surfaces once installed alongside a sibling module the
-    current diff didn't touch (see test_scope's own docstring in
-    config_loader.py for why "changed" alone can miss that class of bug).
+    the same universe CI's Test job installs together. Used by test_scope:
+    full so a local pre-push run can catch a conflict that only surfaces once
+    installed alongside a sibling module the current diff didn't touch (see
+    test_scope's own docstring in config_loader.py for why "changed" alone can
+    miss that class of bug). Callers are responsible for applying
+    config.exclude_modules on top of this - it deliberately returns every
+    module on disk, not the eligible-for-testing subset.
     """
     return sorted({manifest.parent for manifest in repo_root.rglob("__manifest__.py")})
 
@@ -94,6 +95,9 @@ def main():
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
         modules = _detect_all_modules(repo_root)
+        if config.exclude_modules:
+            excluded = set(config.exclude_modules)
+            modules = [m for m in modules if m.name not in excluded]
         if not modules:
             if not args.quiet:
                 print("[solt-test-changed-modules] test_scope: full, but no Odoo modules found in this repo, skipping.")
@@ -107,6 +111,9 @@ def main():
             sys.exit(0)
 
         modules = _detect_modules_from_paths(sorted(changed_files))
+        if config.exclude_modules:
+            excluded = set(config.exclude_modules)
+            modules = [m for m in modules if Path(m).name not in excluded]
         if not modules:
             if not args.quiet:
                 print("[solt-test-changed-modules] No Odoo modules among changed files, skipping.")

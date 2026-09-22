@@ -1396,10 +1396,8 @@ def generate_workflow_file(
 
         # Replace placeholders
         python_version = get_python_version(odoo_version)
-        module_names = " ".join(sorted(modules.keys()))
 
         replacements = {
-            "{{ MODULES }}": module_names or "unknown",
             "{{ SIBLING_REPOS }}": " ".join(sibling_repos) if sibling_repos else "",
             "{{ ODOO_VERSION }}": odoo_version,
             "{{ PYTHON_VERSION }}": python_version,

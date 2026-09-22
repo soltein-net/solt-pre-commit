@@ -18,10 +18,6 @@ name: Coverage (test) - Reusable
 on:
   workflow_call:
     inputs:
-      modules:
-        description: 'Comma-separated Odoo module names to test (e.g. "solt_crm")'
-        required: true
-        type: string
       sibling-repos:
         description: |
           Newline-separated additional module repos this depends on, each
@@ -50,24 +46,21 @@ on:
         default: 'postgres:15'
       scope:
         description: |
-          'full' (default): test every module in `modules`, unconditionally - today's
+          'full' (default): test every Odoo module found in this repo (by `__manifest__.py`
+          presence, minus `exclude_modules` in .solt-hooks.yaml), unconditionally - today's
           behavior, unchanged for any caller that doesn't set this.
-          'changed': test only the modules in `modules` that actually have a changed file
-          in this PR's diff (reuses the same changed-file detection the local pre-push
-          hook already uses for `test_scope: changed` in .solt-hooks.yaml - see
-          checks_test_changed_modules.py). Two distinct fallback cases:
-          - the diff changed files, but none map to any declared module (e.g. a
-            sibling-repo dependency bump) -> falls back to testing the full `modules`
-            list, so this never silently skips real testing for an ambiguous diff.
-          - the diff touched zero Odoo-module-shaped paths at all (e.g. CI config,
-            docs, non-addon scripts) -> the Coverage job never runs at all (see the
-            Detect job above it), reported as a pass with no coverage data, since no
-            module's behavior could possibly have changed and testing the full list
-            would be pure cost for a fixed answer. This is a job-level skip, not just
-            a fast exit inside it - no Postgres service, no Odoo checkout/install pay
-            their ~4 minutes either, which is what actually mattered for a repo whose
-            own tests, once running, take hours (see solt-suite's own 2h40m incident,
-            entirely paid for a diff that turned out to touch zero modules).
+          'changed': test only the detected modules that actually have a changed file in
+          this PR's diff (reuses the same changed-file detection the local pre-push hook
+          already uses for `test_scope: changed` in .solt-hooks.yaml - see
+          checks_test_changed_modules.py). A diff can touch a module that's on
+          `exclude_modules` - that's filtered out same as everywhere else, same as a diff
+          that maps to no module at all: the Coverage job never runs at all (see the Detect
+          job above it), reported as a pass with no coverage data, since no eligible
+          module's behavior could possibly have changed. This is a job-level skip, not just
+          a fast exit inside it - no Postgres service, no Odoo checkout/install pay their ~4
+          minutes either, which is what actually mattered for a repo whose own tests, once
+          running, take hours (see solt-suite's own 2h40m incident, entirely paid for a diff
+          that turned out to touch zero modules).
           A repo with many modules in one addon repo (e.g. solt-llm's 24) should set this
           to 'changed' - most PRs there only ever touch 1-3 of them, and this job's own
           checkout/install overhead is fixed regardless of how many modules get tested, so
@@ -78,8 +71,8 @@ on:
         default: 'full'
       shards:
         description: |
-          Number of parallel shards to split `modules` across (default 1 - no
-          sharding, today's behavior unchanged for any caller that doesn't set
+          Number of parallel shards to split the detected module set across (default 1 -
+          no sharding, today's behavior unchanged for any caller that doesn't set
           this). Each shard pays this job's own fixed checkout/install
           overhead independently (more total billed minutes), in exchange for
           wall-clock roughly divided by N (a 146-module, ~2.5h full-scope run
@@ -264,8 +257,6 @@ jobs:
 
       - name: Detect changed modules
         id: detect
-        env:
-          MODULES: ${{ inputs.modules }}
         run: |
           # Same detection as the "Run tests with coverage" step's own
           # scope='changed' branch below (SoltConfig.changed_detector - self-
@@ -285,21 +276,29 @@ jobs:
           " | tail -n 1)
           echo "Changed-module detection found: ${CHANGED_MODULES:-<none>}"
 
-          MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
-          MODULES_CSV="${MODULES_CSV#,}"
-          MODULES_CSV="${MODULES_CSV%,}"
-          MODULE_COUNT=$(echo "$MODULES_CSV" | tr ',' '\n' | grep -c .)
+          # The eligible universe: every module this repo ships, minus
+          # exclude_modules - live-scanned, not a generated/committed
+          # snapshot (see the declared_modules issue this replaced). A
+          # changed module can only fail to match this when it's on
+          # exclude_modules - `_detect_modules_from_paths` above already
+          # requires a manifest to currently exist, so a module deleted by
+          # this same diff can never appear in CHANGED_MODULES in the first
+          # place.
+          ELIGIBLE=$(cd repo && python3 -c "
+          from pathlib import Path
+          from solt_pre_commit.config_loader import SoltConfig
+
+          config = SoltConfig('.solt-hooks.yaml')
+          excluded = set(config.exclude_modules)
+          modules = sorted({p.parent.name for p in Path('.').rglob('__manifest__.py')} - excluded)
+          print(','.join(modules))
+          ")
 
           if [ -n "$CHANGED_MODULES" ]; then
-            # Something changed - whether it matches a declared module or not,
-            # Coverage below needs to run (either to test it, or to fall back
-            # to the full list as its own safety net for an unmatched diff).
-            echo "should-skip=false" >> "$GITHUB_OUTPUT"
-
             # Mirrors the "Run tests with coverage" step's own intersection
             # exactly, purely to size the shard count - the actual module
             # list used to run tests is still computed independently there.
-            DECLARED=",$MODULES_CSV,"
+            DECLARED=",$ELIGIBLE,"
             INTERSECT_COUNT=0
             IFS=',' read -ra CHANGED_ARR <<< "$CHANGED_MODULES"
             for m in "${CHANGED_ARR[@]}"; do
@@ -308,11 +307,15 @@ jobs:
               esac
             done
             if [ "$INTERSECT_COUNT" -gt 0 ]; then
+              echo "should-skip=false" >> "$GITHUB_OUTPUT"
               echo "matched-count=$INTERSECT_COUNT" >> "$GITHUB_OUTPUT"
             else
-              # No declared module matched - Coverage falls back to the full
-              # list, so that's the count that actually matters for sizing.
-              echo "matched-count=$MODULE_COUNT" >> "$GITHUB_OUTPUT"
+              # Every changed module is on exclude_modules - nothing eligible
+              # to test, same as an empty diff. No full-list fallback: unlike
+              # the old committed-list version of this check, there's no
+              # "forgotten regeneration" ambiguity left to hedge against.
+              echo "should-skip=true" >> "$GITHUB_OUTPUT"
+              echo "matched-count=0" >> "$GITHUB_OUTPUT"
             fi
           else
             echo "should-skip=true" >> "$GITHUB_OUTPUT"
@@ -551,7 +554,6 @@ jobs:
         id: test
         env:
           ADDONS_PATH: ${{ steps.addons_path.outputs.value }}
-          MODULES: ${{ inputs.modules }}
           SOLT_ODOO_VERSION: ${{ inputs.odoo-version }}
           SCOPE: ${{ inputs.scope }}
           SHARDS: ${{ inputs.shards }}
@@ -576,33 +578,36 @@ jobs:
           mkdir -p ".devcontainer/dev_${MAJOR}"
           echo "[options]" > ".devcontainer/dev_${MAJOR}/odoo.conf"
 
-          # inputs.modules is space-separated (how setup-repo.py generates it
-          # into solt-validate.yml's `modules:` value), but solt-test-module's
-          # CLI splits on comma. Passed through as-is, the whole list collapses
-          # into one invalid tag - Odoo loads 0 modules, runs 0 tests, and
-          # since "0 failed, 0 errors" isn't itself a failure, still reports
-          # PASS. Normalize either separator to comma so the CLI actually
-          # receives one module name per entry.
-          MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
-          MODULES_CSV="${MODULES_CSV#,}"
-          MODULES_CSV="${MODULES_CSV%,}"
+          # The eligible universe: every module this repo ships (by
+          # `__manifest__.py` presence), minus exclude_modules in
+          # .solt-hooks.yaml - live-scanned every run instead of trusting a
+          # generated/committed `modules:` snapshot (see the declared_modules
+          # issue this replaced - a module added without re-running a
+          # regeneration script used to be silently never tested).
+          MODULES_CSV=$(cd repo && python3 -c "
+          from pathlib import Path
+          from solt_pre_commit.config_loader import SoltConfig
 
-          # scope: 'changed' - narrow MODULES_CSV to only the declared modules that
+          config = SoltConfig('.solt-hooks.yaml')
+          excluded = set(config.exclude_modules)
+          modules = sorted({p.parent.name for p in Path('.').rglob('__manifest__.py')} - excluded)
+          print(','.join(modules))
+          ")
+
+          # scope: 'changed' - narrow MODULES_CSV to only the eligible modules that
           # actually have a changed file in this PR's diff. Reuses the exact same
           # changed-file detection the local pre-push hook already uses for
           # test_scope: changed (SoltConfig.changed_detector - self-heals a shallow
           # clone by fetching the base ref if it's not already available locally, and
           # reads GITHUB_BASE_REF automatically in this context - no extra checkout
-          # config needed here). Falls back to the full MODULES_CSV whenever detection
-          # finds nothing, so this can never silently skip real testing - it only ever
-          # narrows, never expands or disables the run.
+          # config needed here).
           if [ "$SCOPE" = "changed" ]; then
             # | tail -n 1: ChangedFilesDetector._log() prints "[ChangedFilesDetector] ..."
             # debug lines to stdout unconditionally whenever it detects a CI context (not
             # gated behind SOLT_DEBUG there) - without this, $(...) below captures that
             # noise ahead of the actual CSV line, CHANGED_MODULES ends up holding debug
             # text instead of module names, and every scope=changed run on a real PR
-            # silently falls through to "no declared module matched" regardless of what
+            # silently falls through to "nothing eligible matched" regardless of what
             # actually changed. The real result print(...) is always the last line
             # printed, so tail -n 1 reliably isolates it from the debug noise above it.
             CHANGED_MODULES=$(cd repo && python3 -c "
@@ -627,19 +632,25 @@ jobs:
               done
               INTERSECT="${INTERSECT%,}"
               if [ -n "$INTERSECT" ]; then
-                echo "scope=changed: testing $INTERSECT (declared: $MODULES_CSV)"
+                echo "scope=changed: testing $INTERSECT (eligible: $MODULES_CSV)"
                 MODULES_CSV="$INTERSECT"
               else
-                echo "scope=changed: no declared module matched - falling back to the full list"
+                # Every changed module is on exclude_modules - `_detect_modules_from_paths`
+                # above already requires a manifest to currently exist, so a module deleted
+                # by this same diff can never reach CHANGED_MODULES in the first place. No
+                # full-list fallback: there's no "forgotten regeneration" ambiguity left to
+                # hedge against, so this is treated exactly like "nothing changed" below.
+                echo "scope=changed: every changed module is excluded - nothing to test, skipping"
+                echo "modules-tested=" >> "$GITHUB_OUTPUT"
+                echo "result=0" >> "$GITHUB_OUTPUT"
+                echo "skipped=true" >> "$GITHUB_OUTPUT"
+                exit 0
               fi
             else
-              # Distinct from the branch above: there, *something* changed but
-              # didn't match a declared module (e.g. a sibling dependency bump) -
-              # falling back to full is a real safety net worth its cost. Here,
-              # the diff touched zero Odoo-module-shaped paths at all - CI config,
+              # The diff touched zero Odoo-module-shaped paths at all - CI config,
               # docs, non-addon scripts. No module's behavior could possibly have
-              # changed, so testing all `modules` provides zero additional signal
-              # about *this* diff - it is pure cost for a fixed answer. Skip
+              # changed, so testing the full eligible list provides zero additional
+              # signal about *this* diff - it is pure cost for a fixed answer. Skip
               # outright rather than pay the full-scope run for nothing: this is
               # what turned a 146-module Odoo repo's docs-only PR into a 2h40m
               # run for a config change that touched no module at all.
@@ -677,8 +688,8 @@ jobs:
           # scope=changed, or the untouched full list otherwise) to the Coverage
           # report step below via GITHUB_OUTPUT - shell variables don't survive
           # between steps. Without this, that step falls back to re-deriving the
-          # module list from inputs.modules (the full declared list) and its
-          # --include pattern would span every declared module regardless of
+          # full eligible list (live manifest scan minus exclude_modules) and its
+          # --include pattern would span every eligible module regardless of
           # scope, so a scope=changed run's coverage% would count the untested
           # modules' entirely-untraced source as 0% covered and tank the number
           # for modules that were actually well covered. Written before
@@ -829,7 +840,6 @@ jobs:
         id: report
         if: always()
         env:
-          MODULES: ${{ inputs.modules }}
           MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
           SKIPPED: ${{ steps.test.outputs.skipped }}
           SHARD_INDEX: ${{ matrix.shard }}
@@ -858,22 +868,27 @@ jobs:
 
           # Report coverage over exactly the modules the previous step actually
           # tested (steps.test's modules-tested output - already normalized,
-          # already narrowed if scope=changed applied), not the full declared
-          # list - otherwise --include below would span every declared module,
+          # already narrowed if scope=changed applied), not the full eligible
+          # list - otherwise --include below would span every eligible module,
           # and modules that were never even loaded this run (0 trace data, all
           # statements "missing") would drag percent_covered down for modules
-          # that were genuinely well covered. Falls back to re-deriving from the
-          # full inputs.modules only if modules-tested is unset - e.g. the Run
-          # tests step failed before reaching that computation - matching this
-          # step's own if: always() intent of still reporting something useful.
+          # that were genuinely well covered. Falls back to re-deriving the full
+          # eligible list (same live manifest scan the Run tests step uses) only
+          # if modules-tested is unset - e.g. the Run tests step failed before
+          # reaching that computation - matching this step's own if: always()
+          # intent of still reporting something useful.
           if [ -n "$MODULES_TESTED" ]; then
             MODULES_CSV="$MODULES_TESTED"
           else
-            # Same space-vs-comma normalization as the test step above - see
-            # that step's comment for why this matters.
-            MODULES_CSV=$(printf '%s' "$MODULES" | tr -s ', ' ',')
-            MODULES_CSV="${MODULES_CSV#,}"
-            MODULES_CSV="${MODULES_CSV%,}"
+            MODULES_CSV=$(cd repo && python3 -c "
+          from pathlib import Path
+          from solt_pre_commit.config_loader import SoltConfig
+
+          config = SoltConfig('.solt-hooks.yaml')
+          excluded = set(config.exclude_modules)
+          modules = sorted({p.parent.name for p in Path('.').rglob('__manifest__.py')} - excluded)
+          print(','.join(modules))
+          ")
           fi
           IFS=',' read -ra MODULE_ARR <<< "$MODULES_CSV"
           INCLUDE=""
