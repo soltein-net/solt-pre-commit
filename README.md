@@ -269,11 +269,15 @@ The `.github/workflows/solt-validate.yml` is **auto-generated** with:
 Test:
   uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@v1.1.0
   with:
-    modules: 'solt_crm solt_crm_services solt_crm_project ...'  # auto-detected
     sibling-repos: 'soltein-net/solt-base@17.0:solt-base ...'   # auto-detected
     odoo-version: '17.0'
     python-version: '3.11'  # pinned to what's actually deployed - see note below
 ```
+
+Modules to test are no longer a generated `modules:` input - `solt-coverage.yml` scans
+for `__manifest__.py` at run time, same as the local pre-push hook's own full-scope
+detection. Set `exclude_modules` in `.solt-hooks.yaml` for any module intentionally out
+of scope for a given repo's test job.
 
 **Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.11.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. This comes from `get_python_version()` in `scripts/setup-repo.py`, mapped per Odoo version: `3.11` for 17.0-18.0, `3.13` for 19.0-20.0 - see that function's own docstring for the reasoning (it's not a straight "one bump per Odoo release" progression: below Python 3.12, Odoo's own `requirements.txt` holds `cryptography`/`pyOpenSSL` to 2021-era pins nothing here actually deploys against). These track what's actually deployed (devcontainers and production images), not Odoo's documented *minimum* supported Python (3.10 for 17.0-19.0) — pinning to the minimum instead reliably broke CI on an unrelated toolchain mismatch (Odoo's own `requirements.txt` pins a `gevent` build for Python 3.10 that no longer compiles on current GitHub-hosted runners) while catching nothing real, since nothing in this fleet actually runs that minimum. An odoo-version with no entry in the mapping raises immediately when `setup-repo.py` runs, rather than silently guessing a Python version that might be wrong for it.
 
@@ -284,17 +288,15 @@ this is generated automatically — `setup-repo.py setup`/`regenerate` render it
 `scope: ${{ github.event_name == 'push' && 'full' || 'changed' }}` (see "Recommended pattern" below),
 no hand-added `with:` line needed.
 
-`scope: 'full'` tests every module in `modules`, unconditionally — unchanged default behavior for
-every caller. `scope: 'changed'` narrows that down to only the declared modules that actually have a
+`scope: 'full'` tests every Odoo module found in the repo (by `__manifest__.py` presence, minus
+`exclude_modules` in `.solt-hooks.yaml`), unconditionally — unchanged default behavior for every
+caller. `scope: 'changed'` narrows that down to only the detected modules that actually have a
 changed file in the current diff (same detection the local pre-push hook already uses for
-`test_scope: changed` — self-healing shallow-clone base-ref fetch, `GITHUB_BASE_REF`-aware in CI). Two
-distinct outcomes when nothing declared matches:
-- the diff changed files, but none map to a declared module (e.g. a sibling-repo dependency bump) —
-  falls back to testing the full `modules` list, a safety net for an ambiguous diff.
-- the diff touched zero Odoo-module-shaped paths at all (docs, CI config, non-addon scripts) — the
-  `Test` job is skipped entirely (not even the Postgres service/Odoo checkout run, via a cheap `Detect`
-  job ahead of it), reported as a pass with no coverage data, since nothing declared could possibly
-  have changed behavior.
+`test_scope: changed` — self-healing shallow-clone base-ref fetch, `GITHUB_BASE_REF`-aware in CI).
+A diff that touches zero Odoo-module-shaped paths at all (docs, CI config, non-addon scripts) skips
+the `Test` job entirely (not even the Postgres service/Odoo checkout run, via a cheap `Detect` job
+ahead of it), reported as a pass with no coverage data, since nothing eligible could possibly have
+changed behavior.
 
 Worth setting on a repo with many modules in one addon repo (e.g. 24) where most PRs only ever touch
 1-3 of them — for a real, module-touching diff the job's own checkout/install overhead is fixed

@@ -762,6 +762,12 @@ class SoltConfig:
         self.test_modules_auto_install_disabled: list[str] = self._as_str_list(
             self.config.get("test_modules_auto_install_disabled")
         )
+        # Modules intentionally out of scope for both the local pre-push hook's
+        # test_scope: full and CI's solt-coverage.yml - the replacement for a
+        # hand-maintained `modules:` allowlist (see soltein-net/solt-pre-commit's
+        # declared_modules issue): both sides now auto-detect every module by
+        # manifest presence, so this is the only thing left to maintain by hand.
+        self.exclude_modules: list[str] = self._as_str_list(self.config.get("exclude_modules"))
         # Demo data is for onboarding/sales demos, not test fixtures - tests build their
         # own via setUp(). Loading it anyway is slow and occasionally flaky (a demo-data
         # collision in one module can cascade into an unrelated module's own data load
