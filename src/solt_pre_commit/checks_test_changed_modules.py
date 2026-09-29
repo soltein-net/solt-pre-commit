@@ -50,9 +50,10 @@ def _detect_all_modules(repo_root: Path) -> list:
     test_scope's own docstring in config_loader.py for why "changed" alone can
     miss that class of bug). Callers are responsible for applying
     config.exclude_modules on top of this - it deliberately returns every
-    module on disk, not the eligible-for-testing subset.
+    installable module on disk (installable: False ones can't be installed, so
+    they're never part of the universe), not the eligible-for-testing subset.
     """
-    return sorted({manifest.parent for manifest in repo_root.rglob("__manifest__.py")})
+    return odoo_test_runner.installable_module_dirs(repo_root)
 
 
 def main():
