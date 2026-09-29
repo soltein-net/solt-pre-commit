@@ -676,6 +676,15 @@ class SoltConfig:
         return {}
 
     @staticmethod
+    def _as_positive_int(value, default: int) -> int:
+        """`value` as an int >= 1, else `default` (unset, non-numeric, zero or negative)."""
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return default
+        return number if number >= 1 else default
+
+    @staticmethod
     def _as_str_list(value) -> list[str]:
         """Accept either a YAML list or a comma-separated string for a config
         value, so `test_server_wide_modules: [a, b]` and `test_server_wide_modules: a,b`
@@ -746,6 +755,11 @@ class SoltConfig:
         self.test_db_password: str = self.config.get("test_db_password") or os.environ.get("DB_PASSWORD", "odoo")
         self.test_http_port: str = str(self.config.get("test_http_port", 18069))
         self.test_gevent_port: str = str(self.config.get("test_gevent_port", 18072))
+        # Stop a solt-test-module run that prints nothing for this many minutes (a hung test,
+        # e.g. stuck on a network call) and fail it with exit 124, instead of waiting forever.
+        # Idle-based, so a long run that keeps logging is never stopped. Values below 1 fall
+        # back to the default: the guard can be tuned per repo, not switched off.
+        self.test_idle_timeout_minutes: int = self._as_positive_int(self.config.get("test_idle_timeout_minutes"), 30)
         # Escape hatch: if set, solt-test-changed-modules shells out to this repo-relative
         # script instead of using the built-in runner (odoo_test_runner.py) - for repos with
         # a test setup unusual enough that the built-in runner's assumptions don't fit.

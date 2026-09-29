@@ -46,7 +46,7 @@ on:
         required: true
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.6.17
+  SOLT_PRE_COMMIT_VERSION: v1.6.18
 
 jobs:
   Update-Badges:

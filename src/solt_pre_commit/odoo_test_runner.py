@@ -32,6 +32,8 @@ import os
 import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 from .config_loader import SoltConfig
@@ -65,6 +67,42 @@ def _terminate(proc: subprocess.Popen, grace_seconds: float = 10) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+
+
+# Exit code when the idle watchdog stops a hung run (same as coreutils `timeout`).
+EXIT_IDLE_TIMEOUT = 124
+
+
+def _idle_watchdog(
+    proc: subprocess.Popen,
+    last_output: list,
+    idle_seconds: float,
+    fired: threading.Event,
+    done: threading.Event,
+    poll_seconds: float = 15,
+) -> None:
+    """Stop `proc` if it prints nothing for `idle_seconds`.
+
+    A test stuck on something that never returns (a live network call, a DB
+    lock) leaves odoo-bin alive but silent, and without this the run - a CI
+    shard, the release gate, a pre-push hook - waits on it forever. Idle-based
+    on purpose, not a total cap: a long run that keeps logging is never
+    stopped. `last_output[0]` is a time.monotonic() stamp the reader loop
+    refreshes on every line. Runs in a daemon thread; `done` ends it.
+    """
+    while not done.wait(poll_seconds):
+        if proc.poll() is not None:
+            return
+        idle = time.monotonic() - last_output[0]
+        if idle > idle_seconds:
+            fired.set()
+            print(
+                f"\n[solt-test-module] No output for {int(idle // 60)} min (limit {int(idle_seconds // 60)} min) "
+                "- treating the run as hung and stopping it.",
+                file=sys.stderr,
+            )
+            _terminate(proc)
+            return
 
 
 def find_env_root() -> Path:
@@ -315,11 +353,25 @@ def run(
 
         try:
             summary = ""
-            for line in proc.stdout:
-                print(line, end="")
-                if "failed," in line and "error(s) of" in line and "tests" in line:
-                    summary = line.strip()
-            result = proc.wait()
+            last_output = [time.monotonic()]
+            hung, reader_done = threading.Event(), threading.Event()
+            idle_seconds = config.test_idle_timeout_minutes * 60
+            threading.Thread(
+                target=_idle_watchdog,
+                args=(proc, last_output, idle_seconds, hung, reader_done, min(15, idle_seconds / 4)),
+                daemon=True,
+            ).start()
+            try:
+                for line in proc.stdout:
+                    last_output[0] = time.monotonic()
+                    print(line, end="")
+                    if "failed," in line and "error(s) of" in line and "tests" in line:
+                        summary = line.strip()
+                result = proc.wait()
+            finally:
+                reader_done.set()
+            if hung.is_set():
+                result = EXIT_IDLE_TIMEOUT
         except (_CancelledError, KeyboardInterrupt) as exc:
             print("\n[solt-test-module] Cancelled - stopping the Odoo test process...", file=sys.stderr)
             # _terminate(proc) + _dropdb() below (the outer finally) still run
@@ -347,7 +399,10 @@ def run(
         print(f"FAIL -- do NOT push ({modules_arg})")
         if summary:
             print(f"  {summary}")
-        print(f"  (exit code {result} -- see output above for the failing test/traceback)")
+        if result == EXIT_IDLE_TIMEOUT:
+            print(f"  (hung: no output for {config.test_idle_timeout_minutes} min -- see the last lines above)")
+        else:
+            print(f"  (exit code {result} -- see output above for the failing test/traceback)")
     print("=" * 60)
 
     _report_coverage(modules, env_root)

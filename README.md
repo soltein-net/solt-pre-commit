@@ -425,6 +425,10 @@ solt-test-module solt_crm
 # (instead of skipping) when the local Odoo environment is missing.
 solt-test-module --all
 
+# A run that prints nothing for `test_idle_timeout_minutes` (default 30, set it in
+# .solt-hooks.yaml) is treated as hung: it is stopped and fails with exit 124,
+# so a test stuck on e.g. a network call can't stall CI, the release gate or a push.
+
 # Check test output in .git/hooks/pre-push logs
 cat .git/hooks/pre-push
 ```
