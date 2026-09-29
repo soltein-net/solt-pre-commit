@@ -35,6 +35,12 @@ validation_scope: changed
 # test_http_port: 18069        # dedicated port, distinct from an interactive dev server
 # test_gevent_port: 18072
 
+# Stop a test run that prints nothing for this many minutes (a hung test, e.g.
+# stuck on a network call) and fail it with exit 124 instead of waiting forever.
+# Idle-based: a long run that keeps logging is never stopped. Tunable, not
+# disable-able (values below 1 fall back to the default).
+# test_idle_timeout_minutes: 30
+
 # Use a repo-provided script instead of the built-in runner, for a test setup
 # unusual enough that the built-in runner's assumptions don't fit.
 # test_harness_script: scripts/test-module.sh

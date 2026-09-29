@@ -481,3 +481,85 @@ class TestMainCliAll:
         with pytest.raises(SystemExit):
             otr.main()
         assert captured == {"modules": ["a", "b"], "strict": False}
+
+
+class TestIdleWatchdog:
+    """A run that goes silent is stopped and fails (124); one that keeps logging is not."""
+
+    def _watch(self, script, idle_seconds, wait):
+        import sys
+        import threading
+        import time
+
+        proc = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True)
+        last, fired, done = [time.monotonic()], threading.Event(), threading.Event()
+        t = threading.Thread(target=otr._idle_watchdog, args=(proc, last, idle_seconds, fired, done, 0.1), daemon=True)
+        t.start()
+        try:
+            proc.wait(timeout=wait)
+        except subprocess.TimeoutExpired:
+            pass
+        done.set()
+        stopped = proc.poll() is not None
+        if not stopped:
+            proc.kill()
+            proc.wait()
+        return fired.is_set(), stopped
+
+    def test_silent_process_is_stopped(self):
+        fired, stopped = self._watch("import time; time.sleep(60)", idle_seconds=0.5, wait=15)
+        assert fired and stopped
+
+    def test_process_that_finishes_is_left_alone(self):
+        fired, stopped = self._watch("print('done')", idle_seconds=5, wait=15)
+        assert stopped and not fired
+
+    def test_run_returns_124_and_reports_hung(self, fake_env, capsys):
+        import threading
+
+        tmp_path, config = fake_env
+        config.test_idle_timeout_minutes = 0.01  # 0.6s; bypasses the >=1 clamp on purpose
+
+        class HungProc:
+            def __init__(self):
+                self._dead = threading.Event()
+                self.stdout = self._lines()
+
+            def _lines(self):
+                yield "starting\n"
+                self._dead.wait(30)  # silent until the watchdog terminates us
+
+            def poll(self):
+                return 0 if self._dead.is_set() else None
+
+            def terminate(self):
+                self._dead.set()
+
+            def kill(self):
+                self._dead.set()
+
+            def wait(self, timeout=None):
+                self._dead.wait(timeout)
+                return -15
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", return_value=HungProc()
+        ):
+            rc = otr.run(["fake_module"], config, env_root=tmp_path)
+
+        assert rc == otr.EXIT_IDLE_TIMEOUT == 124
+        captured = capsys.readouterr()
+        assert "hung" in captured.err.lower() or "hung" in captured.out.lower()
+        assert "FAIL" in captured.out
+
+
+class TestIdleTimeoutConfig:
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [(None, 30), (45, 45), ("20", 20), (0, 30), (-5, 30), ("abc", 30), (1, 1)],
+    )
+    def test_as_positive_int(self, raw, expected):
+        assert SoltConfig._as_positive_int(raw, 30) == expected
+
+    def test_default_is_30_minutes(self, real_config):
+        assert real_config.test_idle_timeout_minutes == 30
