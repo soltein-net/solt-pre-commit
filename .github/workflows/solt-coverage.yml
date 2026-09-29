@@ -148,7 +148,7 @@ on:
         value: ${{ jobs.Combine.outputs.coverage_pct }}
 
 env:
-  SOLT_PRE_COMMIT_VERSION: v1.6.16
+  SOLT_PRE_COMMIT_VERSION: v1.6.17
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -287,11 +287,11 @@ jobs:
           ELIGIBLE=$(cd repo && python3 -c "
           from pathlib import Path
           from solt_pre_commit.config_loader import SoltConfig
+          from solt_pre_commit.odoo_test_runner import eligible_modules
 
-          config = SoltConfig('.solt-hooks.yaml')
-          excluded = set(config.exclude_modules)
-          modules = sorted({p.parent.name for p in Path('.').rglob('__manifest__.py')} - excluded)
-          print(','.join(modules))
+          # installable modules minus exclude_modules - one shared definition
+          # (also used by `solt-test-module --all`), so CI and local can't drift.
+          print(','.join(eligible_modules(Path('.'), SoltConfig('.solt-hooks.yaml'))))
           ")
 
           if [ -n "$CHANGED_MODULES" ]; then
@@ -587,11 +587,11 @@ jobs:
           MODULES_CSV=$(cd repo && python3 -c "
           from pathlib import Path
           from solt_pre_commit.config_loader import SoltConfig
+          from solt_pre_commit.odoo_test_runner import eligible_modules
 
-          config = SoltConfig('.solt-hooks.yaml')
-          excluded = set(config.exclude_modules)
-          modules = sorted({p.parent.name for p in Path('.').rglob('__manifest__.py')} - excluded)
-          print(','.join(modules))
+          # installable modules minus exclude_modules - one shared definition
+          # (also used by `solt-test-module --all`), so CI and local can't drift.
+          print(','.join(eligible_modules(Path('.'), SoltConfig('.solt-hooks.yaml'))))
           ")
 
           # scope: 'changed' - narrow MODULES_CSV to only the eligible modules that
@@ -883,11 +883,11 @@ jobs:
             MODULES_CSV=$(cd repo && python3 -c "
           from pathlib import Path
           from solt_pre_commit.config_loader import SoltConfig
+          from solt_pre_commit.odoo_test_runner import eligible_modules
 
-          config = SoltConfig('.solt-hooks.yaml')
-          excluded = set(config.exclude_modules)
-          modules = sorted({p.parent.name for p in Path('.').rglob('__manifest__.py')} - excluded)
-          print(','.join(modules))
+          # installable modules minus exclude_modules - one shared definition
+          # (also used by `solt-test-module --all`), so CI and local can't drift.
+          print(','.join(eligible_modules(Path('.'), SoltConfig('.solt-hooks.yaml'))))
           ")
           fi
           IFS=',' read -ra MODULE_ARR <<< "$MODULES_CSV"

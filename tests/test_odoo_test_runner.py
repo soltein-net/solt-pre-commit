@@ -399,3 +399,85 @@ class TestCancellation:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _module(root, name, manifest="{'name': 'x'}"):
+    (root / name).mkdir(parents=True)
+    (root / name / "__manifest__.py").write_text(manifest)
+
+
+class TestEligibleModules:
+    def test_skips_installable_false(self, tmp_path, real_config):
+        _module(tmp_path, "good")
+        _module(tmp_path, "explicit_true", "{'name': 'x', 'installable': True}")
+        _module(tmp_path, "disabled", "{'name': 'x', 'installable': False}")
+        assert otr.eligible_modules(tmp_path, real_config) == ["explicit_true", "good"]
+
+    def test_unparseable_manifest_still_counts_as_installable(self, tmp_path, real_config):
+        _module(tmp_path, "broken", "this is not python {")
+        assert otr.eligible_modules(tmp_path, real_config) == ["broken"]
+
+    def test_applies_exclude_modules(self, tmp_path, real_config):
+        _module(tmp_path, "keep")
+        _module(tmp_path, "skip_me")
+        real_config.exclude_modules = ["skip_me"]
+        assert otr.eligible_modules(tmp_path, real_config) == ["keep"]
+
+
+class TestStrictMissingEnvironment:
+    def test_strict_fails_instead_of_skipping(self, tmp_path, real_config, capsys):
+        rc = otr.run(["fake_module"], real_config, env_root=tmp_path, strict=True)
+        assert rc == 1
+        assert "FAIL" in capsys.readouterr().err
+
+
+class TestMainCliAll:
+    def _run_main(self, monkeypatch, tmp_path, argv, real_config):
+        captured = {}
+
+        def fake_run(modules, config, **kwargs):
+            captured.update(modules=modules, strict=kwargs.get("strict"))
+            return 0
+
+        monkeypatch.setattr(otr, "run", fake_run)
+        monkeypatch.setattr(otr, "SoltConfig", lambda *_a, **_k: real_config)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["solt-test-module", *argv])
+        return captured
+
+    def test_all_runs_every_eligible_module_strictly(self, monkeypatch, tmp_path, real_config):
+        _module(tmp_path, "a")
+        _module(tmp_path, "b", "{'installable': False}")
+        real_config.exclude_modules = []
+        captured = self._run_main(monkeypatch, tmp_path, ["--all"], real_config)
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+        assert exc_info.value.code == 0
+        assert captured == {"modules": ["a"], "strict": True}
+
+    def test_all_prints_excluded_modules(self, monkeypatch, tmp_path, real_config, capsys):
+        _module(tmp_path, "a")
+        _module(tmp_path, "skipped")
+        real_config.exclude_modules = ["skipped"]
+        self._run_main(monkeypatch, tmp_path, ["--all"], real_config)
+        with pytest.raises(SystemExit):
+            otr.main()
+        assert "EXCLUDED (not tested): skipped" in capsys.readouterr().out
+
+    def test_all_with_module_list_is_an_error(self, monkeypatch, tmp_path, real_config):
+        self._run_main(monkeypatch, tmp_path, ["--all", "a"], real_config)
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+        assert exc_info.value.code == 2
+
+    def test_neither_all_nor_modules_is_an_error(self, monkeypatch, tmp_path, real_config):
+        self._run_main(monkeypatch, tmp_path, [], real_config)
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+        assert exc_info.value.code == 2
+
+    def test_explicit_list_is_not_strict(self, monkeypatch, tmp_path, real_config):
+        captured = self._run_main(monkeypatch, tmp_path, ["a,b"], real_config)
+        with pytest.raises(SystemExit):
+            otr.main()
+        assert captured == {"modules": ["a", "b"], "strict": False}

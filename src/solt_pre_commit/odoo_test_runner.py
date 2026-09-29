@@ -27,6 +27,7 @@ instead of requiring the dev server to be stopped first.
 """
 
 import argparse
+import ast
 import os
 import signal
 import subprocess
@@ -96,6 +97,38 @@ def find_env_root() -> Path:
         return Path.cwd()
 
 
+def _is_installable(manifest: Path) -> bool:
+    """Whether this manifest declares the module installable (Odoo's own
+    default is True). A manifest that can't be parsed counts as installable:
+    better a visible install failure in the test run than a module silently
+    dropped from it.
+    """
+    try:
+        data = ast.literal_eval(manifest.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return True
+    return bool(data.get("installable", True)) if isinstance(data, dict) else True
+
+
+def installable_module_dirs(repo_root: Path) -> list:
+    """Every installable Odoo module directory under repo_root - the universe
+    CI's full-scope Test job installs. `installable: False` modules are left
+    out: Odoo can't install them, so testing them can only ever fail or no-op.
+    Does not apply exclude_modules; see eligible_modules() for that.
+    """
+    return sorted({manifest.parent for manifest in repo_root.rglob("__manifest__.py") if _is_installable(manifest)})
+
+
+def eligible_modules(repo_root: Path, config: SoltConfig) -> list:
+    """Names of the modules to test for a full-scope run: installable modules
+    minus `exclude_modules` from .solt-hooks.yaml. The single definition shared
+    by `solt-test-module --all`, the pre-push hook's test_scope: full, and CI's
+    Detect/Coverage jobs, so none of them can drift from the others.
+    """
+    excluded = set(config.exclude_modules)
+    return sorted({d.name for d in installable_module_dirs(repo_root)} - excluded)
+
+
 def _resolve_odoo_conf(config: SoltConfig, env_root: Path) -> Path:
     if config.test_odoo_conf:
         return env_root / config.test_odoo_conf
@@ -104,7 +137,13 @@ def _resolve_odoo_conf(config: SoltConfig, env_root: Path) -> Path:
     return env_root / f".devcontainer/dev_{major}/odoo.conf"
 
 
-def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_path: str | None = None) -> int:
+def run(
+    modules: list,
+    config: SoltConfig,
+    env_root: Path | None = None,
+    addons_path: str | None = None,
+    strict: bool = False,
+) -> int:
     """Run the given modules' own tests against a scratch DB. Returns the exit
     code to propagate (0 = pass, nonzero = fail or error).
 
@@ -113,6 +152,11 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
     odoo.conf's own addons_path setting. CI passes this explicitly since its
     addons-path is assembled fresh each run from cloned sibling repos, not a
     static conf file.
+
+    strict: fail (return 1) instead of skipping when the Odoo environment is
+    missing. Off for the pre-push hook, where a missing local environment
+    shouldn't block a push; on for `--all`, where "nothing ran" must never
+    read as a pass.
     """
     env_root = env_root or find_env_root()
     odoo_bin = env_root / config.test_odoo_bin
@@ -125,6 +169,9 @@ def run(modules: list, config: SoltConfig, env_root: Path | None = None, addons_
         # built-in mechanism) bypasses this hook entirely if that's what's
         # actually wanted instead.
         missing = odoo_bin if not odoo_bin.exists() else odoo_conf
+        if strict:
+            print(f"[solt-test-module] FAIL - no Odoo environment found ({missing} doesn't exist).", file=sys.stderr)
+            return 1
         print(
             f"[solt-test-module] SKIPPED - no Odoo environment found ({missing} doesn't exist). "
             "Not a test failure - set test_odoo_bin/test_odoo_conf in .solt-hooks.yaml if this "
@@ -346,7 +393,21 @@ def main():
     parser = argparse.ArgumentParser(
         description="Run Odoo tests for one or more modules against a disposable scratch database.",
     )
-    parser.add_argument("modules", help="Comma-separated module names, e.g. llm_crm or solt_hr,solt_hr_payroll")
+    parser.add_argument(
+        "modules",
+        nargs="?",
+        default=None,
+        help="Comma-separated module names, e.g. llm_crm or solt_hr,solt_hr_payroll",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "Test every installable module in this repo except those listed under "
+            "exclude_modules in .solt-hooks.yaml (the same set CI's full-scope run tests). "
+            "Fails, instead of skipping, if the Odoo environment is missing."
+        ),
+    )
     parser.add_argument("--config", default=None, help="Path to .solt-hooks.yaml")
     parser.add_argument(
         "--addons-path",
@@ -356,11 +417,31 @@ def main():
     args = parser.parse_args()
 
     config = SoltConfig(args.config)
-    modules = [m.strip() for m in args.modules.split(",") if m.strip()]
-    if not modules:
-        parser.error("no modules given")
 
-    sys.exit(run(modules, config, addons_path=args.addons_path))
+    if args.all:
+        if args.modules:
+            parser.error("--all cannot be combined with an explicit module list")
+        # This repo's own top level, not find_env_root(): as a submodule that resolves to
+        # the superproject, and scanning it would pull in every sibling repo's modules.
+        try:
+            result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True)
+            repo_root = Path(result.stdout.strip())
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            repo_root = Path.cwd()
+        modules = eligible_modules(repo_root, config)
+        if not modules:
+            parser.error(f"--all found no installable modules under {repo_root}")
+        if config.exclude_modules:
+            print(f"[solt-test-module] EXCLUDED (not tested): {', '.join(sorted(config.exclude_modules))}")
+        print(f"[solt-test-module] --all: {len(modules)} module(s) under {repo_root}")
+    else:
+        if not args.modules:
+            parser.error("give a comma-separated module list, or --all")
+        modules = [m.strip() for m in args.modules.split(",") if m.strip()]
+        if not modules:
+            parser.error("no modules given")
+
+    sys.exit(run(modules, config, addons_path=args.addons_path, strict=args.all))
 
 
 if __name__ == "__main__":

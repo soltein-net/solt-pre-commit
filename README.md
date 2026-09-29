@@ -275,9 +275,10 @@ Test:
 ```
 
 Modules to test are no longer a generated `modules:` input - `solt-coverage.yml` scans
-for `__manifest__.py` at run time, same as the local pre-push hook's own full-scope
-detection. Set `exclude_modules` in `.solt-hooks.yaml` for any module intentionally out
-of scope for a given repo's test job.
+for installable `__manifest__.py` files at run time (modules with `installable: False` are
+skipped), through the same `eligible_modules()` helper as `solt-test-module --all` and the
+local pre-push hook's full-scope detection. Set `exclude_modules` in `.solt-hooks.yaml` for any
+module intentionally out of scope for a given repo's test job.
 
 **Note on `python-version`**: this value is passed directly to `actions/setup-python@v5`, which **installs and pins that exact minor version** (latest patch of `3.11.x`). It is **not** a "minimum version" check — CI will not test on a newer minor unless a matrix is added. This comes from `get_python_version()` in `scripts/setup-repo.py`, mapped per Odoo version: `3.11` for 17.0-18.0, `3.13` for 19.0-20.0 - see that function's own docstring for the reasoning (it's not a straight "one bump per Odoo release" progression: below Python 3.12, Odoo's own `requirements.txt` holds `cryptography`/`pyOpenSSL` to 2021-era pins nothing here actually deploys against). These track what's actually deployed (devcontainers and production images), not Odoo's documented *minimum* supported Python (3.10 for 17.0-19.0) — pinning to the minimum instead reliably broke CI on an unrelated toolchain mismatch (Odoo's own `requirements.txt` pins a `gevent` build for Python 3.10 that no longer compiles on current GitHub-hosted runners) while catching nothing real, since nothing in this fleet actually runs that minimum. An odoo-version with no entry in the mapping raises immediately when `setup-repo.py` runs, rather than silently guessing a Python version that might be wrong for it.
 
@@ -288,8 +289,8 @@ this is generated automatically — `setup-repo.py setup`/`regenerate` render it
 `scope: ${{ github.event_name == 'push' && 'full' || 'changed' }}` (see "Recommended pattern" below),
 no hand-added `with:` line needed.
 
-`scope: 'full'` tests every Odoo module found in the repo (by `__manifest__.py` presence, minus
-`exclude_modules` in `.solt-hooks.yaml`), unconditionally — unchanged default behavior for every
+`scope: 'full'` tests every installable Odoo module found in the repo (a `__manifest__.py` that
+doesn't set `installable: False`, minus `exclude_modules` in `.solt-hooks.yaml`), unconditionally — unchanged default behavior for every
 caller. `scope: 'changed'` narrows that down to only the detected modules that actually have a
 changed file in the current diff (same detection the local pre-push hook already uses for
 `test_scope: changed` — self-healing shallow-clone base-ref fetch, `GITHUB_BASE_REF`-aware in CI).
@@ -415,6 +416,14 @@ python scripts/setup-repo.py setup /path/to/repo  # setup if needed
 
 # Run specific module tests
 solt-test-module solt_crm
+
+# Run every installable module in the repo (what CI's full-scope run tests):
+# all manifests except `installable: False` and `exclude_modules` in .solt-hooks.yaml.
+# Excluded modules are printed, never silently skipped. There is deliberately no
+# --exclude flag: an exclusion changes what "green" means, so it lives in
+# .solt-hooks.yaml and goes through review. Unlike a module list, --all fails
+# (instead of skipping) when the local Odoo environment is missing.
+solt-test-module --all
 
 # Check test output in .git/hooks/pre-push logs
 cat .git/hooks/pre-push
