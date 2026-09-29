@@ -357,6 +357,13 @@ checkout/install overhead independently (more total billed minutes: N shards x ~
 in exchange for wall-clock roughly divided by N (`solt-suite`'s own ~2.5h full-scope run split 8 ways
 is a real cost of ~28 extra minutes for a ~20-minute wait instead of ~2.5 hours).
 
+**Timeout for an unsharded run.** `coverage-timeout-minutes` (default `90`, per shard) is a hard
+backstop, and an unsharded full run of a large repo takes 2.5-4h, so a repo that sets `shards: '1'`
+must raise it (hosted jobs cap at 360). `solt-test-module`'s own idle watchdog
+(`test_idle_timeout_minutes`) stops a *silent* hang long before this fires. The generated workflow
+carries the value on `NightlyTest`, and `setup-repo.py regenerate` preserves it the same way it
+preserves `shards`; set or change it with `regenerate --coverage-timeout-minutes 330`.
+
 A new `Combine` job (always its own job, even at `shards: '1'` - one code path, not two) downloads
 every shard's uploaded coverage data file and pass/fail result, runs `coverage combine` across all of
 them, and produces the one `test-result`/`coverage-pct` this reusable workflow actually promises

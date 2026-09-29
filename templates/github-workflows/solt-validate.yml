@@ -212,6 +212,14 @@ jobs:
       # preserves whatever value is already here instead of silently
       # resetting it back to '1').
       shards: '{{ SHARDS }}'
+      # Per-shard hard backstop against a genuine hang - solt-test-module's own
+      # idle watchdog (test_idle_timeout_minutes) catches a silent run long
+      # before this; this only bounds a run that keeps logging forever. The
+      # default matches solt-coverage.yml's own (90). An UNSHARDED full run of a
+      # large repo takes 2.5-4h and needs this raised (hosted jobs cap at 360).
+      # setup-repo.py regenerate preserves whatever value is already here (see
+      # detect_current_coverage_timeout()) instead of resetting it to 90.
+      coverage-timeout-minutes: {{ COVERAGE_TIMEOUT_MINUTES }}
       # Skip the multi-hour Coverage run outright when Validation already
       # found real errors on this exact commit - see that input's own
       # description in solt-coverage.yml. Combine reports 'skipped' (not a
