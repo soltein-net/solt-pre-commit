@@ -116,9 +116,7 @@ def installable_module_dirs(repo_root: Path) -> list:
     out: Odoo can't install them, so testing them can only ever fail or no-op.
     Does not apply exclude_modules; see eligible_modules() for that.
     """
-    return sorted(
-        {manifest.parent for manifest in repo_root.rglob("__manifest__.py") if _is_installable(manifest)}
-    )
+    return sorted({manifest.parent for manifest in repo_root.rglob("__manifest__.py") if _is_installable(manifest)})
 
 
 def eligible_modules(repo_root: Path, config: SoltConfig) -> list:
@@ -426,9 +424,7 @@ def main():
         # This repo's own top level, not find_env_root(): as a submodule that resolves to
         # the superproject, and scanning it would pull in every sibling repo's modules.
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True)
             repo_root = Path(result.stdout.strip())
         except (subprocess.CalledProcessError, FileNotFoundError):
             repo_root = Path.cwd()
