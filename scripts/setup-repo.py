@@ -1297,6 +1297,8 @@ POSTGRES_EXTENSION_IMAGES = {
     "vector": "pgvector/pgvector:pg15",
 }
 DEFAULT_POSTGRES_IMAGE = "postgres:15"
+# Same default as solt-coverage.yml's own `coverage-timeout-minutes` input.
+DEFAULT_COVERAGE_TIMEOUT_MINUTES = "90"
 
 
 def detect_postgres_image(modules: dict[str, dict]) -> str:
@@ -1375,6 +1377,32 @@ def detect_current_shards(repo_path: Path) -> str:
     return match.group(1) if match else "1"
 
 
+def detect_current_coverage_timeout(repo_path: Path) -> str:
+    """NightlyTest's current `coverage-timeout-minutes`, read back from this
+    repo's own already-generated workflow file, for the same reason as
+    detect_current_shards(): the value is a per-repo judgment call (an
+    unsharded run of a big suite needs far more than the 90-minute default)
+    with nothing to re-derive it from, so regenerating from the template would
+    otherwise silently reset it and the nightly would start dying at 90 minutes.
+
+    Only NightlyTest's own block is searched - bounded at the next
+    top-level job/section - so a line belonging to another job is never picked up.
+    Returns the default (90, solt-coverage.yml's own) when unset.
+    """
+    workflow_file = repo_path / ".github" / "workflows" / "solt-validate.yml"
+    if not workflow_file.exists():
+        return DEFAULT_COVERAGE_TIMEOUT_MINUTES
+    block = re.search(
+        r"^  (?:NightlyTest|TestPostMerge):\n(.*?)(?=^  \S|\Z)",
+        workflow_file.read_text(),
+        re.DOTALL | re.MULTILINE,
+    )
+    if not block:
+        return DEFAULT_COVERAGE_TIMEOUT_MINUTES
+    match = re.search(r"^\s+coverage-timeout-minutes:\s*'?(\d+)'?\s*$", block.group(1), re.MULTILINE)
+    return match.group(1) if match else DEFAULT_COVERAGE_TIMEOUT_MINUTES
+
+
 def generate_workflow_file(
     repo_path: Path,
     modules: dict[str, dict],
@@ -1382,6 +1410,7 @@ def generate_workflow_file(
     sibling_repos: list[str],
     dry_run: bool = False,
     shards: str | None = None,
+    coverage_timeout_minutes: str | None = None,
 ) -> bool:
     """Generate .github/workflows/solt-validate.yml from template."""
     workflow_dest = repo_path / ".github" / "workflows" / "solt-validate.yml"
@@ -1404,6 +1433,11 @@ def generate_workflow_file(
             "{{ SOLT_VERSION }}": CURRENT_VERSION,
             "{{ POSTGRES_IMAGE }}": detect_postgres_image(modules),
             "{{ SHARDS }}": shards if shards is not None else detect_current_shards(repo_path),
+            "{{ COVERAGE_TIMEOUT_MINUTES }}": (
+                coverage_timeout_minutes
+                if coverage_timeout_minutes is not None
+                else detect_current_coverage_timeout(repo_path)
+            ),
         }
 
         for placeholder, value in replacements.items():
@@ -1627,6 +1661,12 @@ Examples:
         help="Shards for the post-merge full-scope run (default: keep whatever this repo's own "
         "generated workflow already has, or '1' - no sharding - if it never set one)",
     )
+    regenerate_parser.add_argument(
+        "--coverage-timeout-minutes",
+        default=None,
+        help="Per-shard hard timeout for the post-merge full-scope run (default: keep whatever this repo's own "
+        f"generated workflow already has, or {DEFAULT_COVERAGE_TIMEOUT_MINUTES} if it never set one)",
+    )
     _add_dry_run(regenerate_parser)
 
     update_version_parser = subparsers.add_parser("update-version", help="Update only the solt-pre-commit version pin")
@@ -1692,7 +1732,15 @@ Examples:
             modules = detect_modules(repo_path)
             odoo_version = detect_odoo_version_from_branch(repo_path=repo_path)
             sibling_repos = detect_sibling_repos(modules, repo_path)  # Pass repo_path, not version
-            generate_workflow_file(repo_path, modules, odoo_version, sibling_repos, args.dry_run, shards=args.shards)
+            generate_workflow_file(
+                repo_path,
+                modules,
+                odoo_version,
+                sibling_repos,
+                args.dry_run,
+                shards=args.shards,
+                coverage_timeout_minutes=args.coverage_timeout_minutes,
+            )
             sync_precommit_config(repo_path, args.dry_run)
             update_version_single(repo, args.version, args.dry_run)
             print_step("✅", f"Regenerated: {repo}")

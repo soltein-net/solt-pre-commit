@@ -730,3 +730,67 @@ class TestGenerateWorkflowFileShardsWiring:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestDetectCurrentCoverageTimeout:
+    """detect_current_coverage_timeout() must read NightlyTest's own
+    `coverage-timeout-minutes` back before regenerate rebuilds the file, or a
+    repo that raised it for an unsharded full run would silently drop back to
+    the 90-minute default and its nightly would die mid-run."""
+
+    def _write(self, tmp_path, text):
+        workflow_dir = tmp_path / ".github" / "workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "solt-validate.yml").write_text(text)
+
+    def test_no_workflow_file_yet_defaults_to_90(self, tmp_path):
+        assert setup_repo.detect_current_coverage_timeout(tmp_path) == "90"
+
+    def test_reads_back_a_configured_value(self, tmp_path):
+        self._write(
+            tmp_path,
+            "  NightlyTest:\n    with:\n      scope: 'full'\n      shards: '1'\n      coverage-timeout-minutes: 330\n",
+        )
+        assert setup_repo.detect_current_coverage_timeout(tmp_path) == "330"
+
+    def test_never_configured_defaults_to_90(self, tmp_path):
+        self._write(tmp_path, "  NightlyTest:\n    with:\n      scope: 'full'\n")
+        assert setup_repo.detect_current_coverage_timeout(tmp_path) == "90"
+
+    def test_ignores_a_line_belonging_to_another_job(self, tmp_path):
+        """Neither the job before nor the job after NightlyTest may leak in."""
+        self._write(
+            tmp_path,
+            "  Test:\n    with:\n      coverage-timeout-minutes: 45\n"
+            "  NightlyTest:\n    with:\n      scope: 'full'\n"
+            "  Badges:\n    with:\n      coverage-timeout-minutes: 200\n",
+        )
+        assert setup_repo.detect_current_coverage_timeout(tmp_path) == "90"
+
+    def test_reads_the_older_testpostmerge_name(self, tmp_path):
+        self._write(tmp_path, "  TestPostMerge:\n    with:\n      coverage-timeout-minutes: 240\n")
+        assert setup_repo.detect_current_coverage_timeout(tmp_path) == "240"
+
+
+class TestGenerateWorkflowFileCoverageTimeout:
+    """Round trip through the REAL template: the value reaches NightlyTest,
+    the default is unchanged, and a second regenerate preserves it."""
+
+    def _generate(self, repo_path, **kwargs):
+        setup_repo.generate_workflow_file(repo_path, {}, "19.0", [], **kwargs)
+        return (repo_path / ".github" / "workflows" / "solt-validate.yml").read_text()
+
+    def test_default_is_90_and_only_on_nightly(self, tmp_path):
+        content = self._generate(tmp_path)
+        assert content.count("coverage-timeout-minutes: 90") == 1
+        nightly = content[content.index("  NightlyTest:") :]
+        assert "coverage-timeout-minutes: 90" in nightly.split("\n  Badges:")[0]
+
+    def test_explicit_value_is_written_through(self, tmp_path):
+        assert "coverage-timeout-minutes: 330" in self._generate(tmp_path, coverage_timeout_minutes="330")
+
+    def test_regenerate_preserves_the_existing_value(self, tmp_path):
+        self._generate(tmp_path, coverage_timeout_minutes="330")
+        again = self._generate(tmp_path)  # no explicit value
+        assert "coverage-timeout-minutes: 330" in again
+        assert "coverage-timeout-minutes: 90" not in again
