@@ -242,6 +242,18 @@ solt-check-requirements --fix
 
 The manifest stays the single source of truth for a module's Python dependencies (it's what Odoo itself checks before allowing a module to install) - `requirements.txt` is only ever a generated aggregate of it, never edited by hand. If two addons in the repo declare different version constraints for the same package, the check fails with both constraints shown instead of silently picking one.
 
+#### Pinning a version no manifest should carry
+
+Odoo checks a manifest's version at install time, so a version above Odoo's own requirement - a library that needs a newer `cryptography` than the one Odoo pins, say - cannot go in a manifest without making the module uninstallable wherever Odoo's version is installed. Pin it in the repo's `.solt-hooks.yaml` instead:
+
+```yaml
+requirements_pins:
+  - satcfdi==4.9.24           # replaces a manifest's bare `satcfdi`
+  - cryptography>=43.0.3,<44  # adds a package no manifest declares
+```
+
+`solt-check-requirements` merges the pins into what it generates from the manifests, so `--fix` keeps them, and editing them triggers the check like editing a manifest does. Every pin states a version - a dependency without one belongs in the manifest of the module that imports it - and a pin against a manifest that states another version fails the check with both constraints shown.
+
 ### Branch Handling for Sibling Repos (Per-Module PR/Branch CI)
 
 **Scope**: this only applies to a module repo's own CI (e.g. `solt-crm`'s `solt-validate.yml`, triggered on a PR against `solt-crm`). It answers "does my branch work against sibling repos' version branch" — not "does this exact release work".
@@ -452,7 +464,7 @@ cat .git/hooks/pre-push
 | `solt-check-csv` | CSV-only validation | CSV |
 | `solt-check-po` | PO/POT-only validation | PO, POT |
 | `solt-check-python` | Python-only validation | Python |
-| `solt-check-requirements` | Verify (or `--fix` regenerate) root requirements.txt from manifests | `__manifest__.py` |
+| `solt-check-requirements` | Verify (or `--fix` regenerate) root requirements.txt from manifests and `requirements_pins` | `__manifest__.py`, `requirements.txt`, `.solt-hooks.yaml` |
 | `solt-test-changed-modules` | Run Odoo tests for changed modules (pre-push stage only) | (all) |
 
 ---
