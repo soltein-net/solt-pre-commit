@@ -178,6 +178,19 @@ exclude_paths:
   - "**/node_modules/**"
 
 # =============================================================================
+# REQUIREMENTS PINS
+# =============================================================================
+# Versions solt-check-requirements adds to the generated requirements.txt on
+# top of the manifests' external_dependencies - for a version no manifest
+# should carry, e.g. a library that needs a newer dependency than Odoo pins
+# (Odoo checks a manifest's version at install time). Each pin states a
+# version: it replaces a manifest's bare declaration of its package, adds a
+# package no manifest declares, and fails the check against a manifest that
+# states another version.
+# requirements_pins:
+#   - cryptography>=43.0.3,<44
+
+# =============================================================================
 # BRANCH NAMING
 # =============================================================================
 branch_naming:

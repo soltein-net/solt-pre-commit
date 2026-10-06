@@ -155,5 +155,165 @@ class TestMainCli:
         assert "manifestoo not found" in capsys.readouterr().err
 
 
+def _requirement_lines(requirements_file):
+    """The requirement lines of a requirements.txt, in file order, without comments or blanks."""
+    return [
+        line.strip()
+        for line in requirements_file.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+class TestRequirementsPins:
+    """requirements_pins in .solt-hooks.yaml: versions a repo pins on top of its manifests."""
+
+    _run = TestMainCli._run
+
+    def test_a_pin_replaces_the_bare_declaration_of_its_package(self, tmp_path, monkeypatch):
+        (tmp_path / ".solt-hooks.yaml").write_text("requirements_pins:\n  - satcfdi==4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\nlxml\n",
+        )
+        assert code == 0
+        assert _requirement_lines(tmp_path / "requirements.txt") == ["lxml", "satcfdi==4.9.24"]
+
+    def test_a_pin_adds_a_package_no_manifest_declares(self, tmp_path, monkeypatch):
+        (tmp_path / ".solt-hooks.yaml").write_text("requirements_pins:\n  - cryptography>=43.0.3,<44\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 0
+        assert _requirement_lines(tmp_path / "requirements.txt") == ["cryptography>=43.0.3,<44", "satcfdi"]
+
+    def test_a_file_carrying_the_pins_is_in_sync(self, tmp_path, monkeypatch):
+        (tmp_path / ".solt-hooks.yaml").write_text(
+            "requirements_pins:\n  - satcfdi==4.9.24\n  - cryptography>=43.0.3,<44\n"
+        )
+        (tmp_path / "requirements.txt").write_text("cryptography>=43.0.3,<44\nlxml\nsatcfdi==4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path)],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\nlxml\n",
+        )
+        assert code == 0
+
+    def test_fix_keeps_the_pins(self, tmp_path, monkeypatch):
+        (tmp_path / ".solt-hooks.yaml").write_text(
+            "requirements_pins:\n  - satcfdi==4.9.24\n  - cryptography>=43.0.3,<44\n"
+        )
+        (tmp_path / "requirements.txt").write_text("cryptography>=43.0.3,<44\nold-unused-package\nsatcfdi==4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 0
+        assert _requirement_lines(tmp_path / "requirements.txt") == ["cryptography>=43.0.3,<44", "satcfdi==4.9.24"]
+
+    def test_a_hooks_file_without_pins_changes_nothing(self, tmp_path, monkeypatch):
+        (tmp_path / ".solt-hooks.yaml").write_text("validation_scope: changed\n")
+        (tmp_path / "requirements.txt").write_text("requests\n")
+        code = self._run(["--path", str(tmp_path)], monkeypatch, git_root=str(tmp_path))
+        assert code == 0
+
+    def test_a_pin_against_another_manifest_version_fails_and_leaves_the_file(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / ".solt-hooks.yaml").write_text("requirements_pins:\n  - satcfdi==4.9.24\n")
+        (tmp_path / "requirements.txt").write_text("satcfdi>=4.9.13\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi>=4.9.13\n",
+        )
+        assert code == 1
+        error = capsys.readouterr().err
+        assert "satcfdi==4.9.24" in error
+        assert "requirements_pins" in error
+        assert (tmp_path / "requirements.txt").read_text() == "satcfdi>=4.9.13\n"
+
+    def test_a_pin_without_a_version_is_refused(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / ".solt-hooks.yaml").write_text("requirements_pins:\n  - cryptography\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 1
+        assert "'cryptography'" in capsys.readouterr().err
+        assert not (tmp_path / "requirements.txt").exists()
+
+    def test_an_invalid_pin_is_refused(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / ".solt-hooks.yaml").write_text("requirements_pins:\n  - satcfdi=4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 1
+        assert "'satcfdi=4.9.24'" in capsys.readouterr().err
+        assert not (tmp_path / "requirements.txt").exists()
+
+    def test_pins_that_are_not_a_list_are_refused(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / ".solt-hooks.yaml").write_text("requirements_pins: satcfdi==4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 1
+        assert "requirements_pins" in capsys.readouterr().err
+        assert not (tmp_path / "requirements.txt").exists()
+
+    def test_a_hooks_file_that_is_not_a_mapping_is_refused(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / ".solt-hooks.yaml").write_text("- satcfdi==4.9.24\n")
+        (tmp_path / "requirements.txt").write_text("satcfdi==4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 1
+        assert ".solt-hooks.yaml" in capsys.readouterr().err
+        assert (tmp_path / "requirements.txt").read_text() == "satcfdi==4.9.24\n"
+
+    def test_an_unreadable_hooks_file_fails_instead_of_dropping_the_pins(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / ".solt-hooks.yaml").write_text("requirements_pins: [satcfdi==4.9.24\n")
+        (tmp_path / "requirements.txt").write_text("satcfdi==4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 1
+        assert ".solt-hooks.yaml" in capsys.readouterr().err
+        assert (tmp_path / "requirements.txt").read_text() == "satcfdi==4.9.24\n"
+
+    def test_the_out_of_sync_message_names_what_fix_would_drop(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / "requirements.txt").write_text("satcfdi==4.9.24\n")
+        code = self._run(
+            ["--path", str(tmp_path)],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="satcfdi\n",
+        )
+        assert code == 1
+        error = capsys.readouterr().err
+        assert "satcfdi==4.9.24" in error
+        assert "requirements_pins" in error
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -59,7 +59,7 @@ repos:
         name: Soltein - Verify requirements.txt matches manifests
         entry: python -m solt_pre_commit.checks_requirements
         language: system
-        files: (__manifest__|__openerp__)\.py$
+        files: (__manifest__|__openerp__)\.py$|^requirements\.txt$|^\.?solt-hooks\.ya?ml$
         pass_filenames: false
         require_serial: true
 
