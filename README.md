@@ -233,14 +233,24 @@ local` block from `templates/.pre-commit-config-local.yaml` by hand instead.
 
 ### Keeping requirements.txt in Sync
 
-`solt-check-requirements` uses [manifestoo](https://github.com/acsone/manifestoo) to read `external_dependencies["python"]` from every installable addon's manifest under the repo, then verifies the repo's root `requirements.txt` is an exact match (dedup'd by canonical package name, order-independent, comments ignored). It fails closed - the file is never rewritten automatically at commit time:
+`solt-check-requirements` uses [manifestoo](https://github.com/acsone/manifestoo) to read `external_dependencies["python"]` from every installable addon's manifest under the repo, then verifies the repo's root `requirements.txt` against them (by canonical package name, order-independent, comments ignored). The manifests say **which** packages the repo needs; `requirements.txt` says **which versions**:
+
+| In the manifests | In `requirements.txt` | Result |
+|---|---|---|
+| `satcfdi` | `satcfdi==4.9.24` | In sync - the version is set in `requirements.txt` |
+| `satcfdi` | *(missing)* | Out of sync - every declared package needs a line |
+| `sqlparse==0.5.5` | `sqlparse==0.5.4` | Out of sync - a version in a manifest is what Odoo checks on install and upgrade, so `requirements.txt` must carry exactly that one |
+| *(nobody declares it)* | `cryptography>=43.0.3,<44` | In sync - a pin on a dependency of a dependency, e.g. to lift a version Odoo's own requirements lock |
+| *(nobody declares it)* | `old-unused-package` | Out of sync - an unversioned line nobody declares |
+
+Keep versions out of the manifests unless Odoo must refuse to install the module on any other: Odoo checks a manifest's version specifier on every install and upgrade, so a version there breaks every environment that has another one. When the check fails it lists the lines to add (`+`) and remove (`-`). It fails closed - the file is never rewritten automatically at commit time:
 
 ```bash
 # After adding/editing a manifest's external_dependencies:
 solt-check-requirements --fix
 ```
 
-The manifest stays the single source of truth for a module's Python dependencies (it's what Odoo itself checks before allowing a module to install) - `requirements.txt` is only ever a generated aggregate of it, never edited by hand. If two addons in the repo declare different version constraints for the same package, the check fails with both constraints shown instead of silently picking one.
+`--fix` adds the declared packages that are missing and drops the unversioned lines nobody declares, keeping every version `requirements.txt` sets and the comment on its line - the place to say why a version is pinned. If two addons in the repo declare different version constraints for the same package, the check fails with both constraints shown instead of silently picking one.
 
 ### Branch Handling for Sibling Repos (Per-Module PR/Branch CI)
 
@@ -452,7 +462,7 @@ cat .git/hooks/pre-push
 | `solt-check-csv` | CSV-only validation | CSV |
 | `solt-check-po` | PO/POT-only validation | PO, POT |
 | `solt-check-python` | Python-only validation | Python |
-| `solt-check-requirements` | Verify (or `--fix` regenerate) root requirements.txt from manifests | `__manifest__.py` |
+| `solt-check-requirements` | Verify (or `--fix` update) root requirements.txt against manifests, keeping its versions | `__manifest__.py`, `requirements.txt` |
 | `solt-test-changed-modules` | Run Odoo tests for changed modules (pre-push stage only) | (all) |
 
 ---

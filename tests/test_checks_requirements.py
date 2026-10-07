@@ -140,6 +140,71 @@ class TestMainCli:
         assert "Conflicting external_dependencies" in capsys.readouterr().err
         assert (tmp_path / "requirements.txt").read_text() == "paramiko<4.0.0\n"
 
+    def test_a_version_requirements_sets_on_a_bare_declaration_is_in_sync(self, tmp_path, monkeypatch):
+        (tmp_path / "requirements.txt").write_text("satcfdi==4.9.24\n")
+        code = self._run(["--path", str(tmp_path)], monkeypatch, git_root=str(tmp_path), manifestoo_stdout="satcfdi\n")
+        assert code == 0
+
+    def test_a_versioned_line_no_manifest_declares_is_in_sync(self, tmp_path, monkeypatch):
+        (tmp_path / "requirements.txt").write_text("cryptography>=43.0.3,<44\nsatcfdi==4.9.24\n")
+        code = self._run(["--path", str(tmp_path)], monkeypatch, git_root=str(tmp_path), manifestoo_stdout="satcfdi\n")
+        assert code == 0
+
+    def test_fix_adds_a_new_declaration_and_keeps_the_versions_of_requirements(self, tmp_path, monkeypatch):
+        (tmp_path / "requirements.txt").write_text("cryptography>=43.0.3,<44\nsatcfdi==4.9.24\nunused-package\n")
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="lxml\nsatcfdi\n",
+        )
+        assert code == 0
+        assert parse_requirement_set((tmp_path / "requirements.txt").read_text()) == parse_requirement_set(
+            "cryptography>=43.0.3,<44\nlxml\nsatcfdi==4.9.24\n"
+        )
+
+    def test_fix_keeps_the_comment_that_explains_a_version(self, tmp_path, monkeypatch):
+        (tmp_path / "requirements.txt").write_text(
+            "cryptography>=43.0.3,<44  # satcfdi 4.9.24 needs it above Odoo's lock\nsatcfdi==4.9.24\n"
+        )
+        code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="lxml\nsatcfdi\n",
+        )
+        assert code == 0
+        assert (
+            "cryptography>=43.0.3,<44  # satcfdi 4.9.24 needs it above Odoo's lock\n"
+            in (tmp_path / "requirements.txt").read_text()
+        )
+
+    def test_out_of_sync_names_the_lines_to_add_and_remove(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / "requirements.txt").write_text("satcfdi==4.9.24\nunused-package\n")
+        code = self._run(
+            ["--path", str(tmp_path)], monkeypatch, git_root=str(tmp_path), manifestoo_stdout="lxml\nsatcfdi\n"
+        )
+        assert code == 1
+        error_output = capsys.readouterr().err
+        assert "+ lxml" in error_output
+        assert "- unused-package" in error_output
+        assert "satcfdi" not in error_output
+
+    def test_a_manifest_version_wins_over_a_different_one_in_requirements(self, tmp_path, monkeypatch):
+        (tmp_path / "requirements.txt").write_text("sqlparse==0.5.4\n")
+        check_code = self._run(
+            ["--path", str(tmp_path)], monkeypatch, git_root=str(tmp_path), manifestoo_stdout="sqlparse==0.5.5\n"
+        )
+        assert check_code == 1
+        fix_code = self._run(
+            ["--path", str(tmp_path), "--fix"],
+            monkeypatch,
+            git_root=str(tmp_path),
+            manifestoo_stdout="sqlparse==0.5.5\n",
+        )
+        assert fix_code == 0
+        assert parse_requirement_set((tmp_path / "requirements.txt").read_text()) == {"sqlparse==0.5.5"}
+
     def test_manifestoo_not_installed_exits_one(self, monkeypatch, capsys):
         monkeypatch.setattr(sys, "argv", ["solt-check-requirements"])
 
