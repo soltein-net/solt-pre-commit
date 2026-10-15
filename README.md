@@ -432,6 +432,12 @@ solt-test-module solt_crm
 # (instead of skipping) when the local Odoo environment is missing.
 solt-test-module --all
 
+# Two runs at once (two worktrees, two sessions): Odoo's test server binds a port, so a second
+# run on the same one dies at startup ("Address already in use"). Give each its own:
+# --http-port N (default: test_http_port of .solt-hooks.yaml, 18069); the gevent port follows,
+# at the gap the config has between the two, or set it with --gevent-port M.
+solt-test-module solt_crm --http-port 18269
+
 # A run that prints nothing for `test_idle_timeout_minutes` (default 30, set it in
 # .solt-hooks.yaml) is treated as hung: it is stopped and fails with exit 124,
 # so a test stuck on e.g. a network call can't stall CI, the release gate or a push.

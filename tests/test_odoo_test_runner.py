@@ -563,3 +563,87 @@ class TestIdleTimeoutConfig:
 
     def test_default_is_30_minutes(self, real_config):
         assert real_config.test_idle_timeout_minutes == 30
+
+
+class TestPortOptions:
+    """``--http-port`` / ``--gevent-port``: two runs at once need their own ports; the config's are the default."""
+
+    @pytest.fixture
+    def ported(self, real_config):
+        real_config.test_http_port = "18069"
+        real_config.test_gevent_port = "18072"
+        return real_config
+
+    def test_the_config_ports_are_the_default(self, ported):
+        assert otr.resolve_ports(ported, None, None) == ("18069", "18072")
+
+    def test_an_http_port_alone_keeps_the_configured_gap_to_the_gevent_port(self, ported):
+        assert otr.resolve_ports(ported, 18269, None) == ("18269", "18272")
+
+    def test_both_ports_given_are_used_as_they_are(self, ported):
+        assert otr.resolve_ports(ported, 18269, 18999) == ("18269", "18999")
+
+    def test_a_gevent_port_alone_leaves_the_http_port_to_the_config(self, ported):
+        assert otr.resolve_ports(ported, None, 18999) == ("18069", "18999")
+
+    def test_run_gives_odoo_the_ports_it_was_asked_for(self, fake_env):
+        tmp_path, config = fake_env
+        config.test_http_port, config.test_gevent_port = "18069", "18072"
+        launched = []
+
+        def fake_popen(cmd, **kwargs):
+            launched.append(cmd)
+            proc = mock.Mock()
+            proc.stdout = iter(["0 failed, 0 error(s) of 3 tests\n"])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", side_effect=fake_popen
+        ):
+            otr.run(["fake_module"], config, env_root=tmp_path, http_port=18369)
+
+        assert "--http-port=18369" in launched[0]
+        assert "--gevent-port=18372" in launched[0]
+
+    def test_run_without_the_options_still_uses_the_config_ports(self, fake_env):
+        tmp_path, config = fake_env
+        config.test_http_port, config.test_gevent_port = "18069", "18072"
+        launched = []
+
+        def fake_popen(cmd, **kwargs):
+            launched.append(cmd)
+            proc = mock.Mock()
+            proc.stdout = iter(["0 failed, 0 error(s) of 3 tests\n"])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", side_effect=fake_popen
+        ):
+            otr.run(["fake_module"], config, env_root=tmp_path)
+
+        assert "--http-port=18069" in launched[0]
+        assert "--gevent-port=18072" in launched[0]
+
+    @pytest.mark.parametrize("bad", ["0", "70000", "-1", "abc", ""])
+    def test_a_port_that_is_not_a_port_is_a_usage_error(self, bad, monkeypatch, tmp_path, real_config, capsys):
+        monkeypatch.setattr(otr, "SoltConfig", lambda *_a, **_k: real_config)
+        monkeypatch.setattr("sys.argv", ["solt-test-module", "a", "--http-port", bad])
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+        assert exc_info.value.code == 2
+
+    def test_main_hands_the_ports_to_run(self, monkeypatch, tmp_path, real_config):
+        seen = {}
+
+        def fake_run(modules, config, **kwargs):
+            seen.update(kwargs)
+            return 0
+
+        monkeypatch.setattr(otr, "run", fake_run)
+        monkeypatch.setattr(otr, "SoltConfig", lambda *_a, **_k: real_config)
+        monkeypatch.setattr("sys.argv", ["solt-test-module", "a", "--http-port", "18269", "--gevent-port", "18999"])
+        with pytest.raises(SystemExit):
+            otr.main()
+        assert (seen["http_port"], seen["gevent_port"]) == (18269, 18999)
