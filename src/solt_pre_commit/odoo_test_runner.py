@@ -175,12 +175,30 @@ def _resolve_odoo_conf(config: SoltConfig, env_root: Path) -> Path:
     return env_root / f".devcontainer/dev_{major}/odoo.conf"
 
 
+def resolve_ports(config: SoltConfig, http_port: int | None, gevent_port: int | None) -> tuple[str, str]:
+    """The ``(http, gevent)`` ports Odoo's test server binds.
+
+    Default: the config's (``test_http_port`` / ``test_gevent_port``). ``http_port`` alone moves the gevent port
+    with it, keeping the gap the config has between the two, so one option is enough to run beside another run.
+    ``gevent_port`` alone replaces only the gevent port.
+    """
+    if http_port is None and gevent_port is None:
+        return str(config.test_http_port), str(config.test_gevent_port)
+    http = str(http_port) if http_port is not None else str(config.test_http_port)
+    if gevent_port is not None:
+        return http, str(gevent_port)
+    gap = int(config.test_gevent_port) - int(config.test_http_port)
+    return http, str(http_port + gap)
+
+
 def run(
     modules: list,
     config: SoltConfig,
     env_root: Path | None = None,
     addons_path: str | None = None,
     strict: bool = False,
+    http_port: int | None = None,
+    gevent_port: int | None = None,
 ) -> int:
     """Run the given modules' own tests against a scratch DB. Returns the exit
     code to propagate (0 = pass, nonzero = fail or error).
@@ -195,6 +213,9 @@ def run(
     missing. Off for the pre-push hook, where a missing local environment
     shouldn't block a push; on for `--all`, where "nothing ran" must never
     read as a pass.
+
+    http_port, gevent_port: override the config's test ports (see ``resolve_ports``), so two runs
+    can be active at once: a run whose port is taken by another dies at startup.
     """
     env_root = env_root or find_env_root()
     odoo_bin = env_root / config.test_odoo_bin
@@ -218,6 +239,7 @@ def run(
         )
         return 0
 
+    http, gevent = resolve_ports(config, http_port, gevent_port)
     test_tags = ",".join(f"/{m}" for m in modules)
     scratch_db = f"test_scratch_{os.getpid()}"
 
@@ -313,8 +335,8 @@ def run(
                 f"--db_host={config.test_db_host}",
                 f"--db_port={config.test_db_port}",
                 f"--db_user={config.test_db_user}",
-                f"--http-port={config.test_http_port}",
-                f"--gevent-port={config.test_gevent_port}",
+                f"--http-port={http}",
+                f"--gevent-port={gevent}",
                 "--logfile=",
                 "--log-handler=:WARNING",
                 "--log-handler=odoo.modules.loading:INFO",
@@ -444,6 +466,17 @@ def _report_coverage(modules: list, env_root: Path) -> None:
         print("[solt-test-module] `coverage` not on PATH, skipping report.", file=sys.stderr)
 
 
+def _port(value: str) -> int:
+    """argparse type: a TCP port, 1 to 65535."""
+    try:
+        port = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a port number") from None
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"{port} is not a port (1 to 65535)")
+    return port
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run Odoo tests for one or more modules against a disposable scratch database.",
@@ -468,6 +501,21 @@ def main():
         "--addons-path",
         default=None,
         help="Override --addons-path for odoo-bin (default: use the resolved odoo.conf's own setting)",
+    )
+    parser.add_argument(
+        "--http-port",
+        type=_port,
+        default=None,
+        help=(
+            "Port of Odoo's test HTTP server (default: test_http_port of .solt-hooks.yaml, 18069). "
+            "Give each run its own when two are active at once; the gevent port follows, at the gap the config has."
+        ),
+    )
+    parser.add_argument(
+        "--gevent-port",
+        type=_port,
+        default=None,
+        help="Port of Odoo's test gevent (longpolling) server (default: follows --http-port, else test_gevent_port).",
     )
     args = parser.parse_args()
 
@@ -496,7 +544,16 @@ def main():
         if not modules:
             parser.error("no modules given")
 
-    sys.exit(run(modules, config, addons_path=args.addons_path, strict=args.all))
+    sys.exit(
+        run(
+            modules,
+            config,
+            addons_path=args.addons_path,
+            strict=args.all,
+            http_port=args.http_port,
+            gevent_port=args.gevent_port,
+        )
+    )
 
 
 if __name__ == "__main__":
