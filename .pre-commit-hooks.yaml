@@ -81,21 +81,23 @@
 # REQUIREMENTS - Keep root requirements.txt in sync with manifests
 # -----------------------------------------------------------------------------
 # IMPORTANT: Runs repo-wide (via manifestoo, not per staged file) every time
-# a manifest changes, since requirements.txt is a repo-wide aggregate - a
-# change to any one module's external_dependencies can affect it.
+# a manifest or the root requirements.txt changes, since requirements.txt is
+# a repo-wide aggregate - a change to any one module's external_dependencies
+# can affect it, and the versions in it are edited by hand.
 # Fails closed (no --fix by default) rather than silently rewriting the file;
-# run `solt-check-requirements --fix` locally to regenerate it.
+# run `solt-check-requirements --fix` locally to update it.
 # -----------------------------------------------------------------------------
 - id: solt-check-requirements
   name: Soltein - Verify requirements.txt matches manifests
   description: |
-    Verify the repo's root requirements.txt is an exact, generated
-    reflection of every installable addon's __manifest__.py
-    external_dependencies["python"] (read via manifestoo). Run with
-    --fix to regenerate it after editing a manifest.
+    Verify the repo's root requirements.txt lists every package that an
+    installable addon's __manifest__.py external_dependencies["python"]
+    declares (read via manifestoo). Versions are set in requirements.txt;
+    a version stated in a manifest must match it. Run with --fix to
+    update it after editing a manifest - it keeps the versions.
   entry: solt-check-requirements
   language: python
-  files: (__manifest__|__openerp__)\.py$
+  files: (__manifest__|__openerp__)\.py$|^requirements\.txt$
   pass_filenames: false
   require_serial: true
 
