@@ -202,6 +202,65 @@ class TestRunDbLifecycle:
         assert "--log-handler=odoo.modules.loading:INFO" in captured["cmd"]
 
 
+class TestScratchDbWithoutAutovacuum:
+    """Autovacuum must never touch the scratch DB's tables. A test runs in one
+    transaction that is rolled back; when autovacuum reaches a table while an
+    open test transaction holds its only rows, it records pages but zero rows,
+    the planner then believes the table empty, and a join over it runs nested
+    loops that take seconds per query for the rest of the run."""
+
+    def _run_recording_calls(self, tmp_path, config, psql_outcome=0):
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(("run", cmd))
+            if cmd[0] != "psql":
+                return mock.Mock(returncode=0)
+            if isinstance(psql_outcome, BaseException):
+                raise psql_outcome
+            return mock.Mock(returncode=psql_outcome, stderr="ERROR:  permission denied to create event trigger")
+
+        def fake_popen(cmd, **kwargs):
+            calls.append(("popen", cmd))
+            proc = mock.Mock()
+            proc.stdout = iter(["0 failed, 0 error(s) of 3 tests\n"])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch(
+            "subprocess.Popen", side_effect=fake_popen
+        ):
+            returncode = otr.run(["fake_module"], config, env_root=tmp_path)
+        return returncode, calls
+
+    def test_autovacuum_is_switched_off_in_the_scratch_db_before_odoo_creates_its_tables(self, fake_env):
+        tmp_path, config = fake_env
+        returncode, calls = self._run_recording_calls(tmp_path, config)
+
+        assert returncode == 0
+        commands = [cmd[0] if kind == "run" else "odoo-bin" for kind, cmd in calls]
+        createdb_cmd = next(cmd for kind, cmd in calls if kind == "run" and cmd[0] == "createdb")
+        scratch_db = createdb_cmd[-1]
+        psql_cmds = [cmd for kind, cmd in calls if kind == "run" and cmd[0] == "psql"]
+        assert len(psql_cmds) == 1
+        psql_cmd = psql_cmds[0]
+        assert psql_cmd[psql_cmd.index("-d") + 1] == scratch_db
+        assert "ON_ERROR_STOP=1" in psql_cmd
+        sql = psql_cmd[psql_cmd.index("-c") + 1]
+        assert "CREATE EVENT TRIGGER" in sql
+        assert "autovacuum_enabled = false" in sql
+        assert commands.index("createdb") < commands.index("psql") < commands.index("odoo-bin")
+
+    @pytest.mark.parametrize("psql_outcome", [1, FileNotFoundError()], ids=["not-a-superuser", "no-psql"])
+    def test_tests_still_run_when_autovacuum_cannot_be_switched_off(self, fake_env, capsys, psql_outcome):
+        tmp_path, config = fake_env
+        returncode, calls = self._run_recording_calls(tmp_path, config, psql_outcome=psql_outcome)
+
+        assert returncode == 0
+        assert any(kind == "popen" for kind, cmd in calls)
+        assert "autovacuum" in capsys.readouterr().err
+
+
 class TestAddonsPathOverride:
     def _run_capturing_popen(self, tmp_path, config, **run_kwargs):
         captured = {}

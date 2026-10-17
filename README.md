@@ -399,7 +399,10 @@ The `solt-test-changed-modules` hook at the **pre-push stage**:
 
 1. Detects which modules changed vs. base branch
 2. Only runs if the current branch has an open PR (checked via `gh` CLI / `GITHUB_TOKEN`) — exempt on a branch's first, PR-less push; fails open (runs anyway) if PR state can't be determined
-3. Creates a **scratch database** (temporary)
+3. Creates a **scratch database** (temporary), with autovacuum kept off every table Odoo creates in it — autovacuum
+   reaching a table while a test's rolled-back transaction is open leaves the planner believing it empty, and the
+   rest of the run slows down by orders of magnitude. Needs a superuser DB role (CI's has it); with any other the run
+   warns and goes on with autovacuum on
 4. Installs the Odoo modules
 5. **Runs tests** for those modules
 6. If **any test fails** → **push is blocked** ❌
