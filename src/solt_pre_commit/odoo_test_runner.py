@@ -105,6 +105,77 @@ def _idle_watchdog(
             return
 
 
+# Run in the scratch DB before Odoo creates anything in it: every ordinary table created there from then on (its
+# TOAST table too) is left out of autovacuum. Temporary tables are never autovacuumed and partitioned parents hold no
+# rows, so both are skipped rather than altered.
+SCRATCH_DB_WITHOUT_AUTOVACUUM_SQL = """
+CREATE FUNCTION solt_test_disable_autovacuum() RETURNS event_trigger LANGUAGE plpgsql AS $$
+DECLARE
+    created_table record;
+BEGIN
+    FOR created_table IN
+        SELECT command.objid::regclass AS table_name
+        FROM pg_event_trigger_ddl_commands() AS command
+        JOIN pg_class ON pg_class.oid = command.objid
+        WHERE command.object_type = 'table' AND pg_class.relkind = 'r' AND pg_class.relpersistence <> 't'
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE %s SET (autovacuum_enabled = false, toast.autovacuum_enabled = false)',
+            created_table.table_name
+        );
+    END LOOP;
+END
+$$;
+CREATE EVENT TRIGGER solt_test_disable_autovacuum ON ddl_command_end
+    WHEN TAG IN ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO')
+    EXECUTE FUNCTION solt_test_disable_autovacuum();
+"""
+
+
+def _keep_autovacuum_out(config: SoltConfig, scratch_db: str, env: dict) -> None:
+    """Keep autovacuum away from every table Odoo is about to create in ``scratch_db``.
+
+    Each test runs in one transaction that is rolled back. When autovacuum reaches a table while an open test
+    transaction holds its only rows, it records the table's pages with zero rows; the planner then estimates the
+    table as empty and a join over it degenerates into nested loops, seconds per query, for as long as the run
+    lasts. The rolled-back rows of the earlier tests are what send autovacuum there in the first place.
+
+    Must run before odoo-bin starts. Creating the event trigger takes a superuser: for any other role the run goes
+    on with autovacuum on, and a warning says so.
+    """
+    try:
+        switched_off = subprocess.run(
+            [
+                "psql",
+                "-h",
+                config.test_db_host,
+                "-p",
+                config.test_db_port,
+                "-U",
+                config.test_db_user,
+                "-d",
+                scratch_db,
+                "-q",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                SCRATCH_DB_WITHOUT_AUTOVACUUM_SQL,
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        reason = (switched_off.stderr or "").strip() if switched_off.returncode != 0 else ""
+    except FileNotFoundError:
+        reason = "`psql` not on PATH"
+    if reason:
+        print(
+            f"[solt-test-module] WARNING - autovacuum stays on in {scratch_db} ({reason}). A test that autovacuum "
+            "reaches mid-run can get planner estimates of empty tables and run orders of magnitude slower.",
+            file=sys.stderr,
+        )
+
+
 def find_env_root() -> Path:
     """The Odoo environment root: the git superproject working tree when this
     repo is a submodule of a checked-out super-repo (e.g. a solt-* addon repo
@@ -289,6 +360,7 @@ def run(
     )
     if createdb.returncode != 0:
         return createdb.returncode
+    _keep_autovacuum_out(config, scratch_db, env)
 
     modules_arg = ",".join(modules)
     print(f"Running tests for: {modules_arg} (test-tags: {test_tags})")
