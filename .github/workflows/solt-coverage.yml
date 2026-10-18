@@ -556,7 +556,11 @@ jobs:
           ADDONS_PATH: ${{ steps.addons_path.outputs.value }}
           SOLT_ODOO_VERSION: ${{ inputs.odoo-version }}
           SCOPE: ${{ inputs.scope }}
-          SHARDS: ${{ inputs.shards }}
+          # The legs this matrix really has, not inputs.shards: for
+          # scope='changed' Plan sizes the matrix from the changed-module
+          # count, so the input (usually '1') no longer matches it - every leg
+          # then kept the whole module list and ran the same suite N times.
+          SHARDS: ${{ strategy.job-total }}
           SHARD_INDEX: ${{ matrix.shard }}
         run: |
           # solt-test-module (odoo_test_runner.py) requires a conf file to
