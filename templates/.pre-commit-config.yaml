@@ -3,7 +3,7 @@
 # =============================================================================
 # Install: pip install pre-commit && pre-commit install
 # Run: pre-commit run --all-files
-# Supports Odoo versions: 17.0, 18.0, 19.0
+# Supports Odoo versions: 17.0, 18.0, 19.0, 20.0
 # =============================================================================
 
 # Lets a plain `pre-commit install` (no --hook-type flag) install both the

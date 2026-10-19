@@ -13,6 +13,8 @@ to the solt-pre-commit repo block, so it matched every `rev: vX.Y.Z` line
 in the file."""
 
 import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -593,13 +595,13 @@ class TestDetectPostgresImage:
 
     def test_no_modules_need_an_extension_keeps_default(self):
         modules = {"solt_crm": {"external_dependencies": {"python": ["requests"]}}}
-        assert setup_repo.detect_postgres_image(modules) == setup_repo.DEFAULT_POSTGRES_IMAGE
+        assert setup_repo.detect_postgres_image(modules, "19.0") == "postgres:15"
 
     def test_module_declaring_vector_extension_picks_pgvector_image(self):
         modules = {
             "llm_pgvector": {"external_dependencies": {"python": ["pgvector"], "postgresql": ["vector"]}},
         }
-        assert setup_repo.detect_postgres_image(modules) == setup_repo.POSTGRES_EXTENSION_IMAGES["vector"]
+        assert setup_repo.detect_postgres_image(modules, "19.0") == "pgvector/pgvector:pg15"
 
     def test_module_declaring_vchord_extension_wins_over_plain_vector(self):
         """vchord's image already CASCADEs pgvector in, so when both are
@@ -610,11 +612,11 @@ class TestDetectPostgresImage:
             "llm_pgvector": {"external_dependencies": {"postgresql": ["vector"]}},
             "llm_vectorchord": {"external_dependencies": {"postgresql": ["vchord"]}},
         }
-        assert setup_repo.detect_postgres_image(modules) == setup_repo.POSTGRES_EXTENSION_IMAGES["vchord"]
+        assert setup_repo.detect_postgres_image(modules, "19.0") == "tensorchord/vchord-postgres:pg15-v1.1.1"
 
     def test_module_with_no_external_dependencies_key_is_tolerated(self):
         modules = {"solt_base": {}}
-        assert setup_repo.detect_postgres_image(modules) == setup_repo.DEFAULT_POSTGRES_IMAGE
+        assert setup_repo.detect_postgres_image(modules, "19.0") == "postgres:15"
 
 
 class TestDetectCurrentShards:
@@ -794,3 +796,114 @@ class TestGenerateWorkflowFileCoverageTimeout:
         again = self._generate(tmp_path)  # no explicit value
         assert "coverage-timeout-minutes: 330" in again
         assert "coverage-timeout-minutes: 90" not in again
+
+
+def _git(repo_path: Path, *arguments: str) -> None:
+    settings = ["user.name=Probe", "user.email=probe@example.com", "commit.gpgsign=false", "core.hooksPath=/dev/null"]
+    config_flags = [flag for setting in settings for flag in ("-c", setting)]
+    subprocess.run(["git", *config_flags, *arguments], cwd=repo_path, check=True, capture_output=True)
+
+
+def _odoo_repo(parent: Path, odoo_version: str, committed: bool = True, postgresql_extensions=()) -> Path:
+    """A checkout on its `odoo_version` branch holding one module of that version, whose
+    model prints - a lint run that reports print-used is one where pylint-odoo's checks ran."""
+    repo_path = parent / "repo"
+    module_path = repo_path / "solt_probe"
+    (module_path / "models").mkdir(parents=True)
+    manifest = {
+        "name": "Probe",
+        "version": f"{odoo_version}.1.0.0",
+        "author": "Soltein SA de CV",
+        "license": "LGPL-3",
+        "depends": ["base"],
+        "external_dependencies": {"postgresql": list(postgresql_extensions)},
+        "installable": True,
+    }
+    (module_path / "__manifest__.py").write_text(repr(manifest) + "\n")
+    (module_path / "__init__.py").write_text("from . import models\n")
+    (module_path / "models" / "__init__.py").write_text("from . import probe\n")
+    (module_path / "models" / "probe.py").write_text(
+        "from odoo import models\n"
+        "\n"
+        "\n"
+        "class Probe(models.Model):\n"
+        '    _name = "solt.probe"\n'
+        "\n"
+        "    def action_shout(self):\n"
+        '        print("shout")\n'
+    )
+    _git(repo_path, "init", "-q", "-b", odoo_version)
+    if committed:
+        _git(repo_path, "add", ".")
+        _git(repo_path, "commit", "-q", "-m", "Probe module")
+    return repo_path
+
+
+def _read_workflow(repo_path: Path) -> dict:
+    return yaml.safe_load((repo_path / ".github" / "workflows" / "solt-validate.yml").read_text())
+
+
+def _workflow_triggers(workflow: dict) -> dict:
+    # PyYAML follows YAML 1.1, where the bare key `on` is the boolean True.
+    return workflow[True]
+
+
+class TestRegenerateTargetsTheRepoOwnOdooVersion:
+    """`regenerate` on a repo of any supported Odoo version yields a workflow that
+    runs on pull requests against that version's branch, with a test database that
+    version of Odoo accepts."""
+
+    def _regenerate(self, repo_path: Path, monkeypatch) -> dict:
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "regenerate", str(repo_path)])
+        setup_repo.main()
+        return _read_workflow(repo_path)
+
+    @pytest.mark.parametrize("odoo_version", ["17.0", "18.0", "19.0", "20.0"])
+    def test_pull_requests_against_the_version_branch_run_ci(self, tmp_path, monkeypatch, odoo_version):
+        triggers = _workflow_triggers(self._regenerate(_odoo_repo(tmp_path, odoo_version), monkeypatch))
+
+        assert triggers["push"]["branches"] == [odoo_version]
+        assert odoo_version in triggers["pull_request"]["branches"]
+
+    def test_odoo_20_tests_against_a_postgres_it_accepts(self, tmp_path, monkeypatch):
+        """Odoo 20 refuses a PostgreSQL older than 16 (odoo/release.py MIN_PG_VERSION)."""
+        jobs = self._regenerate(_odoo_repo(tmp_path, "20.0"), monkeypatch)["jobs"]
+
+        assert jobs["Test"]["with"]["postgres-image"] == "postgres:18"
+        assert jobs["NightlyTest"]["with"]["postgres-image"] == "postgres:18"
+
+    def test_odoo_20_module_needing_pgvector_tests_against_a_postgres_it_accepts(self, tmp_path, monkeypatch):
+        repo_path = _odoo_repo(tmp_path, "20.0", postgresql_extensions=["vector"])
+        jobs = self._regenerate(repo_path, monkeypatch)["jobs"]
+
+        assert jobs["Test"]["with"]["postgres-image"] == "pgvector/pgvector:pg18"
+
+    def test_odoo_19_keeps_the_postgres_it_tests_against_today(self, tmp_path, monkeypatch):
+        jobs = self._regenerate(_odoo_repo(tmp_path, "19.0"), monkeypatch)["jobs"]
+
+        assert jobs["Test"]["with"]["postgres-image"] == "postgres:15"
+
+
+class TestSetupForOdooTwenty:
+    """`setup --odoo-version 20.0` leaves a repo whose 20.0 modules pass the
+    manifest checks of the pylint-odoo hook it installs."""
+
+    def _setup(self, monkeypatch, *arguments: str) -> None:
+        monkeypatch.setattr(setup_repo, "install_precommit_hooks", lambda target, dry_run=False: True)
+        monkeypatch.setattr("sys.argv", ["setup-repo.py", "setup", *arguments])
+        setup_repo.main()
+
+    def test_the_pylintrc_accepts_a_20_manifest(self, tmp_path, monkeypatch):
+        repo_path = _odoo_repo(tmp_path, "20.0")
+        self._setup(monkeypatch, str(repo_path), "--odoo-version", "20.0")
+
+        # The arguments the template's pylint_odoo hook runs with.
+        lint = subprocess.run(
+            [sys.executable, "-m", "pylint", "--rcfile=.pylintrc", "solt_probe"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+        )
+
+        assert "print-used" in lint.stdout, lint.stdout + lint.stderr
+        assert "manifest-version-format" not in lint.stdout

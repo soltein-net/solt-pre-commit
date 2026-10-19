@@ -560,6 +560,8 @@ def setup_single_repo(
             print_step("❌", f"Source not found: {src}")
             failed += 1
 
+    update_file_content(target / ".pylintrc", {"{{ VALID_ODOO_VERSIONS }}": ",".join(ODOO_VERSION_RUNTIMES)}, dry_run)
+
     # Never with `force`, and refreshed rather than replaced when it already
     # exists: see FILES_TO_CREATE_IF_MISSING.
     for src, dest_rel, _description in FILES_TO_CREATE_IF_MISSING:
@@ -781,6 +783,41 @@ def detect_odoo_version_from_branch(branch_name: str | None = None, repo_path: P
     return "17.0"
 
 
+# What CI builds and tests each Odoo version on. A version setup-repo.py can
+# target is a key here and nowhere else: --odoo-version's choices and the
+# valid-odoo-versions of the .pylintrc it writes are read from this table.
+# - python: see get_python_version().
+# - postgres: the major of the CI database service, see detect_postgres_image().
+#   Odoo 20 refuses anything below 16 (MIN_PG_VERSION in its odoo/release.py)
+#   and gets the major the deployed database servers run.
+ODOO_VERSION_RUNTIMES = {
+    "17.0": {"python": "3.11", "postgres": "15"},
+    "18.0": {"python": "3.11", "postgres": "15"},
+    "19.0": {"python": "3.13", "postgres": "15"},
+    # Python above its 3.12 minimum: nothing is deployed yet to override with, so
+    # it follows 19.0 rather than sitting a Python version behind the release
+    # before it - which is the shape that reads as a mistake and eventually is one.
+    "20.0": {"python": "3.13", "postgres": "18"},
+}
+
+
+def get_odoo_version_runtime(odoo_version: str) -> dict[str, str]:
+    """The ODOO_VERSION_RUNTIMES entry of `odoo_version`.
+
+    Raises ValueError for a version the table lacks: silently guessing here
+    would bake a possibly-wrong Python or Postgres version into generated CI,
+    and the mismatch wouldn't surface until a full, expensive CI run fails on
+    what looks like an unrelated dependency error.
+    """
+    if odoo_version not in ODOO_VERSION_RUNTIMES:
+        raise ValueError(
+            f"No known runtime for Odoo {odoo_version!r}. Add it to "
+            "ODOO_VERSION_RUNTIMES in setup-repo.py before generating "
+            "a workflow/README for this version."
+        )
+    return ODOO_VERSION_RUNTIMES[odoo_version]
+
+
 def get_python_version(odoo_version: str) -> str:
     """Map Odoo version to the Python version we actually build/test against.
 
@@ -800,25 +837,10 @@ def get_python_version(odoo_version: str) -> str:
     by evaluating every marker in Odoo 19's requirements.txt, both resolve 44
     of 47 packages, the difference being Odoo's own PyPDF2 -> pypdf swap at the
     3.13 boundary plus a Windows-only entry. Nothing is left without a version.
+
+    The versions themselves live in ODOO_VERSION_RUNTIMES.
     """
-    mapping = {
-        "17.0": "3.11",
-        "18.0": "3.11",
-        "19.0": "3.13",
-        "20.0": "3.13",  # Above its 3.12 minimum: nothing is deployed yet to override with, so
-                         # it follows 19.0 rather than sitting a Python version behind the release
-                         # before it - which is the shape that reads as a mistake and eventually is one.
-    }
-    if odoo_version not in mapping:
-        raise ValueError(
-            f"No known Python version for Odoo {odoo_version!r}. Add it to "
-            "get_python_version()'s mapping in setup-repo.py before generating "
-            "a workflow/README for this version - silently guessing here would "
-            "bake a possibly-wrong Python version into generated CI, and the "
-            "mismatch wouldn't surface until a full, expensive CI run fails on "
-            "what looks like an unrelated dependency error."
-        )
-    return mapping[odoo_version]
+    return get_odoo_version_runtime(odoo_version)["python"]
 
 
 def get_git_branch(repo_path: Path) -> str:
@@ -1289,20 +1311,22 @@ def detect_sibling_repos(modules: dict[str, dict], repo_path: Path) -> list[str]
     return [f"{repo}@{target_ref}:{repo.split('/')[-1]}" for repo in needed]
 
 
-# Postgres extension -> service image that provides it. vchord's image is
+# Postgres extension -> service image that provides it, for the PostgreSQL
+# major ODOO_VERSION_RUNTIMES gives the repo's Odoo version. vchord's image is
 # listed first and used whenever present since VectorChord's own extension
 # install CASCADEs into pgvector - one image then covers both requirements.
 POSTGRES_EXTENSION_IMAGES = {
-    "vchord": "tensorchord/vchord-postgres:pg15-v1.1.1",
-    "vector": "pgvector/pgvector:pg15",
+    "vchord": "tensorchord/vchord-postgres:pg{postgres_major}-v1.1.1",
+    "vector": "pgvector/pgvector:pg{postgres_major}",
 }
-DEFAULT_POSTGRES_IMAGE = "postgres:15"
+DEFAULT_POSTGRES_IMAGE = "postgres:{postgres_major}"
 # Same default as solt-coverage.yml's own `coverage-timeout-minutes` input.
 DEFAULT_COVERAGE_TIMEOUT_MINUTES = "90"
 
 
-def detect_postgres_image(modules: dict[str, dict]) -> str:
-    """Pick the CI Postgres service image from modules' declared needs.
+def detect_postgres_image(modules: dict[str, dict], odoo_version: str) -> str:
+    """Pick the CI Postgres service image from modules' declared needs, on the
+    PostgreSQL major ODOO_VERSION_RUNTIMES gives `odoo_version`.
 
     Single source of truth is each module's own manifest, same as
     solt-check-requirements does for Python deps: a module that needs a
@@ -1311,15 +1335,16 @@ def detect_postgres_image(modules: dict[str, dict]) -> str:
     provides it - instead of a hand-edited workflow line that regeneration
     would otherwise silently overwrite back to the plain default.
     """
+    postgres_major = get_odoo_version_runtime(odoo_version)["postgres"]
     extensions = set()
     for module_info in modules.values():
         extensions.update(module_info.get("external_dependencies", {}).get("postgresql", []))
 
     for extension, image in POSTGRES_EXTENSION_IMAGES.items():
         if extension in extensions:
-            return image
+            return image.format(postgres_major=postgres_major)
 
-    return DEFAULT_POSTGRES_IMAGE
+    return DEFAULT_POSTGRES_IMAGE.format(postgres_major=postgres_major)
 
 
 def sync_precommit_config(repo_path: Path, dry_run: bool = False) -> None:
@@ -1431,7 +1456,7 @@ def generate_workflow_file(
             "{{ ODOO_VERSION }}": odoo_version,
             "{{ PYTHON_VERSION }}": python_version,
             "{{ SOLT_VERSION }}": CURRENT_VERSION,
-            "{{ POSTGRES_IMAGE }}": detect_postgres_image(modules),
+            "{{ POSTGRES_IMAGE }}": detect_postgres_image(modules, odoo_version),
             "{{ SHARDS }}": shards if shards is not None else detect_current_shards(repo_path),
             "{{ COVERAGE_TIMEOUT_MINUTES }}": (
                 coverage_timeout_minutes
@@ -1640,7 +1665,7 @@ Examples:
         "unrelated to the generated CI workflow's own Test/Validation scope",
     )
     setup_parser.add_argument(
-        "--odoo-version", choices=["auto", "17.0", "18.0", "19.0"], default="auto", help="Odoo version (default: auto)"
+        "--odoo-version", choices=["auto", *ODOO_VERSION_RUNTIMES], default="auto", help="Odoo version (default: auto)"
     )
     setup_parser.add_argument("--local", action="store_true", help="Use local hooks config (for monorepo submodules)")
     setup_parser.add_argument(
