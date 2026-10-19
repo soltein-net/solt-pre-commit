@@ -886,7 +886,8 @@ class TestRegenerateTargetsTheRepoOwnOdooVersion:
 
 class TestSetupForOdooTwenty:
     """`setup --odoo-version 20.0` leaves a repo whose 20.0 modules pass the
-    manifest checks of the pylint-odoo hook it installs."""
+    manifest checks of the pylint-odoo hook it installs, and works on a repo
+    that has no commit yet."""
 
     def _setup(self, monkeypatch, *arguments: str) -> None:
         monkeypatch.setattr(setup_repo, "install_precommit_hooks", lambda target, dry_run=False: True)
@@ -907,3 +908,9 @@ class TestSetupForOdooTwenty:
 
         assert "print-used" in lint.stdout, lint.stdout + lint.stderr
         assert "manifest-version-format" not in lint.stdout
+
+    def test_a_repo_with_no_commit_yet_gets_its_workflow(self, tmp_path, monkeypatch):
+        repo_path = _odoo_repo(tmp_path, "20.0", committed=False)
+        self._setup(monkeypatch, str(repo_path))
+
+        assert _workflow_triggers(_read_workflow(repo_path))["push"]["branches"] == ["20.0"]
