@@ -1458,7 +1458,8 @@ def generate_workflow_file(
             "{{ SOLT_VERSION }}": CURRENT_VERSION,
             "{{ POSTGRES_IMAGE }}": detect_postgres_image(modules, odoo_version),
             "{{ SHARDS }}": shards if shards is not None else detect_current_shards(repo_path),
-            "{{ COVERAGE_TIMEOUT_MINUTES }}": (
+            # Quotes included: the template quotes it to stay YAML, the input takes a number.
+            "'{{ COVERAGE_TIMEOUT_MINUTES }}'": (
                 coverage_timeout_minutes
                 if coverage_timeout_minutes is not None
                 else detect_current_coverage_timeout(repo_path)
