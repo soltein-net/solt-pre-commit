@@ -35,6 +35,9 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "ruff>=0.14.0",
+    # The release templates/.pre-commit-config.yaml pins for client repos: the
+    # tests lint a module with the .pylintrc setup-repo.py writes.
+    "pylint-odoo==10.0.0",
 ]
 
 [project.scripts]

@@ -7,7 +7,7 @@
 # badges.
 #
 # ⚠️  DO NOT MANUALLY EDIT THIS FILE
-# Run: python setup-repo.py --regenerate to update
+# Run: python setup-repo.py regenerate <path to this repo> to update
 #
 # SETUP REQUIRED IN REPOSITORY SECRETS:
 # - GIST_SECRET: Fine-grained PAT for updating badges (Gist write access)
@@ -21,8 +21,11 @@ permissions:
   pull-requests: write
 
 on:
+  # The one version branch is the one this file was generated for: every job
+  # below runs with odoo-version '{{ ODOO_VERSION }}', and a branch of another
+  # Odoo version carries a workflow generated for its own.
   pull_request:
-    branches: [ main, master, develop, '17.0', '18.0', '19.0' ]
+    branches: [ main, master, develop, '{{ ODOO_VERSION }}' ]
   # Validation (lint-only, seconds) still runs full-scope on every push, and
   # Badges still refreshes the solt-check/pylint/ruff badges from it - both
   # are cheap regardless of merge volume. NightlyTest (the actual Odoo test

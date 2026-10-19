@@ -29,8 +29,11 @@ manifest-deprecated-keys=description,active
 # Allowed licenses
 license-allowed=AGPL-3,GPL-2,GPL-2 or any later version,GPL-3,GPL-3 or any later version,LGPL-3
 
-# Valid Odoo versions
-valid-odoo-versions=17.0,18.0,19.0
+# Valid Odoo versions: every version setup-repo.py supports, never only this
+# repo's. Given a single version, pylint-odoo turns off each check outside the
+# versions its own release knows, so a version newer than that release silences
+# every check.
+valid-odoo-versions={{ VALID_ODOO_VERSIONS }}
 
 [MESSAGES CONTROL]
 disable=all
