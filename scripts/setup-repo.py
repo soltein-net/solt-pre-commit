@@ -890,7 +890,7 @@ def get_git_branch(repo_path: Path) -> str:
         pass
 
     # Fallback: extract from manifest
-    return detect_odoo_version_from_branch(repo_path)
+    return detect_odoo_version_from_branch(repo_path=repo_path)
 
 
 def generate_module_table(modules: dict[str, dict]) -> str:
