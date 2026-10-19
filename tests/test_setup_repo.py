@@ -774,6 +774,33 @@ class TestDetectCurrentCoverageTimeout:
         assert setup_repo.detect_current_coverage_timeout(tmp_path) == "240"
 
 
+class TestWorkflowTemplateYaml:
+    """The YAML templates load as YAML - the repo's check-yaml hook reads them - and the
+    workflow generated from the template passes NightlyTest's coverage-timeout-minutes as
+    a number: solt-coverage.yml declares that input `type: number`, and GitHub refuses a
+    workflow that passes a value of another type to a typed input."""
+
+    @pytest.mark.parametrize(
+        "template_path",
+        [
+            setup_repo.WORKFLOW_FILE[0],
+            setup_repo.PRECOMMIT_REMOTE[0],
+            setup_repo.PRECOMMIT_LOCAL[0],
+            setup_repo.TEMPLATES_DIR / ".solt-hooks.yaml",
+        ],
+        ids=lambda template_path: template_path.name,
+    )
+    def test_the_template_loads_as_yaml(self, template_path):
+        assert yaml.safe_load(template_path.read_text())
+
+    @pytest.mark.parametrize(("coverage_timeout_minutes", "expected_minutes"), [(None, 90), ("330", 330)])
+    def test_nightly_test_receives_the_timeout_as_a_number(self, tmp_path, coverage_timeout_minutes, expected_minutes):
+        setup_repo.generate_workflow_file(tmp_path, {}, "19.0", [], coverage_timeout_minutes=coverage_timeout_minutes)
+        workflow = yaml.safe_load((tmp_path / ".github" / "workflows" / "solt-validate.yml").read_text())
+
+        assert workflow["jobs"]["NightlyTest"]["with"]["coverage-timeout-minutes"] == expected_minutes
+
+
 class TestGenerateWorkflowFileCoverageTimeout:
     """Round trip through the REAL template: the value reaches NightlyTest,
     the default is unchanged, and a second regenerate preserves it."""
