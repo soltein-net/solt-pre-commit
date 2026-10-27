@@ -6,6 +6,8 @@
 skip path, self-healing dropdb, the coverage/FileNotFoundError guard, and
 cancellation actually killing the Odoo child process."""
 
+import argparse
+import os
 import signal
 import subprocess
 from unittest import mock
@@ -706,3 +708,154 @@ class TestPortOptions:
         with pytest.raises(SystemExit):
             otr.main()
         assert (seen["http_port"], seen["gevent_port"]) == (18269, 18999)
+
+
+class TestTestCountIsLogged:
+    def test_the_result_logger_is_reopened_to_info_so_a_passing_run_reports_how_many_tests_ran(self, fake_env):
+        tmp_path, config = fake_env
+        captured = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = cmd
+            proc = mock.Mock()
+            proc.stdout = iter([])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", side_effect=fake_popen
+        ):
+            otr.run(["fake_module"], config, env_root=tmp_path)
+
+        assert "--log-handler=odoo.tests.result:INFO" in captured["cmd"]
+
+
+class TestShardModules:
+    NAMES = [f"mod_{i:02d}" for i in range(23)]
+
+    @pytest.mark.parametrize("count", [1, 2, 3, 4, 7, 23])
+    def test_the_shards_partition_the_modules(self, count):
+        shares = [otr.shard_modules(self.NAMES, index, count) for index in range(count)]
+        flat = [name for share in shares for name in share]
+        assert sorted(flat) == sorted(self.NAMES), "every module is tested"
+        assert len(flat) == len(set(flat)), "no module is tested twice"
+
+    def test_the_split_does_not_depend_on_the_order_the_modules_come_in(self):
+        assert otr.shard_modules(list(reversed(self.NAMES)), 1, 4) == otr.shard_modules(self.NAMES, 1, 4)
+
+    def test_modules_are_dealt_in_turns_not_in_blocks(self):
+        assert otr.shard_modules(["a", "b", "c", "d", "e"], 0, 2) == ["a", "c", "e"]
+        assert otr.shard_modules(["a", "b", "c", "d", "e"], 1, 2) == ["b", "d"]
+
+    @pytest.mark.parametrize("raw,expected", [("1/4", (0, 4)), ("4/4", (3, 4)), ("1/1", (0, 1))])
+    def test_parse_shard(self, raw, expected):
+        assert otr.parse_shard(raw) == expected
+
+    @pytest.mark.parametrize("raw", ["0/4", "5/4", "2", "a/b", "1/0", "-1/4", "1/2/3"])
+    def test_parse_shard_rejects(self, raw):
+        with pytest.raises(argparse.ArgumentTypeError):
+            otr.parse_shard(raw)
+
+
+class TestRunShard:
+    def _run(self, fake_env, **kwargs):
+        tmp_path, config = fake_env
+        captured = {"run": []}
+
+        def fake_run(cmd, **kw):
+            captured["run"].append(cmd)
+            return mock.Mock(returncode=0)
+
+        def fake_popen(cmd, **kw):
+            captured["cmd"], captured["env"] = cmd, kw.get("env")
+            proc = mock.Mock()
+            proc.stdout = iter(["0 failed, 0 error(s) of 3 tests\n"])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", side_effect=fake_run), mock.patch("subprocess.Popen", side_effect=fake_popen):
+            rc = otr.run(["b", "d"], config, env_root=tmp_path, **kwargs)
+        return rc, captured
+
+    def test_every_module_is_installed_but_only_the_shards_are_tested(self, fake_env):
+        rc, captured = self._run(fake_env, install_modules=["a", "b", "c", "d"])
+        cmd = captured["cmd"]
+        assert rc == 0
+        assert cmd[cmd.index("-i") + 1] == "a,b,c,d"
+        assert "--test-tags=/b,/d" in cmd
+
+    def test_without_install_modules_the_tested_modules_are_the_installed_ones(self, fake_env):
+        _rc, captured = self._run(fake_env)
+        cmd = captured["cmd"]
+        assert cmd[cmd.index("-i") + 1] == "b,d"
+
+    def test_a_shard_has_its_own_coverage_data_and_leaves_the_shared_reports_alone(self, fake_env):
+        _rc, captured = self._run(fake_env, install_modules=["a", "b", "c", "d"], coverage_file="/x/.coverage.shard-1-2")
+        assert captured["env"]["COVERAGE_FILE"] == "/x/.coverage.shard-1-2"
+        coverage_calls = [c[1] for c in captured["run"] if c and c[0] == "coverage"]
+        assert coverage_calls == ["report"], "no coverage.xml / htmlcov: shards would overwrite each other's"
+
+    def test_an_unsharded_run_still_writes_the_shared_reports(self, fake_env):
+        _rc, captured = self._run(fake_env)
+        coverage_calls = [c[1] for c in captured["run"] if c and c[0] == "coverage"]
+        assert coverage_calls == ["report", "xml", "html"]
+        assert "COVERAGE_FILE" not in (captured["env"] or {}) or captured["env"]["COVERAGE_FILE"] == os.environ.get("COVERAGE_FILE")
+
+
+class TestMainShard:
+    def _main(self, monkeypatch, tmp_path, argv, real_config, names):
+        for name in names:
+            _module(tmp_path, name)
+        real_config.exclude_modules = []
+        captured = {}
+
+        def fake_run(modules, config, **kwargs):
+            captured.update(modules=modules, **kwargs)
+            return 0
+
+        monkeypatch.setattr(otr, "run", fake_run)
+        monkeypatch.setattr(otr, "SoltConfig", lambda *_a, **_k: real_config)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("sys.argv", ["solt-test-module", *argv])
+        return captured
+
+    def test_a_shard_tests_its_share_and_installs_everything(self, monkeypatch, tmp_path, real_config):
+        captured = self._main(monkeypatch, tmp_path, ["--all", "--shard", "2/3"], real_config, list("abcdefg"))
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+        assert exc_info.value.code == 0
+        assert captured["modules"] == ["b", "e"]
+        assert captured["install_modules"] == list("abcdefg")
+        assert captured["coverage_file"].endswith(".coverage.shard-2-3")
+
+    def test_the_shards_together_test_every_module_once(self, monkeypatch, tmp_path, real_config):
+        names = list("abcdefghij")
+        tested = []
+        for position in (1, 2, 3):
+            captured = self._main(monkeypatch, tmp_path, ["--all", "--shard", f"{position}/3"], real_config, [])
+            for name in names:
+                if not (tmp_path / name).exists():
+                    _module(tmp_path, name)
+            with pytest.raises(SystemExit):
+                otr.main()
+            tested += captured["modules"]
+        assert sorted(tested) == names
+
+    def test_shard_needs_all(self, monkeypatch, tmp_path, real_config):
+        self._main(monkeypatch, tmp_path, ["a,b", "--shard", "1/2"], real_config, ["a", "b"])
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+        assert exc_info.value.code == 2
+
+    def test_more_shards_than_modules_is_an_error_not_an_empty_pass(self, monkeypatch, tmp_path, real_config):
+        self._main(monkeypatch, tmp_path, ["--all", "--shard", "3/3"], real_config, ["a", "b"])
+        with pytest.raises(SystemExit) as exc_info:
+            otr.main()
+        assert exc_info.value.code == 2
+
+    def test_without_shard_nothing_changes(self, monkeypatch, tmp_path, real_config):
+        captured = self._main(monkeypatch, tmp_path, ["--all"], real_config, ["a", "b"])
+        with pytest.raises(SystemExit):
+            otr.main()
+        assert captured["modules"] == ["a", "b"]
+        assert captured["install_modules"] is None and captured["coverage_file"] is None

@@ -270,9 +270,21 @@ def run(
     strict: bool = False,
     http_port: int | None = None,
     gevent_port: int | None = None,
+    install_modules: list | None = None,
+    coverage_file: str | None = None,
 ) -> int:
     """Run the given modules' own tests against a scratch DB. Returns the exit
     code to propagate (0 = pass, nonzero = fail or error).
+
+    install_modules: modules to install (``-i``) when that is more than the ones being tested; omitted,
+    exactly ``modules`` are installed. A shard of a full run passes every eligible module here and only its
+    own share as ``modules``, so each shard runs against the same installed registry as an unsharded run
+    (installing only a shard's modules would let a test pass for want of a module that is there in the real
+    suite). Tests are selected by ``modules`` alone.
+
+    coverage_file: write this run's coverage data to its own file instead of the shared ``.coverage``, and
+    leave the shared ``coverage.xml``/``htmlcov`` alone: shards run side by side and would otherwise append
+    to, and overwrite, each other's.
 
     addons_path: optional --addons-path override for odoo-bin. Omitted by
     default (None) - local/devcontainer callers rely on the resolved
@@ -316,6 +328,8 @@ def run(
 
     env = os.environ.copy()
     env["PGPASSWORD"] = config.test_db_password
+    if coverage_file:
+        env["COVERAGE_FILE"] = coverage_file
     if config.test_modules_auto_install_disabled:
         # Read directly by module_change_auto_install's post_load patch (see its
         # own README) - only takes effect if that module is also server-wide
@@ -363,7 +377,10 @@ def run(
     _keep_autovacuum_out(config, scratch_db, env)
 
     modules_arg = ",".join(modules)
+    install_arg = ",".join(install_modules) if install_modules else modules_arg
     print(f"Running tests for: {modules_arg} (test-tags: {test_tags})")
+    if install_arg != modules_arg:
+        print(f"Installing {len(install_modules)} module(s), testing {len(modules)} of them")
 
     proc = None
     previous_sigterm_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
@@ -412,6 +429,11 @@ def run(
                 "--logfile=",
                 "--log-handler=:WARNING",
                 "--log-handler=odoo.modules.loading:INFO",
+                # The run's own verdict line ("0 failed, 0 error(s) of N tests") is logged at INFO when
+                # nothing failed, so without this a passing run reports no test count at all: nothing can
+                # tell "ran 3,000 tests" from "ran none". A caller that splits a run (see --shard) needs the
+                # count to check that the pieces add up.
+                "--log-handler=odoo.tests.result:INFO",
                 f"--test-tags={test_tags}",
                 "--stop-after-init",
             ]
@@ -432,7 +454,7 @@ def run(
                 # we must keep those two or lose functionality they provide.
                 server_wide = dict.fromkeys(["base", "web", *config.test_server_wide_modules])
                 odoo_bin_args.append(f"--load={','.join(server_wide)}")
-            odoo_bin_args += ["-i", modules_arg]
+            odoo_bin_args += ["-i", install_arg]
 
             proc = subprocess.Popen(
                 odoo_bin_args,
@@ -499,12 +521,12 @@ def run(
             print(f"  (exit code {result} -- see output above for the failing test/traceback)")
     print("=" * 60)
 
-    _report_coverage(modules, env_root)
+    _report_coverage(modules, env_root, env=env if coverage_file else None, write_files=not coverage_file)
 
     return result
 
 
-def _report_coverage(modules: list, env_root: Path) -> None:
+def _report_coverage(modules: list, env_root: Path, env: dict | None = None, write_files: bool = True) -> None:
     """Surface what `coverage run` just collected: a terminal summary right away,
     plus coverage.xml/htmlcov so an editor extension (VS Code's Coverage Gutters
     reads coverage.xml automatically) or a browser can show it. `*/<module>/*`
@@ -527,15 +549,37 @@ def _report_coverage(modules: list, env_root: Path) -> None:
     include = ",".join(f"*/{m}/*" for m in modules)
     print("\nCoverage:")
     try:
-        subprocess.run(["coverage", "report", "-m", f"--include={include}"], cwd=str(env_root))
-        subprocess.run(["coverage", "xml", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True)
-        subprocess.run(["coverage", "html", "-d", "htmlcov"], cwd=str(env_root), capture_output=True)
-        print(f"HTML report: {env_root / 'htmlcov' / 'index.html'}")
-        print(
-            "coverage.xml written (cumulative across all modules tested so far) -- VS Code's Coverage Gutters picks this up automatically."
-        )
+        subprocess.run(["coverage", "report", "-m", f"--include={include}"], cwd=str(env_root), env=env)
+        if write_files:
+            subprocess.run(["coverage", "xml", "-o", "coverage.xml"], cwd=str(env_root), capture_output=True)
+            subprocess.run(["coverage", "html", "-d", "htmlcov"], cwd=str(env_root), capture_output=True)
+            print(f"HTML report: {env_root / 'htmlcov' / 'index.html'}")
+            print(
+                "coverage.xml written (cumulative across all modules tested so far) -- VS Code's Coverage Gutters picks this up automatically."
+            )
     except FileNotFoundError:
         print("[solt-test-module] `coverage` not on PATH, skipping report.", file=sys.stderr)
+
+
+def parse_shard(value: str) -> tuple[int, int]:
+    """argparse type: ``I/N`` (1-based), the I-th of N shards, as ``(index, count)`` with a 0-based index."""
+    try:
+        position, count = (int(part) for part in value.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not I/N, e.g. 2/4") from None
+    if count < 1 or not 1 <= position <= count:
+        raise argparse.ArgumentTypeError(f"{value!r}: I must be between 1 and N, and N at least 1")
+    return position - 1, count
+
+
+def shard_modules(modules: list, index: int, count: int) -> list:
+    """The share of ``modules`` that shard ``index`` of ``count`` tests.
+
+    Taken from the sorted list in turns (module i goes to shard i % count), so the shards partition the list:
+    every module is in exactly one, whatever ``count`` is, and the same inputs always give the same split.
+    Turns, not contiguous blocks, so a family of similarly named (and similarly slow) modules is spread.
+    """
+    return sorted(modules)[index::count]
 
 
 def _port(value: str) -> int:
@@ -589,9 +633,22 @@ def main():
         default=None,
         help="Port of Odoo's test gevent (longpolling) server (default: follows --http-port, else test_gevent_port).",
     )
+    parser.add_argument(
+        "--shard",
+        type=parse_shard,
+        default=None,
+        metavar="I/N",
+        help=(
+            "With --all: test only the I-th of N shares of the eligible modules (e.g. 2/4), but install ALL of "
+            "them, so the registry is the one an unsharded run has. Run the N shards side by side, each with "
+            "its own --http-port, and require every one of them to pass. Each writes its own coverage data."
+        ),
+    )
     args = parser.parse_args()
 
     config = SoltConfig(args.config)
+    if args.shard and not args.all:
+        parser.error("--shard needs --all")
 
     if args.all:
         if args.modules:
@@ -609,7 +666,19 @@ def main():
         if config.exclude_modules:
             print(f"[solt-test-module] EXCLUDED (not tested): {', '.join(sorted(config.exclude_modules))}")
         print(f"[solt-test-module] --all: {len(modules)} module(s) under {repo_root}")
+        install_modules = None
+        coverage_file = None
+        if args.shard:
+            index, count = args.shard
+            install_modules = sorted(modules)
+            modules = shard_modules(modules, index, count)
+            coverage_file = str(find_env_root() / f".coverage.shard-{index + 1}-{count}")
+            if not modules:
+                parser.error(f"shard {index + 1}/{count} has no module: there are only {len(install_modules)}")
+            print(f"[solt-test-module] shard {index + 1}/{count}: testing {len(modules)} of {len(install_modules)}")
     else:
+        install_modules = None
+        coverage_file = None
         if not args.modules:
             parser.error("give a comma-separated module list, or --all")
         modules = [m.strip() for m in args.modules.split(",") if m.strip()]
@@ -624,6 +693,8 @@ def main():
             strict=args.all,
             http_port=args.http_port,
             gevent_port=args.gevent_port,
+            install_modules=install_modules,
+            coverage_file=coverage_file,
         )
     )
 
