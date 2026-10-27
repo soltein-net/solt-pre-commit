@@ -453,6 +453,12 @@ solt-test-module --all
 # at the gap the config has between the two, or set it with --gevent-port M.
 solt-test-module solt_crm --http-port 18269
 
+# One share of a full-scope run (--all only): every shard installs ALL eligible modules, so each one
+# loads exactly the registry an unsharded run does, and runs the tests of its own share (the sorted
+# list, round-robin). Run the N shards with their own --http-port, one process each; a run is only
+# green when all N are: each prints PASS/FAIL and "N tests", whose sum must equal an unsharded run's.
+solt-test-module --all --shard 1/4 --http-port 18100
+
 # A run that prints nothing for `test_idle_timeout_minutes` (default 30, set it in
 # .solt-hooks.yaml) is treated as hung: it is stopped and fails with exit 124,
 # so a test stuck on e.g. a network call can't stall CI, the release gate or a push.
