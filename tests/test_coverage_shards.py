@@ -15,6 +15,7 @@ leg's SHARDS expression resolved the way GitHub Actions resolves it."""
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -80,3 +81,21 @@ class TestCoverageShardSplit:
             tested += leg_run.stdout.strip().splitlines()[-1].split(",")
         assert len(tested) == module_count, f"{len(tested)} module runs on {len(legs)} legs for {module_count} modules"
         assert sorted(tested) == modules
+
+
+def test_inline_python_holds_no_backtick():
+    """Real incident: a comment inside a double-quoted ``python3 -c "..."`` quoted ``solt-test-module --all``
+    in backticks, which bash ran as a command substitution. With ``exclude_modules`` set it prints two lines,
+    the second landed in the script as code, and Detect and Coverage died with a SyntaxError."""
+    lines = _WORKFLOW_PATH.read_text().splitlines()
+    blocks, current = [], None
+    for number, line in enumerate(lines, 1):
+        if current is None and line.rstrip().endswith('python3 -c "'):
+            current = []
+        elif current is not None and line.lstrip().startswith('"'):
+            blocks.append(current)
+            current = None
+        elif current is not None:
+            current.append((number, line))
+    assert len(blocks) >= 4, "the workflow no longer has the inline python this test guards"
+    assert [number for block in blocks for number, line in block if "`" in line] == []
