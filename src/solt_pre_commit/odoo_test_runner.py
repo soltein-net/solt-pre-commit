@@ -393,15 +393,16 @@ def run(
             # already logged at WARNING/ERROR, so nothing evidentiary is lost, just the noise.
             #
             # --log-handler=odoo.modules.loading:INFO re-opens exactly one logger back up to
-            # INFO on top of that: "Loading module X (n/N)" - Odoo doesn't attach a duration to
-            # that line itself, but every CI log line already carries a timestamp, so the gap
-            # between two consecutive "Loading module" lines is that module's own install+test
-            # wall-clock cost. Without this, per-module timing simply isn't recoverable from a
-            # run's log at all - the exact gap this closes: a repo can *see* that its full suite
-            # took N hours but never *which* module(s) actually spent it (see solt-suite's own
-            # 2h40m run, investigated purely from FAIL/ERROR line gaps for lack of anything
-            # better). 146 extra lines on a 146-module repo is not the firehose the WARNING
-            # default exists to avoid - it's the one thing worth re-enabling in isolation.
+            # INFO on top of that: "Loading module X (n/N)", which is how far a run got and
+            # where it died. 146 extra lines on a 146-module repo is not the firehose the
+            # WARNING default exists to avoid.
+            #
+            # Read as timing it lies, which is why odoo.tests.stats:INFO is below. The gap
+            # between two "Loading module" lines looks like a module's cost and is not one:
+            # at_install tests run inside that gap but post_install tests run after the whole
+            # load, so the phase that dominates a full suite is spread over no gap at all
+            # (measured on solt-suite: 296 of 323 minutes were post_install). A reading taken
+            # that way put 85 minutes on a module that has no browser tours.
             # No --db_password here: PGPASSWORD is already set in env above, and psycopg2
             # (via libpq) picks it up the same way createdb/dropdb do - passing the password
             # as a plain CLI arg would otherwise make it visible to anyone on the box via
@@ -434,6 +435,13 @@ def run(
                 # tell "ran 3,000 tests" from "ran none". A caller that splits a run (see --shard) needs the
                 # count to check that the pieces add up.
                 "--log-handler=odoo.tests.result:INFO",
+                # One "module: N tests Xs Q queries" line per module, measured by Odoo itself
+                # (odoo/tests/result.py, log_stats) around each test rather than inferred from
+                # the log. A suite that outgrows its CI budget is otherwise a black box: the
+                # run is known to be too long and nothing says which modules to look at, which
+                # is also what the caller needs to balance shards by real cost instead of
+                # round-robin. One line per module, emitted once at the end.
+                "--log-handler=odoo.tests.stats:INFO",
                 f"--test-tags={test_tags}",
                 "--stop-after-init",
             ]
