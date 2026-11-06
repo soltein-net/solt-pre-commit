@@ -24,7 +24,12 @@ on:
   # The one version branch is the one this file was generated for: every job
   # below runs with odoo-version '{{ ODOO_VERSION }}', and a branch of another
   # Odoo version carries a workflow generated for its own.
+  # A draft PR runs nothing: it is not up for review yet, and every push to it
+  # used to pay a full test run. ready_for_review runs it once it is; a PR
+  # turned back into a draft (converted_to_draft) starts a run that cancels
+  # the one in progress and then skips every job.
   pull_request:
+    types: [ opened, synchronize, reopened, ready_for_review, converted_to_draft ]
     branches: [ main, master, develop, '{{ ODOO_VERSION }}' ]
   # Validation (lint-only, seconds) still runs full-scope on every push, and
   # Badges still refreshes the solt-check/pylint/ruff badges from it - both
@@ -73,7 +78,7 @@ jobs:
   # ---------------------------------------------------------------------------
   Validation:
     if: |
-      github.event_name == 'pull_request' || github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && !github.event.pull_request.draft) || github.event_name == 'push' ||
       (github.event_name == 'schedule' && github.event.schedule == '0 4 * * *')
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-validate.yml@{{ SOLT_VERSION }}
     with:
@@ -122,7 +127,7 @@ jobs:
   # ---------------------------------------------------------------------------
   Test:
     needs: Validation
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft
     uses: soltein-net/solt-pre-commit/.github/workflows/solt-coverage.yml@{{ SOLT_VERSION }}
     with:
       sibling-repos: '{{ SIBLING_REPOS }}'
