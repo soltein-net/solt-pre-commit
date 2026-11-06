@@ -153,7 +153,7 @@ env:
 jobs:
   # ---------------------------------------------------------------------------
   # PLAN - computes the shard index list Coverage's matrix reads. Runs
-  # regardless of Detect's own outcome (needs: [Detect] + if: always() -
+  # regardless of Detect's own outcome (needs: [Detect] + if: !cancelled() -
   # Detect is a plain job, not one that itself calls a reusable workflow, so
   # this doesn't risk the .result/success() propagation bug documented
   # elsewhere in this repo) - a static `matrix: shard: [0, 1, ..., N-1]` can't
@@ -177,7 +177,7 @@ jobs:
   Plan:
     name: Plan shard matrix
     needs: [ Detect ]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       shard-list: ${{ steps.plan.outputs.shard-list }}
@@ -325,21 +325,25 @@ jobs:
   Coverage:
     name: Run tests + coverage
     needs: [ Detect, Plan ]
-    # always() is required here, not optional: a bare `if:` (without always(),
-    # success(), failure(), or cancelled()) is implicitly ANDed with success()
-    # by GitHub Actions, and a *skipped* needs job does not count as
-    # "success" - so without always(), this job silently skipped on every
+    # !cancelled() is required here, not optional: a bare `if:` (without a
+    # status function) is implicitly ANDed with success() by GitHub Actions,
+    # and a *skipped* needs job does not count as "success" - so without a
+    # status function, this job silently skipped on every
     # single `scope: 'full'` run (Detect's own `if: inputs.scope == 'changed'`
     # means it is *always* skipped for scope='full', by design), from the day
     # this Detect/Coverage split landed until this line was added. Found by
     # running solt-suite's real post-merge push (scope='full') end to end and
     # finding this job never even started, coverage_pct always empty.
+    # !cancelled() and not always(): always() is true after a cancellation
+    # too, so cancelling the run - or cancel-in-progress after a newer push
+    # to the same PR - left every shard running to the end, and the newer
+    # run waited for it to free the concurrency group.
     # inputs.skip-if-errors is plain data (a string the caller computed
     # itself), not a cross-job success()/.result check - see that input's own
     # description for why this specific comparison is safe where the
     # documented .result-based approach was not.
     if: |
-      always() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true') &&
+      !cancelled() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true') &&
       (inputs.skip-if-errors == '' || inputs.skip-if-errors == '0')
     strategy:
       fail-fast: false
@@ -985,17 +989,18 @@ jobs:
   # read every shard's own result from a side channel (the uploaded
   # artifacts) regardless of shard count.
   #
-  # needs: [ Detect, Coverage ] + if: always() is deliberate, same reasoning
+  # needs: [ Detect, Coverage ] + if: !cancelled() is deliberate, same reasoning
   # as Coverage's own if: above it: Coverage can legitimately be skipped
   # entirely (Detect said should-skip=true), and a bare `if:` here would
   # silently skip this job too the same way Coverage itself did before that
-  # bug was found and fixed - always() is not optional on any job whose
-  # `needs` can be skipped, not just failed.
+  # bug was found and fixed - a status function is not optional on any job
+  # whose `needs` can be skipped, not just failed. Not always(), which also
+  # runs on a cancelled run.
   # ---------------------------------------------------------------------------
   Combine:
     name: Combine shard results
     needs: [ Detect, Coverage ]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       test_result: ${{ steps.combine.outputs.test_result }}
@@ -1026,7 +1031,7 @@ jobs:
         # repo` the shard job itself uses, so the recorded paths resolve
         # identically here.
         #
-        # Unconditional, same as the job itself (if: always() above) - a
+        # Unconditional, same as the job itself (if: !cancelled() above) - a
         # checkout on a run with no shard data to combine is a few wasted
         # seconds, not worth a second signal to keep in sync with the
         # combine step's own "nothing to combine" check below.
