@@ -761,7 +761,7 @@ jobs:
         # failed to install) has no matching FAIL/ERROR record - the
         # fallback branch below says so plainly rather than producing an
         # empty, misleadingly-reassuring summary.
-        if: always() && steps.test.outputs.skipped != 'true'
+        if: ${{ !cancelled() && steps.test.outputs.skipped != 'true' }}
         env:
           RESULT: ${{ steps.test.outputs.result }}
           MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
@@ -846,7 +846,7 @@ jobs:
 
       - name: Coverage report
         id: report
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
           SKIPPED: ${{ steps.test.outputs.skipped }}
@@ -883,7 +883,7 @@ jobs:
           # that were genuinely well covered. Falls back to re-deriving the full
           # eligible list (same live manifest scan the Run tests step uses) only
           # if modules-tested is unset - e.g. the Run tests step failed before
-          # reaching that computation - matching this step's own if: always()
+          # reaching that computation - matching this step's own if: !cancelled()
           # intent of still reporting something useful.
           if [ -n "$MODULES_TESTED" ]; then
             MODULES_CSV="$MODULES_TESTED"
@@ -934,7 +934,7 @@ jobs:
           fi
 
       - name: Upload HTML coverage report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           # Shard-suffixed - with shards > 1, every matrix leg would otherwise
@@ -948,14 +948,14 @@ jobs:
           retention-days: 30
 
       - name: Upload shard data for Combine
-        # Not gated on always() the same way as the HTML upload above:
-        # nothing to upload at all when this shard's "Run tests" step exited
+        # Gated like the HTML upload above, and harmless when there is
+        # nothing to upload: when this shard's "Run tests" step exited
         # early via the scope=changed/no-changes safety net (see that step's
         # own comment) - shard-output/ is never created in that case. Combine
         # already treats "no shard artifacts at all" as its own skip case,
-        # matching this job's own if: always() && (...) skip semantics one
+        # matching this job's own if: !cancelled() && (...) skip semantics one
         # level up.
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-shard-data-${{ matrix.shard }}
@@ -1081,6 +1081,10 @@ jobs:
         id: combine
         env:
           SKIP_IF_ERRORS: ${{ inputs.skip-if-errors }}
+          # 'failure' or 'cancelled' when a shard did not finish (timeout, crash,
+          # killed runner): such a shard uploads no result, and reading only the
+          # results that did arrive would turn it into a pass.
+          COVERAGE_RESULT: ${{ needs.Coverage.result }}
         run: |
           python3 - <<'PYEOF'
           import glob
@@ -1094,7 +1098,14 @@ jobs:
                   for key, value in kwargs.items():
                       f.write(f"{key}={value}\n")
 
+          unfinished = os.environ.get("COVERAGE_RESULT") in ("failure", "cancelled")
+
           shard_dirs = sorted(d for d in glob.glob("shard-artifacts/*/") if os.path.isdir(d))
+          if not shard_dirs and unfinished:
+              print(f"No shard data, and Coverage ended '{os.environ['COVERAGE_RESULT']}': "
+                    "no shard finished, so nothing was verified.")
+              write_output(test_result="1", coverage_pct="")
+              sys.exit(1)
           if not shard_dirs:
               skip_if_errors = os.environ.get("SKIP_IF_ERRORS", "")
               if skip_if_errors and skip_if_errors != "0":
@@ -1127,11 +1138,18 @@ jobs:
                   with open(result_path) as f:
                       if f.read().strip() != "0":
                           overall_result = 1
+              else:
+                  print(f"{shard_dir}: no result - this shard did not finish its tests.")
+                  overall_result = 1
               # Explicit glob, not a bare directory arg to `coverage combine` -
               # coverage.py's own directory-scanning combine logic looks for a
               # specific parallel-mode suffix pattern; being explicit about
               # which files these are removes any doubt it will find them.
               data_files.extend(glob.glob(os.path.join(shard_dir, ".coverage.*")))
+
+          if unfinished:
+              print(f"Coverage ended '{os.environ['COVERAGE_RESULT']}': at least one shard failed or did not finish.")
+              overall_result = 1
 
           print(f"{len(shard_dirs)} shard(s), modules tested: {','.join(sorted(modules)) or '<none>'}")
           print(f"Overall result: {overall_result} ({'pass' if overall_result == 0 else 'fail'})")
@@ -1181,7 +1199,7 @@ jobs:
           PYEOF
 
       - name: Upload combined HTML coverage report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-html-combined-${{ github.run_id }}
