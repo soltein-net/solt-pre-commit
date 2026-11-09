@@ -153,7 +153,7 @@ env:
 jobs:
   # ---------------------------------------------------------------------------
   # PLAN - computes the shard index list Coverage's matrix reads. Runs
-  # regardless of Detect's own outcome (needs: [Detect] + if: always() -
+  # regardless of Detect's own outcome (needs: [Detect] + if: !cancelled() -
   # Detect is a plain job, not one that itself calls a reusable workflow, so
   # this doesn't risk the .result/success() propagation bug documented
   # elsewhere in this repo) - a static `matrix: shard: [0, 1, ..., N-1]` can't
@@ -177,7 +177,7 @@ jobs:
   Plan:
     name: Plan shard matrix
     needs: [ Detect ]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       shard-list: ${{ steps.plan.outputs.shard-list }}
@@ -325,21 +325,25 @@ jobs:
   Coverage:
     name: Run tests + coverage
     needs: [ Detect, Plan ]
-    # always() is required here, not optional: a bare `if:` (without always(),
-    # success(), failure(), or cancelled()) is implicitly ANDed with success()
-    # by GitHub Actions, and a *skipped* needs job does not count as
-    # "success" - so without always(), this job silently skipped on every
+    # !cancelled() is required here, not optional: a bare `if:` (without a
+    # status function) is implicitly ANDed with success() by GitHub Actions,
+    # and a *skipped* needs job does not count as "success" - so without a
+    # status function, this job silently skipped on every
     # single `scope: 'full'` run (Detect's own `if: inputs.scope == 'changed'`
     # means it is *always* skipped for scope='full', by design), from the day
     # this Detect/Coverage split landed until this line was added. Found by
     # running solt-suite's real post-merge push (scope='full') end to end and
     # finding this job never even started, coverage_pct always empty.
+    # !cancelled() and not always(): always() is true after a cancellation
+    # too, so cancelling the run - or cancel-in-progress after a newer push
+    # to the same PR - left every shard running to the end, and the newer
+    # run waited for it to free the concurrency group.
     # inputs.skip-if-errors is plain data (a string the caller computed
     # itself), not a cross-job success()/.result check - see that input's own
     # description for why this specific comparison is safe where the
     # documented .result-based approach was not.
     if: |
-      always() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true') &&
+      !cancelled() && (needs.Detect.result == 'skipped' || needs.Detect.outputs.should-skip != 'true') &&
       (inputs.skip-if-errors == '' || inputs.skip-if-errors == '0')
     strategy:
       fail-fast: false
@@ -757,7 +761,7 @@ jobs:
         # failed to install) has no matching FAIL/ERROR record - the
         # fallback branch below says so plainly rather than producing an
         # empty, misleadingly-reassuring summary.
-        if: always() && steps.test.outputs.skipped != 'true'
+        if: ${{ !cancelled() && steps.test.outputs.skipped != 'true' }}
         env:
           RESULT: ${{ steps.test.outputs.result }}
           MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
@@ -842,7 +846,7 @@ jobs:
 
       - name: Coverage report
         id: report
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           MODULES_TESTED: ${{ steps.test.outputs.modules-tested }}
           SKIPPED: ${{ steps.test.outputs.skipped }}
@@ -879,7 +883,7 @@ jobs:
           # that were genuinely well covered. Falls back to re-deriving the full
           # eligible list (same live manifest scan the Run tests step uses) only
           # if modules-tested is unset - e.g. the Run tests step failed before
-          # reaching that computation - matching this step's own if: always()
+          # reaching that computation - matching this step's own if: !cancelled()
           # intent of still reporting something useful.
           if [ -n "$MODULES_TESTED" ]; then
             MODULES_CSV="$MODULES_TESTED"
@@ -930,7 +934,7 @@ jobs:
           fi
 
       - name: Upload HTML coverage report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           # Shard-suffixed - with shards > 1, every matrix leg would otherwise
@@ -944,14 +948,14 @@ jobs:
           retention-days: 30
 
       - name: Upload shard data for Combine
-        # Not gated on always() the same way as the HTML upload above:
-        # nothing to upload at all when this shard's "Run tests" step exited
+        # Gated like the HTML upload above, and harmless when there is
+        # nothing to upload: when this shard's "Run tests" step exited
         # early via the scope=changed/no-changes safety net (see that step's
         # own comment) - shard-output/ is never created in that case. Combine
         # already treats "no shard artifacts at all" as its own skip case,
-        # matching this job's own if: always() && (...) skip semantics one
+        # matching this job's own if: !cancelled() && (...) skip semantics one
         # level up.
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-shard-data-${{ matrix.shard }}
@@ -985,17 +989,18 @@ jobs:
   # read every shard's own result from a side channel (the uploaded
   # artifacts) regardless of shard count.
   #
-  # needs: [ Detect, Coverage ] + if: always() is deliberate, same reasoning
+  # needs: [ Detect, Coverage ] + if: !cancelled() is deliberate, same reasoning
   # as Coverage's own if: above it: Coverage can legitimately be skipped
   # entirely (Detect said should-skip=true), and a bare `if:` here would
   # silently skip this job too the same way Coverage itself did before that
-  # bug was found and fixed - always() is not optional on any job whose
-  # `needs` can be skipped, not just failed.
+  # bug was found and fixed - a status function is not optional on any job
+  # whose `needs` can be skipped, not just failed. Not always(), which also
+  # runs on a cancelled run.
   # ---------------------------------------------------------------------------
   Combine:
     name: Combine shard results
     needs: [ Detect, Coverage ]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       test_result: ${{ steps.combine.outputs.test_result }}
@@ -1026,7 +1031,7 @@ jobs:
         # repo` the shard job itself uses, so the recorded paths resolve
         # identically here.
         #
-        # Unconditional, same as the job itself (if: always() above) - a
+        # Unconditional, same as the job itself (if: !cancelled() above) - a
         # checkout on a run with no shard data to combine is a few wasted
         # seconds, not worth a second signal to keep in sync with the
         # combine step's own "nothing to combine" check below.
@@ -1076,6 +1081,10 @@ jobs:
         id: combine
         env:
           SKIP_IF_ERRORS: ${{ inputs.skip-if-errors }}
+          # 'failure' or 'cancelled' when a shard did not finish (timeout, crash,
+          # killed runner): such a shard uploads no result, and reading only the
+          # results that did arrive would turn it into a pass.
+          COVERAGE_RESULT: ${{ needs.Coverage.result }}
         run: |
           python3 - <<'PYEOF'
           import glob
@@ -1089,7 +1098,14 @@ jobs:
                   for key, value in kwargs.items():
                       f.write(f"{key}={value}\n")
 
+          unfinished = os.environ.get("COVERAGE_RESULT") in ("failure", "cancelled")
+
           shard_dirs = sorted(d for d in glob.glob("shard-artifacts/*/") if os.path.isdir(d))
+          if not shard_dirs and unfinished:
+              print(f"No shard data, and Coverage ended '{os.environ['COVERAGE_RESULT']}': "
+                    "no shard finished, so nothing was verified.")
+              write_output(test_result="1", coverage_pct="")
+              sys.exit(1)
           if not shard_dirs:
               skip_if_errors = os.environ.get("SKIP_IF_ERRORS", "")
               if skip_if_errors and skip_if_errors != "0":
@@ -1122,11 +1138,18 @@ jobs:
                   with open(result_path) as f:
                       if f.read().strip() != "0":
                           overall_result = 1
+              else:
+                  print(f"{shard_dir}: no result - this shard did not finish its tests.")
+                  overall_result = 1
               # Explicit glob, not a bare directory arg to `coverage combine` -
               # coverage.py's own directory-scanning combine logic looks for a
               # specific parallel-mode suffix pattern; being explicit about
               # which files these are removes any doubt it will find them.
               data_files.extend(glob.glob(os.path.join(shard_dir, ".coverage.*")))
+
+          if unfinished:
+              print(f"Coverage ended '{os.environ['COVERAGE_RESULT']}': at least one shard failed or did not finish.")
+              overall_result = 1
 
           print(f"{len(shard_dirs)} shard(s), modules tested: {','.join(sorted(modules)) or '<none>'}")
           print(f"Overall result: {overall_result} ({'pass' if overall_result == 0 else 'fail'})")
@@ -1176,7 +1199,7 @@ jobs:
           PYEOF
 
       - name: Upload combined HTML coverage report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-html-combined-${{ github.run_id }}

@@ -7,7 +7,7 @@
 # solt-validate.yml/solt-coverage.yml is that "report a result as a badge" and
 # "produce the result" are different jobs, so this one is as cheap as a job
 # can be (just jq + gh api). Call it with `needs: [Lint, Test]` and
-# `if: always()` so it runs whether the other jobs passed or failed.
+# `if: ${{ !cancelled() }}` so it runs whether the other jobs passed or failed.
 #
 # Docstring coverage is intentionally NOT here - that's solt-update-badges.yml,
 # a separate, unrelated concern (a full-repo scan on its own weekly schedule,
