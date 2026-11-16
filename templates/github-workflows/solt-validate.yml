@@ -167,15 +167,28 @@ jobs:
   # ---------------------------------------------------------------------------
   NightlyGate:
     # A quiet night (nothing merged to {{ ODOO_VERSION }} since yesterday's
-    # run) has nothing new to test - the previous night's result is still
-    # entirely accurate, so there's no reason to spend ~200+ minutes
-    # re-confirming it. This is the actual point of "nightly, not per-push":
-    # cost now scales with days that had at least one merge, not with merge
-    # count or with the calendar. "25 hours ago", not 24 - a 1-hour overlap
-    # margin against cron drift or a late-starting runner, so a commit that
-    # lands right at the boundary is never missed.
+    # run) has nothing new to test - provided the last night that DID test it
+    # passed. That result is then still entirely accurate, so there's no
+    # reason to spend ~200+ minutes re-confirming it. This is the actual
+    # point of "nightly, not per-push": cost now scales with days that had at
+    # least one merge, not with merge count or with the calendar. "25 hours
+    # ago", not 24 - a 1-hour overlap margin against cron drift or a
+    # late-starting runner, so a commit that lands right at the boundary is
+    # never missed.
+    #
+    # A quiet night after a FAILED one is not quiet: skipping it would turn
+    # the failing branch green (a skipped run counts as a pass, and its
+    # Badges job republishes "passing") until the next merge. So the tests
+    # also run when the last nightly that actually ran them did not pass
+    # (failure, cancelled, timed out), or when that cannot be told (no run
+    # found, API error) - never skipped on a guess.
     if: github.event_name == 'schedule' && github.event.schedule == '0 4 * * *'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
     outputs:
       has-new-commits: ${{ steps.check.outputs.value }}
     steps:
@@ -189,8 +202,31 @@ jobs:
           echo "Found $COUNT commit(s) to {{ ODOO_VERSION }} in the last 25 hours"
           if [ "$COUNT" -gt 0 ]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
-          else
+            exit 0
+          fi
+          # Nothing new: what did the last night that ran the tests say?
+          LAST=unknown
+          WORKFLOW_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .workflow_id 2>/dev/null || true)
+          if [ -n "$WORKFLOW_ID" ]; then
+            RUNS=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs?event=schedule&branch={{ ODOO_VERSION }}&status=completed&per_page=10" --jq '.workflow_runs[].id' 2>/dev/null || true)
+            for RUN in $RUNS; do
+              [ "$RUN" = "$GITHUB_RUN_ID" ] && continue
+              CONCLUSIONS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/jobs?per_page=100" --jq '[.jobs[] | select(.name | startswith("NightlyTest")) | .conclusion | select(. != "skipped" and . != null)] | unique | join(" ")' 2>/dev/null || true)
+              [ -z "$CONCLUSIONS" ] && continue
+              case " $CONCLUSIONS " in
+                *" failure "*|*" cancelled "*|*" timed_out "*) LAST=failed ;;
+                *) LAST=passed ;;
+              esac
+              echo "Last nightly that ran the tests: run $RUN, $CONCLUSIONS"
+              break
+            done
+          fi
+          if [ "$LAST" = "passed" ]; then
+            echo "Nothing new and the last tested night passed: skipping the tests"
             echo "value=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing new, but the last tested night is '$LAST': running the tests"
+            echo "value=true" >> "$GITHUB_OUTPUT"
           fi
 
   NightlyTest:

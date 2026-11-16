@@ -376,6 +376,13 @@ must raise it (hosted jobs cap at 360). `solt-test-module`'s own idle watchdog
 carries the value on `NightlyTest`, and `setup-repo.py regenerate` preserves it the same way it
 preserves `shards`; set or change it with `regenerate --coverage-timeout-minutes 330`.
 
+**A quiet night does not hide a failed one.** The generated workflow's `NightlyGate` skips the nightly
+test run when nothing was merged in the last 25 hours, but only if the last night that actually ran the
+tests passed. When it failed, was cancelled or timed out, or when that cannot be told (no earlier run, an
+API error), the tests run again, so a broken branch stays red until it is fixed instead of turning green
+on a skipped run. The gate reads the workflow's earlier runs through the API (`actions: read` on its job).
+Repos pick this up with `setup-repo.py regenerate`.
+
 A new `Combine` job (always its own job, even at `shards: '1'` - one code path, not two) downloads
 every shard's uploaded coverage data file and pass/fail result, runs `coverage combine` across all of
 them, and produces the one `test-result`/`coverage-pct` this reusable workflow actually promises
