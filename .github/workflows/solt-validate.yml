@@ -256,7 +256,7 @@ jobs:
 
       - name: Ruff linting
         id: ruff
-        if: always() && steps.find-modules.outputs.count != '0'
+        if: ${{ !cancelled() && steps.find-modules.outputs.count != '0' }}
         continue-on-error: true
         env:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
@@ -298,7 +298,7 @@ jobs:
 
       - name: Pylint-Odoo linting
         id: pylint
-        if: always() && steps.find-modules.outputs.count != '0'
+        if: ${{ !cancelled() && steps.find-modules.outputs.count != '0' }}
         continue-on-error: true
         env:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
@@ -347,7 +347,7 @@ jobs:
 
       - name: Extract summary
         id: summary
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p reports
           touch reports/validation.txt
@@ -405,7 +405,7 @@ jobs:
 
       - name: Extract issues & annotate diff
         id: extract-issues
-        if: always() && steps.find-modules.outputs.count != '0'
+        if: ${{ !cancelled() && steps.find-modules.outputs.count != '0' }}
         run: |
           python3 << 'PYEOF'
           import re, json
@@ -535,7 +535,7 @@ jobs:
             }
 
       - name: Write job summary
-        if: always() && steps.branch-check.outputs.valid != 'false'
+        if: ${{ !cancelled() && steps.branch-check.outputs.valid != 'false' }}
         env:
           MODULE_COUNT: ${{ steps.find-modules.outputs.count }}
           EXIT_CODE: ${{ steps.validate.outputs.exit_code }}
@@ -643,7 +643,7 @@ jobs:
 
       - name: Final validation check
         id: final-check
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           ODOO_VERSION: ${{ steps.detect-version.outputs.odoo_version }}
           MODULE_COUNT: ${{ steps.find-modules.outputs.count }}
