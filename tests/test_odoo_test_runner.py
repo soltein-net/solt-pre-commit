@@ -730,6 +730,26 @@ class TestTestCountIsLogged:
         assert "--log-handler=odoo.tests.result:INFO" in captured["cmd"]
 
 
+class TestPerModuleTimingIsLogged:
+    def test_the_stats_logger_is_reopened_to_info_so_the_log_says_where_the_time_went(self, fake_env):
+        tmp_path, config = fake_env
+        captured = {}
+
+        def fake_popen(cmd, **kwargs):
+            captured["cmd"] = cmd
+            proc = mock.Mock()
+            proc.stdout = iter([])
+            proc.wait.return_value = 0
+            return proc
+
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)), mock.patch(
+            "subprocess.Popen", side_effect=fake_popen
+        ):
+            otr.run(["fake_module"], config, env_root=tmp_path)
+
+        assert "--log-handler=odoo.tests.stats:INFO" in captured["cmd"]
+
+
 class TestShardModules:
     NAMES = [f"mod_{i:02d}" for i in range(23)]
 
