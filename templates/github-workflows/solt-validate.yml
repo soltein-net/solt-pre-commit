@@ -66,7 +66,14 @@ concurrency:
   # ref-scoped group unchanged - cancelling a
   # stale run in favor of a newer push to the SAME PR is exactly what you
   # want during iterative development.
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  #
+  # schedule groups by its cron string: both crons above run on the default
+  # branch, so a ref-scoped group put them in one group, and every Monday the
+  # 6 AM docstring run cancelled the nightly test run started at 4 AM - with
+  # its shards still going, or already done and reported as cancelled. Each
+  # cron now only shares its group with its own next firing, a day or a week
+  # later.
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.event_name == 'schedule' && github.event.schedule || github.ref }}
   cancel-in-progress: true
 
 jobs:
